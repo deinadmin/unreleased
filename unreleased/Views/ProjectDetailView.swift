@@ -13,6 +13,7 @@ struct ProjectDetailView: View {
     @State private var importError: String? = nil
     @State private var showDeleteConfirm = false
     @State private var trackToDelete: Track? = nil
+    @State private var showNavTitle = false
 
     private var project: Project? {
         store.projects.first { $0.id == projectID }
@@ -26,8 +27,15 @@ struct ProjectDetailView: View {
                 ContentUnavailableView("Project not found", systemImage: "music.note")
             }
         }
+        .navigationTitle(project?.name ?? "")
+        .navigationSubtitle("")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar { toolbarContent }
+        .toolbarBackground(.hidden, for: .navigationBar)
+        .toolbar {
+            if let project {
+                toolbarContent(project: project)
+            }
+        }
         .sheet(isPresented: $isShowingEdit) {
             if let project { EditProjectSheet(project: project) }
         }
@@ -65,6 +73,11 @@ struct ProjectDetailView: View {
                 headerSection(project: project)
                     .padding(.horizontal, 20)
                     .padding(.top, 24)
+                    .onScrollVisibilityChange(threshold: 0.1) { visible in
+                        withAnimation(.easeInOut(duration: 0.25)) {
+                            showNavTitle = !visible
+                        }
+                    }
 
                 trackListSection(project: project)
                     .padding(.top, 24)
@@ -112,10 +125,7 @@ struct ProjectDetailView: View {
                         .foregroundStyle(.primary)
 
                     HStack(spacing: 4) {
-                        Circle()
-                            .fill(Color.secondary)
-                            .frame(width: 6, height: 6)
-                        Text("\(project.trackCountText) • \(project.formattedDuration)")
+                        Text("carlowav • \(project.trackCountText) • \(project.formattedDuration)")
                             .font(.system(size: 14))
                             .foregroundStyle(.secondary)
                     }
@@ -184,7 +194,34 @@ struct ProjectDetailView: View {
     // MARK: - Toolbar
 
     @ToolbarContentBuilder
-    private var toolbarContent: some ToolbarContent {
+    private func toolbarContent(project: Project) -> some ToolbarContent {
+        ToolbarItem(placement: .principal) {
+            HStack(spacing: 8) {
+                ProjectCoverThumbnail(
+                    gradient: project.gradient,
+                    size: 28,
+                    cornerRadius: 7
+                )
+
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(project.name)
+                        .font(.subheadline)
+                        .fontWeight(.bold)
+                        .lineLimit(1)
+
+                    Text("\(project.trackCountText) • \(project.formattedDuration)")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+
+                Spacer(minLength: 0)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .opacity(showNavTitle ? 1 : 0)
+            .animation(.easeInOut(duration: 0.25), value: showNavTitle)
+        }
+
         ToolbarItem(placement: .topBarTrailing) {
             HStack(spacing: 8) {
                 Button {

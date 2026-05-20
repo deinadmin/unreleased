@@ -100,6 +100,7 @@ struct HomeView: View {
                     NavigationLink(value: project.id) {
                         ProjectCard(project: project)
                     }
+                    .buttonStyle(.plain)
                 }
             }
             .padding(.horizontal, 20)
@@ -183,9 +184,13 @@ struct HomeView: View {
 
 private struct ProjectCard: View {
     @Environment(AudioPlayer.self) private var player
+    @Environment(ProjectStore.self) private var store
     let project: Project
 
-    private var isActive: Bool { player.currentProject?.id == project.id }
+    @State private var playHapticTick = 0
+
+    private var isActiveProject: Bool { player.currentProject?.id == project.id }
+    private var showsPause: Bool { isActiveProject && player.isPlaying }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -193,19 +198,21 @@ private struct ProjectCard: View {
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
                     .fill(project.gradient.gradient)
                     .aspectRatio(1, contentMode: .fit)
-                    .containerRelativeFrame(.horizontal) { width, _ in
-                        (width - 16) / 2   // 2 columns with 16 pt gap
-                    }
+                    .frame(maxWidth: .infinity)
 
-                if isActive {
-                    ZStack {
-                        Circle()
-                            .fill(.black.opacity(0.6))
-                            .frame(width: 32, height: 32)
-                        Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
-                            .font(.system(size: 12, weight: .bold))
-                            .foregroundStyle(.white)
+                if !project.tracks.isEmpty {
+                    Button(action: playOrPause) {
+                        ZStack {
+                            Circle()
+                                .fill(.black.opacity(0.6))
+                                .frame(width: 32, height: 32)
+                            Image(systemName: showsPause ? "pause.fill" : "play.fill")
+                                .font(.system(size: 12, weight: .bold))
+                                .foregroundStyle(.white)
+                                .animation(nil, value: showsPause)
+                        }
                     }
+                    .buttonStyle(.scale)
                     .padding(10)
                 }
             }
@@ -221,5 +228,16 @@ private struct ProjectCard: View {
                     .foregroundStyle(.secondary)
             }
         }
+        .sensoryFeedback(.impact(weight: .medium), trigger: playHapticTick)
+    }
+
+    private func playOrPause() {
+        if isActiveProject {
+            player.togglePlayPause()
+        } else if let first = project.tracks.first {
+            let url = store.audioFileURL(for: first)
+            player.play(track: first, in: project, fileURL: url)
+        }
+        playHapticTick &+= 1
     }
 }
