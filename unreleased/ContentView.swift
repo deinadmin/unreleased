@@ -2,8 +2,13 @@ import SwiftUI
 
 struct ContentView: View {
     @State private var store = ProjectStore()
-    @State private var player = AudioPlayer()
-    @Namespace private var playerNS
+    @State private var player: AudioPlayer
+
+    init() {
+        let store = ProjectStore()
+        _store = State(initialValue: store)
+        _player = State(initialValue: AudioPlayer(store: store))
+    }
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -16,46 +21,51 @@ struct ContentView: View {
             .environment(player)
             // Reserve room so the last list item doesn't hide under the mini player
             .safeAreaInset(edge: .bottom, spacing: 0) {
-                if player.currentTrack != nil {
+                if player.currentTrack != nil, !player.isShowingNowPlaying {
                     Color.clear.frame(height: 66)
                 }
             }
-            // Blur the app when the full player is open (background blur, not dim)
             .blur(radius: player.isShowingNowPlaying ? 24 : 0)
             .overlay {
-                Color.black
-                    .opacity(player.isShowingNowPlaying ? 0.22 : 0)
-                    .ignoresSafeArea()
-                    .allowsHitTesting(false)
+                if player.isShowingNowPlaying {
+                    Color.black
+                        .opacity(0.22)
+                        .ignoresSafeArea()
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            player.isShowingNowPlaying = false
+                        }
+                }
             }
 
-            // ── Mini player — hidden while full player is open ───────────────────
-            if player.currentTrack != nil, !player.isShowingNowPlaying {
-                MiniPlayerView(namespace: playerNS)
+            // ── Unified morphing player (mini ↔ full) ────────────────────────────
+            if player.currentTrack != nil {
+                PlayerView()
                     .environment(player)
                     .environment(store)
-                    .padding(.horizontal, 12)
-                    .padding(.bottom, 8)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-            }
-
-            // ── Full now-playing overlay ─────────────────────────────────────────
-            if player.isShowingNowPlaying {
-                NowPlayingView(namespace: playerNS)
-                    .environment(player)
-                    .environment(store)
-                    .ignoresSafeArea()
+                    .frame(maxWidth: .infinity, alignment: .bottom)
+                    .zIndex(player.isShowingNowPlaying ? 10 : 1)
                     .transition(
                         .asymmetric(
-                            insertion: .move(edge: .bottom).combined(with: .opacity),
-                            removal:   .move(edge: .bottom).combined(with: .opacity)
+                            insertion: .opacity.combined(with: .offset(y: 18)),
+                            removal: .opacity.combined(with: .offset(y: 10))
                         )
                     )
-                    .zIndex(10)
             }
         }
-        // One unified spring drives all state changes (blur, mini player, full player)
-        .animation(.spring(response: 0.48, dampingFraction: 0.82), value: player.isShowingNowPlaying)
+        .ignoresSafeArea(edges: player.isShowingNowPlaying ? .bottom : [])
+        .animation(
+            .spring(response: 0.44, dampingFraction: 0.84),
+            value: player.currentTrack != nil
+        )
+        // Slower open, snappier close — keyed off the destination state.
+        .animation(
+            .spring(
+                response: player.isShowingNowPlaying ? 0.48 : 0.30,
+                dampingFraction: player.isShowingNowPlaying ? 0.82 : 0.86
+            ),
+            value: player.isShowingNowPlaying
+        )
         .animation(.smooth(duration: 0.35), value: player.currentTrack?.id)
     }
 }

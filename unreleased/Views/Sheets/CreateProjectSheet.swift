@@ -54,8 +54,7 @@ struct CreateProjectSheet: View {
                 Label("Randomize", systemImage: "shuffle")
                     .font(.system(size: 14, weight: .medium))
             }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
+            .buttonStyle(.scaleBordered)
         }
         .frame(maxWidth: .infinity)
         .padding(.top, 8)

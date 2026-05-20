@@ -75,6 +75,11 @@ struct ScrollingMiniWaveformView: View {
     let trackID: UUID
     var waveformData: [Float]?
     var progress: Double
+    /// Total track length — used for the scrub time pill (e.g. "1:37 / 2:40").
+    var duration: TimeInterval = 0
+    /// When true, reports scrub overlay visibility/progress to the parent (mini player pill).
+    var showsScrubTimeOverlay: Bool = false
+    var onScrubOverlayChange: ((Bool, Double) -> Void)?
     /// How many bars are visible in the sliding window at once.
     var visibleBars: Int
     var onSeek: ((Double) -> Void)?
@@ -93,19 +98,33 @@ struct ScrollingMiniWaveformView: View {
     // Scrubbing — displayProgress is the single authoritative position while
     // the user has a finger on the waveform.
     @State private var isScrubbing: Bool = false
+    @State private var isDecelerating: Bool = false
     @State private var displayProgress: Double
     @State private var dragStartProgress: Double = 0
+    @State private var decelStartDate: Date = .init()
+    @State private var decelStartProgress: Double = 0
+    @State private var decelVelocity: Double = 0
     @State private var lastHapticBarIdx: Int = -1
     @State private var haptic = UIImpactFeedbackGenerator(style: .light)
+
+    private let edgeRubberBandLimit: Double = 0.06
+    private let decelFriction: Double = 5.2
+    private let decelStopVelocity: Double = 0.012
 
     init(trackID: UUID,
          waveformData: [Float]? = nil,
          progress: Double = 0,
+         duration: TimeInterval = 0,
+         showsScrubTimeOverlay: Bool = false,
+         onScrubOverlayChange: ((Bool, Double) -> Void)? = nil,
          visibleBars: Int = 38,
          onSeek: ((Double) -> Void)? = nil) {
         self.trackID = trackID
         self.waveformData = waveformData
         self.progress = progress
+        self.duration = duration
+        self.showsScrubTimeOverlay = showsScrubTimeOverlay
+        self.onScrubOverlayChange = onScrubOverlayChange
         self.visibleBars = visibleBars
         self.onSeek = onSeek
         // Seed the anchor from the live progress value so the very first
@@ -121,6 +140,87 @@ struct ScrollingMiniWaveformView: View {
             return seededBars(count: 200, seed: trackID.hashValue)
         }
         return data
+    }
+
+    private func rubberBandedProgress(_ raw: Double) -> Double {
+        if raw >= 0, raw <= 1 { return raw }
+        let overshoot = raw < 0 ? -raw : raw - 1
+        let resisted = edgeRubberBandLimit * (1 - 1 / (overshoot * 14 + 1))
+        return raw < 0 ? -resisted : 1 + resisted
+    }
+
+    private func progressFromDrag(translationWidth: CGFloat, barWidth: CGFloat, totalBars: Int) -> Double {
+        let shifted = Double(-translationWidth) / Double(barWidth)
+        let raw = dragStartProgress + shifted / Double(max(1, totalBars - 1))
+        return rubberBandedProgress(raw)
+    }
+
+    /// Where the waveform should start a scrub — extrapolate while playing, else use live player progress.
+    private func scrubOriginProgress(at date: Date) -> Double {
+        let elapsed = min(date.timeIntervalSince(anchorDate), 0.15)
+        let extrapolated = anchorProgress + elapsed * progressRate
+        if abs(progressRate) > 0.01 {
+            return max(0, min(1, extrapolated))
+        }
+        return min(1, max(0, progress))
+    }
+
+    private func syncAnchor(to progress: Double) {
+        anchorProgress = progress
+        anchorDate = Date()
+        progressRate = 0
+    }
+
+    private func finishScrub(at progress: Double) {
+        guard isScrubbing || isDecelerating else { return }
+        let final = min(1, max(0, progress))
+        isDecelerating = false
+        displayProgress = final
+        syncAnchor(to: final)
+        if showsScrubTimeOverlay {
+            withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
+                onScrubOverlayChange?(false, final)
+            }
+        }
+        onSeek?(final)
+        // Brief hold so incoming `progress` ticks do not fight the scrubbed position.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.22) {
+            isScrubbing = false
+        }
+    }
+
+    private func stepDeceleration(at date: Date) {
+        let elapsed = date.timeIntervalSince(decelStartDate)
+        let velocity = decelVelocity * exp(-decelFriction * elapsed)
+        let displacement = (decelVelocity / decelFriction) * (1 - exp(-decelFriction * elapsed))
+        let raw = decelStartProgress + displacement
+
+        // Rubber-band only the visuals; integrate on `raw` so momentum math stays stable.
+        displayProgress = rubberBandedProgress(raw)
+        reportScrubOverlayIfNeeded()
+
+        let clamped = min(1, max(0, raw))
+        let newIdx = Int(clamped * Double(max(1, effectiveBars.count - 1)))
+        if newIdx != lastHapticBarIdx {
+            haptic.impactOccurred(intensity: 0.35)
+            haptic.prepare()
+            lastHapticBarIdx = newIdx
+        }
+
+        // Hit an edge while still moving outward — settle immediately.
+        if (raw <= 0 && velocity < 0) || (raw >= 1 && velocity > 0) {
+            finishScrub(at: raw <= 0 ? 0 : 1)
+            return
+        }
+
+        if abs(velocity) < decelStopVelocity || elapsed > 2.5 {
+            finishScrub(at: clamped)
+        }
+    }
+
+    private func reportScrubOverlayIfNeeded() {
+        guard showsScrubTimeOverlay, isScrubbing else { return }
+        onScrubOverlayChange?(true, min(1, max(0, displayProgress)))
     }
 
     var body: some View {
@@ -139,7 +239,7 @@ struct ScrollingMiniWaveformView: View {
                 // motion stays smooth at full display refresh rate (≤120 Hz)
                 // between sparse 100 ms progress ticks.
                 let liveProgress: Double = {
-                    if isScrubbing { return displayProgress }
+                    if isScrubbing || isDecelerating { return displayProgress }
                     let elapsed = min(tl.date.timeIntervalSince(anchorDate), 0.15)
                     return max(0, min(1, anchorProgress + elapsed * progressRate))
                 }()
@@ -184,39 +284,67 @@ struct ScrollingMiniWaveformView: View {
                 .gesture(
                     DragGesture(minimumDistance: 2)
                         .onChanged { value in
+                            if isDecelerating {
+                                isDecelerating = false
+                                dragStartProgress = min(1, max(0, displayProgress))
+                            }
                             if !isScrubbing {
                                 isScrubbing = true
-                                // Use the current smooth live position as the drag
-                                // anchor so there's no jump when scrubbing starts.
-                                let elapsed = min(Date().timeIntervalSince(anchorDate), 0.15)
-                                let live    = max(0, min(1, anchorProgress + elapsed * progressRate))
+                                let live = scrubOriginProgress(at: Date())
                                 dragStartProgress = live
                                 displayProgress   = live
+                                syncAnchor(to: live)
                                 lastHapticBarIdx  = Int(live * Double(max(1, totalBars - 1)))
                                 haptic.prepare()
+                                if showsScrubTimeOverlay {
+                                    withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) {
+                                        onScrubOverlayChange?(true, live)
+                                    }
+                                }
                             }
-                            let shifted = Double(-value.translation.width) / Double(barWidth)
-                            let newP    = max(0, min(1, dragStartProgress + shifted / Double(max(1, totalBars - 1))))
+                            let newP = progressFromDrag(
+                                translationWidth: value.translation.width,
+                                barWidth: barWidth,
+                                totalBars: totalBars
+                            )
                             displayProgress = newP
+                            reportScrubOverlayIfNeeded()
 
-                            let newIdx = Int(newP * Double(max(1, totalBars - 1)))
+                            let clamped = min(1, max(0, newP))
+                            let newIdx = Int(clamped * Double(max(1, totalBars - 1)))
                             if newIdx != lastHapticBarIdx {
                                 haptic.impactOccurred(intensity: 0.45)
                                 haptic.prepare()
                                 lastHapticBarIdx = newIdx
                             }
                         }
-                        .onEnded { _ in
-                            onSeek?(displayProgress)
-                            // Keep isScrubbing = true until the seek propagates.
-                            // anchorProgress is already updated by onChange below
-                            // (the guard was removed), so it will be correct
-                            // the moment isScrubbing becomes false.
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.22) {
-                                isScrubbing = false
+                        .onEnded { value in
+                            let span = Double(max(1, totalBars - 1)) * Double(barWidth)
+                            let velocity = span > 0
+                                ? -Double(value.velocity.width) / span
+                                : 0
+
+                            let releaseProgress = min(1, max(0, displayProgress))
+
+                            if abs(velocity) < 0.1 {
+                                finishScrub(at: releaseProgress)
+                                return
                             }
+
+                            isScrubbing = true
+                            isDecelerating = true
+                            decelStartDate = Date()
+                            decelStartProgress = releaseProgress
+                            decelVelocity = velocity
                         }
                 )
+                .background {
+                    Color.clear
+                        .onChange(of: tl.date) { _, date in
+                            guard isDecelerating else { return }
+                            stepDeceleration(at: date)
+                        }
+                }
             }
         }
         // When the track changes while the view stays alive (e.g. next track
@@ -226,12 +354,13 @@ struct ScrollingMiniWaveformView: View {
             anchorDate      = Date()
             displayProgress = progress
             progressRate    = 0
-            isScrubbing     = false
+            isScrubbing = false
+            isDecelerating = false
+            onScrubOverlayChange?(false, progress)
         }
-        // Always update the anchor — even while scrubbing — so it's ready the
-        // instant isScrubbing becomes false.
         .onChange(of: progress) { _, newValue in
-            let now     = Date()
+            guard !isScrubbing, !isDecelerating else { return }
+            let now = Date()
             let elapsed = now.timeIntervalSince(anchorDate)
             if elapsed > 0.01, elapsed < 0.5 {
                 let measured = (newValue - anchorProgress) / elapsed
@@ -239,14 +368,23 @@ struct ScrollingMiniWaveformView: View {
                 // song longer than 1 second).  Reject it and reset progressRate
                 // to 0 so the extrapolation doesn't overshoot to the wrong spot.
                 progressRate = abs(measured) < 1.0 ? measured : 0
+            } else {
+                progressRate = 0
             }
             anchorProgress = newValue
-            anchorDate     = now
+            anchorDate = now
         }
     }
+
 }
 
 // MARK: - Shared helpers
+
+func formatPlaybackTime(_ seconds: TimeInterval) -> String {
+    guard seconds.isFinite else { return "0:00" }
+    let total = Int(max(0, seconds))
+    return String(format: "%d:%02d", total / 60, total % 60)
+}
 
 /// Classic smoothstep — clamps `t` to [0,1] then applies 3t²-2t³.
 private func smoothstep(_ t: Double) -> Double {

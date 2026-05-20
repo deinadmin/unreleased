@@ -8,12 +8,14 @@ struct GradientPickerView: View {
     var body: some View {
         LazyVGrid(columns: columns, spacing: 12) {
             ForEach(GradientTheme.presets, id: \.colors) { theme in
-                GradientSwatch(theme: theme, isSelected: theme == selected)
-                    .onTapGesture {
-                        withAnimation(.smooth(duration: 0.2)) {
-                            selected = theme
-                        }
+                Button {
+                    withAnimation(.smooth(duration: 0.2)) {
+                        selected = theme
                     }
+                } label: {
+                    GradientSwatch(theme: theme, isSelected: theme == selected)
+                }
+                .buttonStyle(.scale)
             }
         }
     }

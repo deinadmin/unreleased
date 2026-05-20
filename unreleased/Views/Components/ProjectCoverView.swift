@@ -21,7 +21,11 @@ struct ProjectCoverView: View {
     // Vinyl x-offset when playing: places vinyl center at cover's right edge.
     private var vinylPlayX: CGFloat { size * 0.3125 }
 
+    private static let layoutDuration: TimeInterval = 0.5
+    private static let layoutAnimation = Animation.easeInOut(duration: layoutDuration)
+
     @State private var isSpinning = false
+    @State private var spinTask: Task<Void, Never>?
 
     var body: some View {
         ZStack {
@@ -35,7 +39,6 @@ struct ProjectCoverView: View {
                         value: isSpinning
                     )
                     .offset(x: isPlaying ? vinylPlayX : 0)
-                    .animation(.easeInOut(duration: 0.55), value: isPlaying)
             }
 
             RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
@@ -43,20 +46,26 @@ struct ProjectCoverView: View {
                 .frame(width: size, height: size)
                 .shadow(color: .black.opacity(0.2), radius: 20, x: 0, y: 8)
                 .offset(x: isPlaying ? -shift : 0)
-                .animation(.easeInOut(duration: 0.25), value: isPlaying)
         }
+        .animation(Self.layoutAnimation, value: isPlaying)
         .frame(width: size, height: size)
         .onChange(of: isPlaying, initial: true) { _, playing in
-            // Give the snap-to-zero a single frame head-start before starting the spin,
-            // so the repeatForever animation always begins from 0°.
+            spinTask?.cancel()
             if playing {
+                // One frame at 0° so repeatForever always starts from a clean origin.
                 isSpinning = false
-                Task { @MainActor in
+                spinTask = Task { @MainActor in
                     try? await Task.sleep(for: .milliseconds(16))
+                    guard !Task.isCancelled, isPlaying else { return }
                     isSpinning = true
                 }
             } else {
-                isSpinning = false
+                // Keep spinning through the slide-in; reset only once hidden behind the cover.
+                spinTask = Task { @MainActor in
+                    try? await Task.sleep(for: .seconds(Self.layoutDuration))
+                    guard !Task.isCancelled, !isPlaying else { return }
+                    isSpinning = false
+                }
             }
         }
     }
@@ -104,14 +113,4 @@ struct ProjectCoverThumbnail: View {
             .fill(gradient.gradient)
             .frame(width: size, height: size)
     }
-}
-
-#Preview {
-    @Previewable @State var playing = false
-    VStack(spacing: 32) {
-        ProjectCoverView(gradient: GradientTheme.presets[0], size: 240, isPlaying: playing)
-        Button(playing ? "Pause" : "Play") { playing.toggle() }
-            .buttonStyle(.bordered)
-    }
-    .padding()
 }

@@ -79,7 +79,6 @@ struct HomeView: View {
                 .background(Color.black, in: Capsule())
                 .foregroundStyle(.white)
             }
-            .buttonStyle(.plain)
             .padding(.top, 28)
             .disabled(isImporting)
 
@@ -101,7 +100,6 @@ struct HomeView: View {
                     NavigationLink(value: project.id) {
                         ProjectCard(project: project)
                     }
-                    .buttonStyle(.plain)
                 }
             }
             .padding(.horizontal, 20)

@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import UIKit
 
 // MARK: - Gradient Theme
 
@@ -40,6 +41,20 @@ struct GradientTheme: Codable, Hashable, Sendable {
 
     static func random() -> GradientTheme {
         presets.randomElement() ?? presets[0]
+    }
+
+    /// Square edge-to-edge artwork for lock screen / Control Center.
+    /// No corner radius — the system applies its own mask; rounded corners leave black gaps.
+    @MainActor
+    func artworkImage(size: CGFloat = 600) -> UIImage? {
+        let renderer = ImageRenderer(
+            content: Rectangle()
+                .fill(gradient)
+                .frame(width: size, height: size)
+        )
+        renderer.scale = 2
+        renderer.isOpaque = true
+        return renderer.uiImage
     }
 }
 

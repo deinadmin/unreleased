@@ -179,7 +179,6 @@ struct ProjectDetailView: View {
             .foregroundStyle(.primary)
         }
         .disabled(isImporting)
-        .buttonStyle(.plain)
     }
 
     // MARK: - Toolbar
@@ -273,10 +272,9 @@ private struct PlayButton: View {
                 Image(systemName: isActiveProject && player.isPlaying ? "pause.fill" : "play.fill")
                     .font(.system(size: 22, weight: .bold))
                     .foregroundStyle(.white)
-                    .contentTransition(.symbolEffect(.replace))
+                    .animation(nil, value: player.isPlaying)
             }
         }
-        .buttonStyle(.plain)
         .sensoryFeedback(.impact(weight: .medium), trigger: player.isPlaying)
     }
 
@@ -301,12 +299,13 @@ private struct TrackRow: View {
     let project: Project
     let onDelete: () -> Void
 
+    @State private var playHapticTick = 0
+
     private var isActive: Bool { player.currentTrack?.id == track.id }
 
     var body: some View {
         Button {
-            let url = store.audioFileURL(for: track)
-            player.play(track: track, in: project, fileURL: url)
+            playTrack()
         } label: {
             HStack(spacing: 12) {
                 trackNumber
@@ -331,8 +330,7 @@ private struct TrackRow: View {
 
                 Menu {
                     Button {
-                        let url = store.audioFileURL(for: track)
-                        player.play(track: track, in: project, fileURL: url)
+                        playTrack()
                     } label: {
                         Label("Play", systemImage: "play.fill")
                     }
@@ -344,11 +342,16 @@ private struct TrackRow: View {
                         .foregroundStyle(.secondary)
                         .frame(width: 36, height: 36)
                 }
-                .buttonStyle(.plain)
             }
             .padding(.vertical, 12)
         }
-        .buttonStyle(.plain)
+        .sensoryFeedback(.impact(weight: .medium), trigger: playHapticTick)
+    }
+
+    private func playTrack() {
+        let url = store.audioFileURL(for: track)
+        player.play(track: track, in: project, fileURL: url)
+        playHapticTick &+= 1
     }
 
     @ViewBuilder
