@@ -5,6 +5,7 @@ import UIKit
 struct PlayerView: View {
     @Environment(AudioPlayer.self) private var player
     @Environment(ProjectStore.self) private var store
+    @Environment(\.navigateToTrackNotes) private var navigateToTrackNotes
 
     @State private var offset: CGFloat = 0
     @State private var lastDragTranslation: CGFloat = 0
@@ -72,18 +73,16 @@ struct PlayerView: View {
             .onChange(of: player.isShowingNowPlaying) { _, showing in
                 offset = 0
                 lastDragTranslation = 0
+                if showing { dismissKeyboard() }
             }
             .sheet(isPresented: $isShowingTrackInfo) {
                 if let track = player.currentTrack, let project = player.currentProject {
                     TrackInfoSheet(
                         track: track,
                         project: project,
-                        onDelete: {
-                            store.deleteTrack(track, from: project.id)
-                            if player.currentTrack?.id == track.id {
-                                player.stop()
-                            }
+                        onOpenNotes: {
                             isShowingTrackInfo = false
+                            navigateToTrackNotes(track.id, project.id)
                         }
                     )
                 }
@@ -412,7 +411,9 @@ struct PlayerView: View {
 
     private var bottomAccessories: some View {
         HStack(spacing: 0) {
-            bottomAccessoryButton(icon: "doc.text", label: "notes") {}
+            bottomAccessoryButton(icon: "doc.text", label: "notes") {
+                openTrackNotes()
+            }
             bottomAccessoryButton(icon: "square.and.arrow.up", label: "share") {
                 shareCurrentTrack()
             }
@@ -506,6 +507,25 @@ struct PlayerView: View {
                     }
                 }
             }
+    }
+
+    private func dismissKeyboard() {
+        UIApplication.shared.sendAction(
+            #selector(UIResponder.resignFirstResponder),
+            to: nil,
+            from: nil,
+            for: nil
+        )
+    }
+
+    private func openTrackNotes() {
+        guard let track = player.currentTrack, let project = player.currentProject else { return }
+        let trackID = track.id
+        let projectID = project.id
+        player.isShowingNowPlaying = false
+        DispatchQueue.main.async {
+            navigateToTrackNotes(trackID, projectID)
+        }
     }
 
     private func shareCurrentTrack() {

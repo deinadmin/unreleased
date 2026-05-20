@@ -4,13 +4,16 @@ import UIKit
 struct TrackInfoSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(ProjectStore.self) private var store
+    @Environment(AudioPlayer.self) private var player
+    @Environment(PlayerToastCenter.self) private var toastCenter
 
     let track: Track
     let project: Project
-    var onDelete: () -> Void
+    var onOpenNotes: () -> Void
 
     @State private var selectedDetent: PresentationDetent = .medium
     @State private var isShowingMove = false
+    @State private var showDeleteConfirm = false
 
     private var isMediumDetent: Bool { selectedDetent == .medium }
 
@@ -44,6 +47,14 @@ struct TrackInfoSheet: View {
         .presentationBackground(Color(.systemGroupedBackground))
         .onChange(of: isShowingMove) { _, showing in
             if showing { selectedDetent = .large }
+        }
+        .alert("Delete Track?", isPresented: $showDeleteConfirm) {
+            Button("Delete", role: .destructive) {
+                confirmDelete()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This will remove the track from the project.")
         }
     }
 
@@ -151,7 +162,12 @@ struct TrackInfoSheet: View {
         var actions: [TrackInfoAction] = [
             TrackInfoAction(title: "Edit track", systemImage: "slider.horizontal.3"),
             TrackInfoAction(title: "Replace audio", systemImage: "waveform.badge.plus"),
-            TrackInfoAction(title: "Notes", systemImage: "note.text"),
+            TrackInfoAction(title: "Notes", systemImage: "note.text") {
+                dismiss()
+                DispatchQueue.main.async {
+                    onOpenNotes()
+                }
+            },
             TrackInfoAction(title: "Share snippet", systemImage: "play.square"),
         ]
 
@@ -167,7 +183,15 @@ struct TrackInfoSheet: View {
             })
         }
 
-        actions.append(TrackInfoAction(title: "Add to queue", systemImage: "text.line.first.and.arrowtriangle.forward"))
+        if player.currentProject?.id == project.id {
+            actions.append(TrackInfoAction(title: "Add to queue", systemImage: "text.line.first.and.arrowtriangle.forward") {
+                player.addToQueue(liveTrack)
+                dismiss()
+                DispatchQueue.main.async {
+                    toastCenter.showTrackQueued()
+                }
+            })
+        }
         return actions
     }
 
@@ -180,8 +204,7 @@ struct TrackInfoSheet: View {
                 withAnimation(Self.sheetFade) { isShowingMove = true }
             },
             TrackInfoAction(title: "Delete", systemImage: "trash", isDestructive: true) {
-                dismiss()
-                onDelete()
+                showDeleteConfirm = true
             },
         ]
     }
@@ -194,6 +217,19 @@ struct TrackInfoSheet: View {
     @ViewBuilder
     private var secondaryActionsGroup: some View {
         TrackInfoActionGroup(actions: secondaryActions)
+    }
+
+    // MARK: - Delete
+
+    private func confirmDelete() {
+        store.deleteTrack(liveTrack, from: project.id)
+        if player.currentTrack?.id == liveTrack.id {
+            player.stop()
+        }
+        dismiss()
+        DispatchQueue.main.async {
+            toastCenter.showTrackDeleted()
+        }
     }
 
     // MARK: - Export
@@ -346,5 +382,5 @@ private extension Track {
         }
     )
     let project = Project(name: "demo", tracks: [track])
-    TrackInfoSheet(track: track, project: project, onDelete: {})
+    TrackInfoSheet(track: track, project: project, onOpenNotes: {})
 }

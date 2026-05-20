@@ -4,6 +4,23 @@ struct ContentView: View {
     @Environment(AuthManager.self) private var auth
     @State private var store = ProjectStore()
     @State private var player: AudioPlayer
+    @State private var navigationPath = NavigationPath()
+    @State private var toastCenter = PlayerToastCenter()
+
+    /// Matches `safeAreaBar` clearance above the mini player.
+    private let miniPlayerReservedHeight: CGFloat = 66
+    private let toastSpacingAbovePlayer: CGFloat = 10
+    private let toastBottomInsetWithoutPlayer: CGFloat = 12
+
+    private var showsMiniPlayer: Bool {
+        player.currentTrack != nil && !player.isShowingNowPlaying
+    }
+
+    private var toastBottomInset: CGFloat {
+        showsMiniPlayer
+            ? miniPlayerReservedHeight + toastSpacingAbovePlayer
+            : toastBottomInsetWithoutPlayer
+    }
 
     init() {
         let store = ProjectStore()
@@ -15,11 +32,15 @@ struct ContentView: View {
         ZStack(alignment: .bottom) {
 
             // ── Main app content ─────────────────────────────────────────────────
-            NavigationStack {
+            NavigationStack(path: $navigationPath) {
                 HomeView()
+                    .navigationDestination(for: UUID.self) { projectID in
+                        ProjectDetailView(projectID: projectID)
+                    }
+                    .navigationDestination(for: TrackNotesRoute.self) { route in
+                        TrackNotesView(trackID: route.trackID, projectID: route.projectID)
+                    }
             }
-            .environment(store)
-            .environment(player)
             // Reserve room + native progressive blur under scroll content (iOS 26+)
             .safeAreaBar(edge: .bottom, spacing: 0) {
                 if player.currentTrack != nil, !player.isShowingNowPlaying {
@@ -39,6 +60,19 @@ struct ContentView: View {
                 }
             }
 
+            if let toast = toastCenter.toast, !player.isShowingNowPlaying {
+                PlayerToastBanner(toast: toast)
+                    .padding(.bottom, toastBottomInset)
+                    .frame(maxWidth: .infinity)
+                    .zIndex(2)
+                    .transition(
+                        .asymmetric(
+                            insertion: .opacity.combined(with: .offset(y: 10)),
+                            removal: .opacity.combined(with: .offset(y: 6))
+                        )
+                    )
+            }
+
             // ── Unified morphing player (mini ↔ full) ────────────────────────────
             if player.currentTrack != nil {
                 PlayerView()
@@ -53,6 +87,14 @@ struct ContentView: View {
                         )
                     )
             }
+        }
+        .animation(.spring(response: 0.4, dampingFraction: 0.86), value: toastCenter.toast)
+        .animation(.spring(response: 0.4, dampingFraction: 0.86), value: toastBottomInset)
+        .environment(store)
+        .environment(player)
+        .environment(toastCenter)
+        .environment(\.navigateToTrackNotes) { trackID, projectID in
+            navigationPath.append(TrackNotesRoute(trackID: trackID, projectID: projectID))
         }
         .ignoresSafeArea(edges: player.isShowingNowPlaying ? .bottom : [])
         .animation(

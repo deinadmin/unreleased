@@ -2,8 +2,10 @@ import SwiftUI
 import UIKit
 
 struct ProjectDetailView: View {
+    @Environment(\.dismiss) private var dismiss
     @Environment(ProjectStore.self) private var store
     @Environment(AudioPlayer.self) private var player
+    @Environment(\.navigateToTrackNotes) private var navigateToTrackNotes
 
     let projectID: UUID
 
@@ -11,10 +13,9 @@ struct ProjectDetailView: View {
     @State private var isImporting = false
     @State private var isShowingEdit = false
     @State private var importError: String? = nil
-    @State private var showDeleteConfirm = false
-    @State private var trackToDelete: Track? = nil
     @State private var trackForInfo: Track? = nil
     @State private var showNavTitle = false
+    @State private var showDeleteConfirm = false
 
     private var project: Project? {
         store.projects.first { $0.id == projectID }
@@ -56,24 +57,20 @@ struct ProjectDetailView: View {
                 TrackInfoSheet(
                     track: track,
                     project: project,
-                    onDelete: {
-                        trackToDelete = track
+                    onOpenNotes: {
                         trackForInfo = nil
+                        navigateToTrackNotes(track.id, project.id)
                     }
                 )
             }
         }
-        .alert("Delete Track?", isPresented: .init(
-            get: { trackToDelete != nil },
-            set: { if !$0 { trackToDelete = nil } }
-        )) {
+        .alert("Delete Project?", isPresented: $showDeleteConfirm) {
             Button("Delete", role: .destructive) {
-                if let t = trackToDelete { store.deleteTrack(t, from: projectID) }
-                trackToDelete = nil
+                confirmDeleteProject()
             }
-            Button("Cancel", role: .cancel) { trackToDelete = nil }
+            Button("Cancel", role: .cancel) {}
         } message: {
-            Text("This will remove the track from the project.")
+            Text("This will permanently delete the project and all of its tracks.")
         }
     }
 
@@ -248,18 +245,30 @@ struct ProjectDetailView: View {
                 }
 
                 Menu {
-                    Button("Edit Project") { isShowingEdit = true }
+                    Button {
+                        isShowingEdit = true
+                    } label: {
+                        Label("Edit", systemImage: "pencil")
+                    }
                     if store.projectHasPendingDownloads(project) {
-                        Button("Download Project") {
+                        Button {
                             store.downloadProject(project.id)
+                        } label: {
+                            Label("Download", systemImage: "arrow.down.circle")
                         }
                     }
                     if store.projectIsFullyDownloaded(project) {
-                        Button("Remove Downloads") {
+                        Button {
                             store.removeProjectDownloads(project.id)
+                        } label: {
+                            Label("Remove Downloads", systemImage: "arrow.down.to.line")
                         }
                     }
-                    Button("Delete Project", role: .destructive) { deleteProject() }
+                    Button(role: .destructive) {
+                        showDeleteConfirm = true
+                    } label: {
+                        Label("Delete", systemImage: "trash")
+                    }
                 } label: {
                     Image(systemName: "ellipsis")
                         .font(.system(size: 14, weight: .medium))
@@ -296,10 +305,13 @@ struct ProjectDetailView: View {
         }
     }
 
-    private func deleteProject() {
+    private func confirmDeleteProject() {
         guard let project else { return }
-        if player.currentProject?.id == project.id { player.stop() }
+        if player.currentProject?.id == project.id {
+            player.stop()
+        }
         store.deleteProject(project)
+        dismiss()
     }
 }
 

@@ -54,6 +54,9 @@ enum FirestoreProjectCodec {
         if track.isDownloaded {
             payload["isDownloaded"] = true
         }
+        if !track.notes.isEmpty {
+            payload["notes"] = track.notes
+        }
         // Waveform is derived from audio — analyzed locally after cache/download, not stored in Firestore.
         return payload
     }
@@ -70,6 +73,7 @@ enum FirestoreProjectCodec {
         let duration = data["duration"] as? TimeInterval ?? (data["duration"] as? Double ?? 0)
         let storagePath = data["storagePath"] as? String
         let isDownloaded = data["isDownloaded"] as? Bool ?? false
+        let notes = data["notes"] as? String ?? ""
 
         return Track(
             id: id,
@@ -80,7 +84,8 @@ enum FirestoreProjectCodec {
             addedDate: added.dateValue(),
             waveformData: nil,
             storagePath: storagePath,
-            isDownloaded: isDownloaded
+            isDownloaded: isDownloaded,
+            notes: notes
         )
     }
 

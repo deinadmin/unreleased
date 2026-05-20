@@ -273,6 +273,17 @@ final class ProjectStore {
         }
     }
 
+    func updateTrackNotes(_ notes: String, trackID: UUID, projectID: UUID) {
+        guard let pIdx = projects.firstIndex(where: { $0.id == projectID }),
+              let tIdx = projects[pIdx].tracks.firstIndex(where: { $0.id == trackID })
+        else { return }
+
+        guard projects[pIdx].tracks[tIdx].notes != notes else { return }
+        projects[pIdx].tracks[tIdx].notes = notes
+        projects[pIdx].updatedDate = Date()
+        save()
+    }
+
     /// Analyzes waveform from a local audio file. Call after playback has cached the track. Never synced to Firestore.
     func analyzeWaveformIfNeeded(for track: Track, in projectID: UUID) {
         guard track.waveformData == nil,

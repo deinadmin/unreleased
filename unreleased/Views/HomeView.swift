@@ -40,9 +40,6 @@ struct HomeView: View {
                 onCancel: { isShowingDocumentPicker = false }
             )
         }
-        .navigationDestination(for: UUID.self) { id in
-            ProjectDetailView(projectID: id)
-        }
         .confirmationDialog("Account", isPresented: $isShowingAccount, titleVisibility: .visible) {
             Button("Sign Out", role: .destructive) {
                 player.stop()

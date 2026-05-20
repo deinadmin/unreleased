@@ -73,6 +73,7 @@ struct Track: Identifiable, Codable, Sendable {
     var storagePath: String?
     /// User-pinned offline copy in Downloads (distinct from playback cache).
     var isDownloaded: Bool
+    var notes: String
 
     init(
         id: UUID = UUID(),
@@ -83,7 +84,8 @@ struct Track: Identifiable, Codable, Sendable {
         addedDate: Date = Date(),
         waveformData: [Float]? = nil,
         storagePath: String? = nil,
-        isDownloaded: Bool = false
+        isDownloaded: Bool = false,
+        notes: String = ""
     ) {
         self.id = id
         self.title = title
@@ -94,6 +96,7 @@ struct Track: Identifiable, Codable, Sendable {
         self.waveformData = waveformData
         self.storagePath = storagePath
         self.isDownloaded = isDownloaded
+        self.notes = notes
     }
 
     var fileExtension: String {

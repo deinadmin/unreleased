@@ -19,6 +19,8 @@ final class AudioPlayer {
     var isLoadingAudio: Bool = false
     /// Download progress 0…1 while `isLoadingAudio`; indeterminate UI when 0.
     var loadingProgress: Double = 0
+    /// User-queued tracks (played next, in order) before the rest of the current project.
+    private(set) var queueTrackIDs: [UUID] = []
 
     private let store: ProjectStore
     private var shuffleOrder: [UUID] = []
@@ -60,6 +62,10 @@ final class AudioPlayer {
 
         cancelLoad()
         tearDownPlayer()
+
+        if currentProject?.id != project.id {
+            queueTrackIDs = []
+        }
 
         currentTrack = track
         currentProject = project
@@ -109,6 +115,11 @@ final class AudioPlayer {
 
     private func startPlayback(track: Track, in project: Project, fileURL: URL) {
         tearDownPlayer()
+
+        if currentProject?.id != project.id {
+            queueTrackIDs = []
+        }
+        dequeueIfQueued(track.id)
 
         currentTrack = track
         currentProject = project
@@ -169,6 +180,17 @@ final class AudioPlayer {
         isLooping.toggle()
     }
 
+    /// Appends a track to the end of the queue (before upcoming project tracks). No-op if not in the current project.
+    func addToQueue(_ track: Track) {
+        guard let project = currentProject,
+              project.tracks.contains(where: { $0.id == track.id }) else { return }
+        queueTrackIDs.append(track.id)
+    }
+
+    func isQueued(_ trackID: UUID) -> Bool {
+        queueTrackIDs.contains(trackID)
+    }
+
     /// Next track in the project (wraps to the first after the last).
     func skipForward() {
         guard let next = adjacentTrack(offset: 1) else { return }
@@ -193,6 +215,7 @@ final class AudioPlayer {
         tearDownPlayer()
         currentTrack = nil
         currentProject = nil
+        queueTrackIDs = []
         isPlaying = false
         currentTime = 0
         duration = 0
@@ -247,7 +270,11 @@ final class AudioPlayer {
         let tracks = project.tracks
         guard !tracks.isEmpty else { return nil }
 
-        if isShuffleEnabled {
+        if offset > 0, let next = upcomingTracks(in: project).first {
+            return (next, project)
+        }
+
+        if isShuffleEnabled, offset < 0 {
             return shuffledAdjacentTrack(offset: offset, in: project, tracks: tracks)
         }
 
@@ -259,6 +286,57 @@ final class AudioPlayer {
         }
 
         return (tracks[index], project)
+    }
+
+    /// Queued tracks first, then remaining project tracks after the current song.
+    private func upcomingTracks(in project: Project) -> [Track] {
+        guard let currentID = currentTrack?.id,
+              let currentIdx = project.tracks.firstIndex(where: { $0.id == currentID })
+        else { return [] }
+
+        var upcoming: [Track] = []
+        for id in queueTrackIDs {
+            if let track = project.tracks.first(where: { $0.id == id }) {
+                upcoming.append(track)
+            }
+        }
+
+        let remainder: [Track]
+        if isShuffleEnabled {
+            remainder = shuffledRemainderAfterCurrent(in: project, currentIdx: currentIdx)
+        } else {
+            remainder = Array(project.tracks[(currentIdx + 1)...])
+        }
+        upcoming.append(contentsOf: remainder)
+        return upcoming
+    }
+
+    private func shuffledRemainderAfterCurrent(in project: Project, currentIdx: Int) -> [Track] {
+        let tracks = project.tracks
+        guard !tracks.isEmpty else { return [] }
+
+        if shuffleOrder.isEmpty {
+            regenerateShuffleOrder()
+        }
+
+        guard let currentID = currentTrack?.id,
+              let orderIdx = shuffleOrder.firstIndex(of: currentID)
+        else {
+            return tracks.filter { $0.id != currentTrack?.id }
+        }
+
+        var result: [Track] = []
+        for i in (orderIdx + 1)..<shuffleOrder.count {
+            if let track = tracks.first(where: { $0.id == shuffleOrder[i] }) {
+                result.append(track)
+            }
+        }
+        return result
+    }
+
+    private func dequeueIfQueued(_ trackID: UUID) {
+        guard let index = queueTrackIDs.firstIndex(of: trackID) else { return }
+        queueTrackIDs.remove(at: index)
     }
 
     private func regenerateShuffleOrder() {
