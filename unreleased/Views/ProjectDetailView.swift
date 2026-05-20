@@ -13,6 +13,7 @@ struct ProjectDetailView: View {
     @State private var importError: String? = nil
     @State private var showDeleteConfirm = false
     @State private var trackToDelete: Track? = nil
+    @State private var trackForInfo: Track? = nil
     @State private var showNavTitle = false
 
     private var project: Project? {
@@ -50,6 +51,18 @@ struct ProjectDetailView: View {
                 )
             }
         }
+        .sheet(item: $trackForInfo) { track in
+            if let project {
+                TrackInfoSheet(
+                    track: track,
+                    project: project,
+                    onDelete: {
+                        trackToDelete = track
+                        trackForInfo = nil
+                    }
+                )
+            }
+        }
         .alert("Delete Track?", isPresented: .init(
             get: { trackToDelete != nil },
             set: { if !$0 { trackToDelete = nil } }
@@ -83,12 +96,6 @@ struct ProjectDetailView: View {
                     .padding(.top, 24)
             }
             .padding(.bottom, 100)
-        }
-        .onAppear {
-            // Lazy waveform analysis for tracks imported before the analyzer existed.
-            for track in project.tracks where track.waveformData == nil {
-                store.analyzeWaveformIfNeeded(for: track, in: project.id)
-            }
         }
     }
 
@@ -152,7 +159,7 @@ struct ProjectDetailView: View {
                             track: track,
                             index: index + 1,
                             project: project,
-                            onDelete: { trackToDelete = track }
+                            onShowInfo: { trackForInfo = track }
                         )
                         .padding(.horizontal, 20)
 
@@ -242,6 +249,16 @@ struct ProjectDetailView: View {
 
                 Menu {
                     Button("Edit Project") { isShowingEdit = true }
+                    if store.projectHasPendingDownloads(project) {
+                        Button("Download Project") {
+                            store.downloadProject(project.id)
+                        }
+                    }
+                    if store.projectIsFullyDownloaded(project) {
+                        Button("Remove Downloads") {
+                            store.removeProjectDownloads(project.id)
+                        }
+                    }
                     Button("Delete Project", role: .destructive) { deleteProject() }
                 } label: {
                     Image(systemName: "ellipsis")
@@ -289,6 +306,7 @@ struct ProjectDetailView: View {
 // MARK: - Play Button
 
 private struct PlayButton: View {
+    @Environment(\.colorScheme) private var colorScheme
     @Environment(AudioPlayer.self) private var player
     @Environment(ProjectStore.self) private var store
 
@@ -298,17 +316,20 @@ private struct PlayButton: View {
         player.currentProject?.id == project.id
     }
 
+    private var buttonFill: Color { colorScheme == .dark ? .white : .black }
+    private var iconColor: Color { colorScheme == .dark ? .black : .white }
+
     var body: some View {
         Button {
             playOrPause()
         } label: {
             ZStack {
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .fill(Color.black)
+                    .fill(buttonFill)
                     .frame(width: 56, height: 56)
                 Image(systemName: isActiveProject && player.isPlaying ? "pause.fill" : "play.fill")
                     .font(.system(size: 22, weight: .bold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(iconColor)
                     .animation(nil, value: player.isPlaying)
             }
         }
@@ -319,8 +340,7 @@ private struct PlayButton: View {
         if isActiveProject {
             player.togglePlayPause()
         } else if let first = project.tracks.first {
-            let url = store.audioFileURL(for: first)
-            player.play(track: first, in: project, fileURL: url)
+            player.play(track: first, in: project)
         }
     }
 }
@@ -334,61 +354,60 @@ private struct TrackRow: View {
     let track: Track
     let index: Int
     let project: Project
-    let onDelete: () -> Void
+    let onShowInfo: () -> Void
 
     @State private var playHapticTick = 0
 
     private var isActive: Bool { player.currentTrack?.id == track.id }
 
     var body: some View {
-        Button {
-            playTrack()
-        } label: {
-            HStack(spacing: 12) {
-                trackNumber
-                    .frame(width: 28)
+        HStack(spacing: 12) {
+            Button {
+                playTrack()
+            } label: {
+                HStack(spacing: 12) {
+                    trackNumber
+                        .frame(width: 28)
 
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(track.title)
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(isActive ? Color.accentColor : .primary)
-                        .lineLimit(1)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(track.title)
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(isActive ? Color.accentColor : .primary)
+                            .lineLimit(1)
 
-                    HStack(spacing: 4) {
-                        Text(track.formattedAddedDate)
-                        Text("•")
-                        Text(track.formattedFileSize)
-                    }
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-                }
-
-                Spacer(minLength: 0)
-
-                Menu {
-                    Button {
-                        playTrack()
-                    } label: {
-                        Label("Play", systemImage: "play.fill")
-                    }
-                    Divider()
-                    Button("Delete", role: .destructive, action: onDelete)
-                } label: {
-                    Image(systemName: "ellipsis")
-                        .font(.system(size: 14))
+                        HStack(spacing: 4) {
+                            TrackDownloadStatusView(track: track)
+                            Text(track.formattedAddedDate)
+                            Text("•")
+                            Text(track.formattedFileSize)
+                        }
+                        .font(.system(size: 12))
                         .foregroundStyle(.secondary)
-                        .frame(width: 36, height: 36)
+                    }
+
+                    Spacer(minLength: 0)
                 }
+                .contentShape(Rectangle())
             }
-            .padding(.vertical, 12)
+            .buttonStyle(.plain)
+
+            Button(action: onShowInfo) {
+                Image(systemName: "ellipsis")
+                    .font(.system(size: 14))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 36, height: 36)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Track info")
         }
+        .padding(.vertical, 12)
         .sensoryFeedback(.impact(weight: .medium), trigger: playHapticTick)
     }
 
     private func playTrack() {
-        let url = store.audioFileURL(for: track)
-        player.play(track: track, in: project, fileURL: url)
         playHapticTick &+= 1
+        player.play(track: track, in: project)
     }
 
     @ViewBuilder

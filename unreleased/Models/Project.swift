@@ -67,8 +67,12 @@ struct Track: Identifiable, Codable, Sendable {
     var fileSize: Int64
     var duration: TimeInterval
     var addedDate: Date
-    /// Normalized amplitude values (0…1) for each waveform bar. Nil until analysis completes.
+    /// Normalized amplitude values (0…1) for each waveform bar. Local-only cache (nil until analyzed from audio).
     var waveformData: [Float]?
+    /// Cloud Storage object path (e.g. `users/{uid}/audio/{trackId}.m4a`). Nil until uploaded.
+    var storagePath: String?
+    /// User-pinned offline copy in Downloads (distinct from playback cache).
+    var isDownloaded: Bool
 
     init(
         id: UUID = UUID(),
@@ -77,7 +81,9 @@ struct Track: Identifiable, Codable, Sendable {
         fileSize: Int64 = 0,
         duration: TimeInterval = 0,
         addedDate: Date = Date(),
-        waveformData: [Float]? = nil
+        waveformData: [Float]? = nil,
+        storagePath: String? = nil,
+        isDownloaded: Bool = false
     ) {
         self.id = id
         self.title = title
@@ -86,6 +92,13 @@ struct Track: Identifiable, Codable, Sendable {
         self.duration = duration
         self.addedDate = addedDate
         self.waveformData = waveformData
+        self.storagePath = storagePath
+        self.isDownloaded = isDownloaded
+    }
+
+    var fileExtension: String {
+        let ext = (fileName as NSString).pathExtension.lowercased()
+        return ext.isEmpty ? "m4a" : ext
     }
 
     var formattedDuration: String {

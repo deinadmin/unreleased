@@ -46,6 +46,7 @@ struct HomeView: View {
         .confirmationDialog("Account", isPresented: $isShowingAccount, titleVisibility: .visible) {
             Button("Sign Out", role: .destructive) {
                 player.stop()
+                store.configureSync(userID: nil)
                 auth.signOut()
             }
             Button("Cancel", role: .cancel) {}
@@ -248,8 +249,7 @@ private struct ProjectCard: View {
         if isActiveProject {
             player.togglePlayPause()
         } else if let first = project.tracks.first {
-            let url = store.audioFileURL(for: first)
-            player.play(track: first, in: project, fileURL: url)
+            player.play(track: first, in: project)
         }
         playHapticTick &+= 1
     }

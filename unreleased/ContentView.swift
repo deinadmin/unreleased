@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct ContentView: View {
+    @Environment(AuthManager.self) private var auth
     @State private var store = ProjectStore()
     @State private var player: AudioPlayer
 
@@ -19,8 +20,8 @@ struct ContentView: View {
             }
             .environment(store)
             .environment(player)
-            // Reserve room so the last list item doesn't hide under the mini player
-            .safeAreaInset(edge: .bottom, spacing: 0) {
+            // Reserve room + native progressive blur under scroll content (iOS 26+)
+            .safeAreaBar(edge: .bottom, spacing: 0) {
                 if player.currentTrack != nil, !player.isShowingNowPlaying {
                     Color.clear.frame(height: 66)
                 }
@@ -67,6 +68,9 @@ struct ContentView: View {
             value: player.isShowingNowPlaying
         )
         .animation(.smooth(duration: 0.35), value: player.currentTrack?.id)
+        .task(id: auth.signedInUserID) {
+            store.configureSync(userID: auth.signedInUserID)
+        }
     }
 }
 

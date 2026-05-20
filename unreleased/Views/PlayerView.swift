@@ -11,6 +11,7 @@ struct PlayerView: View {
     @State private var isDragging = false
     @State private var miniScrubPillVisible = false
     @State private var miniScrubProgress: Double = 0
+    @State private var isShowingTrackInfo = false
 
     private let compactHeight: CGFloat = 50
     /// Space between the mini player bar and the floating scrub time pill.
@@ -71,6 +72,21 @@ struct PlayerView: View {
             .onChange(of: player.isShowingNowPlaying) { _, showing in
                 offset = 0
                 lastDragTranslation = 0
+            }
+            .sheet(isPresented: $isShowingTrackInfo) {
+                if let track = player.currentTrack, let project = player.currentProject {
+                    TrackInfoSheet(
+                        track: track,
+                        project: project,
+                        onDelete: {
+                            store.deleteTrack(track, from: project.id)
+                            if player.currentTrack?.id == track.id {
+                                player.stop()
+                            }
+                            isShowingTrackInfo = false
+                        }
+                    )
+                }
             }
         }
     }
@@ -227,18 +243,38 @@ struct PlayerView: View {
                 Circle()
                     .fill(.black.opacity(isExpanded ? 0 : 0.18))
 
-                Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
-                    .font(.system(size: 14, weight: .bold))
-                    .foregroundStyle(.white)
-                    .opacity(isExpanded ? 0 : 1)
-                    .animation(nil, value: player.isPlaying)
+                if !isExpanded {
+                    miniCoverOverlay
+                }
             }
             .frame(width: coverSize, height: coverSize)
             .contentShape(Circle())
         }
         .buttonStyle(.scale)
-        .disabled(isExpanded)
+        .disabled(isExpanded || player.isLoadingAudio)
         .sensoryFeedback(.impact(weight: .medium), trigger: player.isPlaying)
+    }
+
+    @ViewBuilder
+    private var miniCoverOverlay: some View {
+        if player.isLoadingAudio {
+            Group {
+                if player.loadingProgress > 0 {
+                    ProgressView(value: player.loadingProgress)
+                        .progressViewStyle(.circular)
+                } else {
+                    ProgressView()
+                        .progressViewStyle(.circular)
+                }
+            }
+            .tint(.white)
+            .scaleEffect(0.9)
+        } else {
+            Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
+                .font(.system(size: 14, weight: .bold))
+                .foregroundStyle(.white)
+                .animation(nil, value: player.isPlaying)
+        }
     }
 
     @ViewBuilder
@@ -380,9 +416,13 @@ struct PlayerView: View {
             bottomAccessoryButton(icon: "square.and.arrow.up", label: "share") {
                 shareCurrentTrack()
             }
-            bottomAccessoryButton(icon: "slider.horizontal.3", label: "edit") {}
+            bottomAccessoryButton(icon: "ellipsis", label: "options") {
+                isShowingTrackInfo = true
+            }
         }
     }
+
+    private static let bottomAccessoryHeight: CGFloat = 48
 
     private func bottomAccessoryButton(
         icon: String,
@@ -393,10 +433,16 @@ struct PlayerView: View {
             VStack(spacing: 5) {
                 Image(systemName: icon)
                     .font(.system(size: 19))
+                    .frame(height: 22)
+
                 Text(label)
                     .font(.system(size: 11))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                    .frame(height: 14)
             }
             .foregroundStyle(.white.opacity(0.48))
+            .frame(height: Self.bottomAccessoryHeight)
             .frame(maxWidth: .infinity)
         }
     }
@@ -464,8 +510,10 @@ struct PlayerView: View {
 
     private func shareCurrentTrack() {
         guard let track = player.currentTrack else { return }
-        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        let url = docs.appendingPathComponent("AudioFiles/\(track.fileName)")
+        let url = store.hasDownloadedFile(for: track)
+            ? store.downloadedFileURL(for: track)
+            : store.audioFileURL(for: track)
+        guard FileManager.default.fileExists(atPath: url.path) else { return }
         let av = UIActivityViewController(activityItems: [url], applicationActivities: nil)
         if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
            let window = scene.windows.first {

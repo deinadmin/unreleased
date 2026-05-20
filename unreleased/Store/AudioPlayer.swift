@@ -15,6 +15,10 @@ final class AudioPlayer {
     var isShowingNowPlaying: Bool = false
     var isShuffleEnabled: Bool = false
     var isLooping: Bool = false
+    /// True while a remote audio file is downloading before playback can start.
+    var isLoadingAudio: Bool = false
+    /// Download progress 0…1 while `isLoadingAudio`; indeterminate UI when 0.
+    var loadingProgress: Double = 0
 
     private let store: ProjectStore
     private var shuffleOrder: [UUID] = []
@@ -23,6 +27,7 @@ final class AudioPlayer {
     private var timeObserver: Any?
     private var endObserver: NSObjectProtocol?
     private var nowPlayingArtwork: MPMediaItemArtwork?
+    private var loadTask: Task<Void, Never>?
 
     private let trackRestartThreshold: TimeInterval = 1.5
 
@@ -36,11 +41,70 @@ final class AudioPlayer {
     // MARK: - Playback Control
 
     func play(track: Track, in project: Project, fileURL: URL) {
-        if currentTrack?.id == track.id {
+        if currentTrack?.id == track.id, !isLoadingAudio {
             togglePlayPause()
             return
         }
+        cancelLoad()
+        isLoadingAudio = false
+        loadingProgress = 0
         startPlayback(track: track, in: project, fileURL: fileURL)
+    }
+
+    /// Shows the mini player immediately; downloads uncached audio in the background.
+    func play(track: Track, in project: Project) {
+        if currentTrack?.id == track.id, !isLoadingAudio {
+            togglePlayPause()
+            return
+        }
+
+        cancelLoad()
+        tearDownPlayer()
+
+        currentTrack = track
+        currentProject = project
+        duration = track.duration
+        currentTime = 0
+        isPlaying = false
+        refreshNowPlayingArtwork(for: project)
+        updateNowPlayingInfo()
+
+        if store.hasCachedAudio(for: track) {
+            isLoadingAudio = false
+            loadingProgress = 0
+            startPlayback(track: track, in: project, fileURL: store.audioFileURL(for: track))
+            return
+        }
+
+        isLoadingAudio = true
+        loadingProgress = 0
+
+        loadTask = Task {
+            let url = await store.playbackURL(for: track) { [weak self] progress in
+                Task { @MainActor in
+                    guard let self, self.isLoadingAudio, self.currentTrack?.id == track.id else { return }
+                    self.loadingProgress = progress
+                }
+            }
+
+            guard !Task.isCancelled else { return }
+
+            await MainActor.run {
+                guard self.currentTrack?.id == track.id else { return }
+                self.isLoadingAudio = false
+                self.loadingProgress = 0
+
+                guard let url else {
+                    self.currentTrack = nil
+                    self.currentProject = nil
+                    self.duration = 0
+                    self.updateNowPlayingInfo()
+                    return
+                }
+
+                self.startPlayback(track: track, in: project, fileURL: url)
+            }
+        }
     }
 
     private func startPlayback(track: Track, in project: Project, fileURL: URL) {
@@ -70,9 +134,11 @@ final class AudioPlayer {
         player?.play()
         isPlaying = true
         updateNowPlayingInfo()
+        store.analyzeWaveformIfNeeded(for: track, in: project.id)
     }
 
     func togglePlayPause() {
+        if isLoadingAudio { return }
         guard player != nil else { return }
         if isPlaying {
             player?.pause()
@@ -106,20 +172,24 @@ final class AudioPlayer {
     /// Next track in the project (wraps to the first after the last).
     func skipForward() {
         guard let next = adjacentTrack(offset: 1) else { return }
-        playAdjacentTrack(next)
+        play(track: next.track, in: next.project)
     }
 
     /// Restart if past 1.5s; otherwise previous track (wraps to the last from the first).
     func skipBackward() {
+        if isLoadingAudio { return }
         if currentTime > trackRestartThreshold {
             seek(to: 0)
             return
         }
         guard let previous = adjacentTrack(offset: -1) else { return }
-        playAdjacentTrack(previous)
+        play(track: previous.track, in: previous.project)
     }
 
     func stop() {
+        cancelLoad()
+        isLoadingAudio = false
+        loadingProgress = 0
         tearDownPlayer()
         currentTrack = nil
         currentProject = nil
@@ -142,8 +212,7 @@ final class AudioPlayer {
 
     private func handlePlaybackEnded() {
         if isLooping, let track = currentTrack, let project = currentProject {
-            let url = store.audioFileURL(for: track)
-            startPlayback(track: track, in: project, fileURL: url)
+            play(track: track, in: project)
             return
         }
 
@@ -153,7 +222,12 @@ final class AudioPlayer {
             updateNowPlayingInfo()
             return
         }
-        playAdjacentTrack(next)
+        play(track: next.track, in: next.project)
+    }
+
+    private func cancelLoad() {
+        loadTask?.cancel()
+        loadTask = nil
     }
 
     private func projectTracks() -> [Track] {
@@ -243,11 +317,6 @@ final class AudioPlayer {
         let trackID = shuffleOrder[shuffleIndex]
         guard let track = tracks.first(where: { $0.id == trackID }) else { return nil }
         return (track, project)
-    }
-
-    private func playAdjacentTrack(_ pair: (track: Track, project: Project)) {
-        let url = store.audioFileURL(for: pair.track)
-        startPlayback(track: pair.track, in: pair.project, fileURL: url)
     }
 
     private func tearDownPlayer() {
