@@ -3,8 +3,10 @@ import SwiftUI
 struct HomeView: View {
     @Environment(ProjectStore.self) private var store
     @Environment(AudioPlayer.self) private var player
+    @Environment(AuthManager.self) private var auth
 
     @State private var isShowingCreate = false
+    @State private var isShowingAccount = false
     @State private var isShowingDocumentPicker = false
     @State private var isImporting = false
     @State private var navigateToProjectID: UUID? = nil
@@ -40,6 +42,17 @@ struct HomeView: View {
         }
         .navigationDestination(for: UUID.self) { id in
             ProjectDetailView(projectID: id)
+        }
+        .confirmationDialog("Account", isPresented: $isShowingAccount, titleVisibility: .visible) {
+            Button("Sign Out", role: .destructive) {
+                player.stop()
+                auth.signOut()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            if let label = auth.accountLabel {
+                Text("Signed in as \(label)")
+            }
         }
     }
 
@@ -132,7 +145,7 @@ struct HomeView: View {
                 }
 
                 Button {
-                    // Profile
+                    isShowingAccount = true
                 } label: {
                     Image(systemName: "person")
                         .font(.system(size: 14, weight: .medium))
