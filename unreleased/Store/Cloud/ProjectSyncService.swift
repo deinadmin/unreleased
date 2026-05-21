@@ -1,19 +1,27 @@
 import FirebaseFirestore
 import Foundation
 
-/// Syncs projects with Firestore and uploads audio to Storage. Local JSON remains the UI source of truth.
+/// Syncs projects with Firestore and uploads audio/covers to Storage. Local JSON remains the UI source of truth.
 @MainActor
 final class ProjectSyncService {
+    struct ProjectPatch {
+        var coverStoragePath: String?
+        var accentColorHex: String?
+    }
+
     typealias ProjectSnapshotProvider = () -> [Project]
     typealias ProjectUpdater = (_ projects: [Project], _ persistLocally: Bool) -> Void
     typealias TrackUpdater = (_ projectID: UUID, _ track: Track, _ persistLocally: Bool) -> Void
+    typealias ProjectPatcher = (_ projectID: UUID, _ patch: ProjectPatch, _ persistLocally: Bool) -> Void
     typealias ProjectRemover = (_ projectID: UUID, _ persistLocally: Bool) -> Void
 
     private let userID: String
     private let audioDirectory: URL
+    private let coverDirectory: URL
     private let snapshotProvider: ProjectSnapshotProvider
     private let projectUpdater: ProjectUpdater
     private let trackUpdater: TrackUpdater
+    private let projectPatcher: ProjectPatcher
     private let projectRemover: ProjectRemover
 
     private var listener: ListenerRegistration?
@@ -21,20 +29,26 @@ final class ProjectSyncService {
     private var lastSyncedUpdated: [UUID: Date] = [:]
     private var applyingRemote = false
     private var uploadTasks: [UUID: Task<Void, Never>] = [:]
+    private var coverUploadTasks: [UUID: Task<Void, Never>] = [:]
+    private var coverDownloadTasks: [UUID: Task<Void, Never>] = [:]
 
     init(
         userID: String,
         audioDirectory: URL,
+        coverDirectory: URL,
         snapshotProvider: @escaping ProjectSnapshotProvider,
         projectUpdater: @escaping ProjectUpdater,
         trackUpdater: @escaping TrackUpdater,
+        projectPatcher: @escaping ProjectPatcher,
         projectRemover: @escaping ProjectRemover
     ) {
         self.userID = userID
         self.audioDirectory = audioDirectory
+        self.coverDirectory = coverDirectory
         self.snapshotProvider = snapshotProvider
         self.projectUpdater = projectUpdater
         self.trackUpdater = trackUpdater
+        self.projectPatcher = projectPatcher
         self.projectRemover = projectRemover
     }
 
@@ -64,6 +78,10 @@ final class ProjectSyncService {
         pushTask = nil
         uploadTasks.values.forEach { $0.cancel() }
         uploadTasks.removeAll()
+        coverUploadTasks.values.forEach { $0.cancel() }
+        coverUploadTasks.removeAll()
+        coverDownloadTasks.values.forEach { $0.cancel() }
+        coverDownloadTasks.removeAll()
         lastSyncedUpdated.removeAll()
     }
 
@@ -85,6 +103,20 @@ final class ProjectSyncService {
         }
     }
 
+    func enqueueCoverUpload(projectID: UUID) {
+        coverUploadTasks[projectID]?.cancel()
+        coverUploadTasks[projectID] = Task { [weak self] in
+            await self?.uploadCover(projectID: projectID)
+        }
+    }
+
+    func enqueueCoverDownload(projectID: UUID) {
+        coverDownloadTasks[projectID]?.cancel()
+        coverDownloadTasks[projectID] = Task { [weak self] in
+            await self?.downloadCover(projectID: projectID)
+        }
+    }
+
     func deleteFromCloud(project: Project) async {
         let doc = CloudPaths.projectDocument(userID: userID, projectID: project.id)
         for track in project.tracks {
@@ -92,8 +124,15 @@ final class ProjectSyncService {
                 await AudioFileCache.shared.delete(storagePath: path)
             }
         }
+        if let coverPath = project.coverStoragePath {
+            await AudioFileCache.shared.delete(storagePath: coverPath)
+        }
         try? await doc.delete()
         lastSyncedUpdated[project.id] = nil
+    }
+
+    func deleteCoverFromCloud(storagePath: String) async {
+        await AudioFileCache.shared.delete(storagePath: storagePath)
     }
 
     func deleteTrackFromCloud(_ track: Track) async {
@@ -152,6 +191,10 @@ final class ProjectSyncService {
                 for track in project.tracks where track.storagePath == nil {
                     enqueueAudioUpload(projectID: project.id, track: track)
                 }
+
+                if project.coverImageFileName != nil {
+                    enqueueCoverUpload(projectID: project.id)
+                }
             } catch {
                 print("ProjectSyncService: push failed for \(project.id) — \(error)")
             }
@@ -188,6 +231,52 @@ final class ProjectSyncService {
             schedulePush()
         } catch {
             print("ProjectSyncService: audio upload failed for \(track.id) — \(error)")
+        }
+    }
+
+    // MARK: - Cover upload / download
+
+    private func uploadCover(projectID: UUID) async {
+        guard let project = snapshotProvider().first(where: { $0.id == projectID }),
+              let fileName = project.coverImageFileName
+        else { return }
+
+        let localURL = coverDirectory.appendingPathComponent(fileName)
+        guard FileManager.default.fileExists(atPath: localURL.path) else { return }
+
+        let storagePath = CloudPaths.coverStoragePath(userID: userID, projectID: projectID)
+
+        do {
+            _ = try await AudioFileCache.shared.upload(
+                localURL: localURL,
+                to: storagePath,
+                contentType: "image/jpeg"
+            )
+            projectPatcher(
+                projectID,
+                ProjectPatch(coverStoragePath: storagePath, accentColorHex: project.accentColorHex),
+                true
+            )
+            schedulePush()
+        } catch {
+            print("ProjectSyncService: cover upload failed for \(projectID) — \(error)")
+        }
+    }
+
+    private func downloadCover(projectID: UUID) async {
+        guard let project = snapshotProvider().first(where: { $0.id == projectID }),
+              let storagePath = project.coverStoragePath
+        else { return }
+
+        let fileName = project.coverImageFileName ?? "\(projectID.uuidString).jpg"
+        let destination = coverDirectory.appendingPathComponent(fileName)
+
+        if FileManager.default.fileExists(atPath: destination.path) { return }
+
+        do {
+            try await AudioFileCache.shared.download(storagePath: storagePath, to: destination)
+        } catch {
+            print("ProjectSyncService: cover download failed for \(projectID) — \(error)")
         }
     }
 

@@ -12,8 +12,11 @@ struct TrackInfoSheet: View {
     var onOpenNotes: () -> Void
 
     @State private var selectedDetent: PresentationDetent = .medium
+    @State private var detentBeforeMove: PresentationDetent = .medium
     @State private var isShowingMove = false
     @State private var showDeleteConfirm = false
+    @State private var showRenameAlert = false
+    @State private var renameText = ""
 
     private var isMediumDetent: Bool { selectedDetent == .medium }
 
@@ -46,7 +49,19 @@ struct TrackInfoSheet: View {
         .presentationDragIndicator(.visible)
         .presentationBackground(Color(.systemGroupedBackground))
         .onChange(of: isShowingMove) { _, showing in
-            if showing { selectedDetent = .large }
+            if showing {
+                detentBeforeMove = selectedDetent
+                selectedDetent = .medium
+            } else {
+                selectedDetent = detentBeforeMove
+            }
+        }
+        .alert("Rename", isPresented: $showRenameAlert) {
+            TextField("Track name", text: $renameText)
+            Button("Save") {
+                confirmRename()
+            }
+            Button("Cancel", role: .cancel) {}
         }
         .alert("Delete Track?", isPresented: $showDeleteConfirm) {
             Button("Delete", role: .destructive) {
@@ -160,7 +175,10 @@ struct TrackInfoSheet: View {
 
     private var primaryActions: [TrackInfoAction] {
         var actions: [TrackInfoAction] = [
-            TrackInfoAction(title: "Edit track", systemImage: "slider.horizontal.3"),
+            TrackInfoAction(title: "Rename", systemImage: "pencil") {
+                renameText = liveTrack.title
+                showRenameAlert = true
+            },
             TrackInfoAction(title: "Replace audio", systemImage: "waveform.badge.plus"),
             TrackInfoAction(title: "Notes", systemImage: "note.text") {
                 dismiss()
@@ -217,6 +235,14 @@ struct TrackInfoSheet: View {
     @ViewBuilder
     private var secondaryActionsGroup: some View {
         TrackInfoActionGroup(actions: secondaryActions)
+    }
+
+    // MARK: - Rename
+
+    private func confirmRename() {
+        let trimmed = renameText.trimmingCharacters(in: .whitespaces)
+        let newTitle = trimmed.isEmpty ? "Untitled" : trimmed
+        store.updateTrackTitle(newTitle, trackID: liveTrack.id, projectID: project.id)
     }
 
     // MARK: - Delete

@@ -4,6 +4,7 @@ struct HomeView: View {
     @Environment(ProjectStore.self) private var store
     @Environment(AudioPlayer.self) private var player
     @Environment(AuthManager.self) private var auth
+    @Environment(AppSearchState.self) private var searchState
 
     @State private var isShowingCreate = false
     @State private var isShowingAccount = false
@@ -16,16 +17,36 @@ struct HomeView: View {
         GridItem(.flexible(), spacing: 16),
     ]
 
+    private var filteredProjects: [Project] {
+        let query = searchState.text.trimmingCharacters(in: .whitespaces)
+        guard searchState.isActive, searchState.scope == .library, !query.isEmpty else {
+            return store.projects
+        }
+        return store.projects.filter { project in
+            project.name.localizedCaseInsensitiveContains(query)
+                || project.tracks.contains {
+                    $0.title.localizedCaseInsensitiveContains(query)
+                }
+        }
+    }
+
     var body: some View {
         ZStack {
             if store.projects.isEmpty {
                 emptyState
+            } else if searchState.isActive, searchState.scope == .library,
+                      !searchState.text.trimmingCharacters(in: .whitespaces).isEmpty,
+                      filteredProjects.isEmpty {
+                ContentUnavailableView.search(text: searchState.text)
             } else {
                 projectGrid
             }
         }
         .navigationTitle("unreleased")
         .toolbar { toolbarContent }
+        .onDisappear {
+            searchState.deactivateIfMatching(scope: .library)
+        }
         .sheet(isPresented: $isShowingCreate) {
             CreateProjectSheet { project in
                 navigateToProjectID = project.id
@@ -107,7 +128,7 @@ struct HomeView: View {
     private var projectGrid: some View {
         ScrollView {
             LazyVGrid(columns: columns, spacing: 16) {
-                ForEach(store.projects) { project in
+                ForEach(filteredProjects) { project in
                     NavigationLink(value: project.id) {
                         ProjectCard(project: project)
                     }
@@ -135,7 +156,8 @@ struct HomeView: View {
                 }
 
                 Button {
-                    // Search
+                    player.isShowingNowPlaying = false
+                    searchState.activate(scope: .library, placeholder: "Search your library")
                 } label: {
                     Image(systemName: "magnifyingglass")
                         .font(.system(size: 14, weight: .medium))
@@ -202,14 +224,24 @@ private struct ProjectCard: View {
 
     private var isActiveProject: Bool { player.currentProject?.id == project.id }
     private var showsPause: Bool { isActiveProject && player.isPlaying }
+    private var coverImage: UIImage? { store.coverImage(for: project) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             ZStack(alignment: .bottomTrailing) {
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(project.gradient.gradient)
-                    .aspectRatio(1, contentMode: .fit)
-                    .frame(maxWidth: .infinity)
+                Group {
+                    if let coverImage {
+                        Image(uiImage: coverImage)
+                            .resizable()
+                            .scaledToFill()
+                    } else {
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .fill(project.gradient.gradient)
+                    }
+                }
+                .aspectRatio(1, contentMode: .fit)
+                .frame(maxWidth: .infinity)
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
 
                 if !project.tracks.isEmpty {
                     Button(action: playOrPause) {

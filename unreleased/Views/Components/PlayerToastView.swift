@@ -1,5 +1,10 @@
 import SwiftUI
 
+enum PlayerChrome {
+    /// Mini player bar, toast banner, and scrub time pill.
+    static let surfaceBackground = Color(white: 0.13)
+}
+
 @Observable
 @MainActor
 final class PlayerToastCenter {
@@ -21,6 +26,10 @@ final class PlayerToastCenter {
 
     func showTrackDeleted() {
         show(message: "Track deleted", systemImage: "trash")
+    }
+
+    func showTrackMoved(to projectName: String) {
+        show(message: "Moved to \(projectName)", systemImage: "arrow.right.square")
     }
 
     func show(message: String, systemImage: String) {
@@ -56,6 +65,6 @@ struct PlayerToastBanner: View {
         .foregroundStyle(.white)
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
-        .background(Color(white: 0.13), in: Capsule())
+        .background(PlayerChrome.surfaceBackground, in: Capsule())
     }
 }

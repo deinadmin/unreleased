@@ -5,6 +5,7 @@ struct ProjectDetailView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(ProjectStore.self) private var store
     @Environment(AudioPlayer.self) private var player
+    @Environment(AppSearchState.self) private var searchState
     @Environment(\.navigateToTrackNotes) private var navigateToTrackNotes
 
     let projectID: UUID
@@ -19,6 +20,17 @@ struct ProjectDetailView: View {
 
     private var project: Project? {
         store.projects.first { $0.id == projectID }
+    }
+
+    private func filteredTracks(for project: Project) -> [Track] {
+        let query = searchState.text.trimmingCharacters(in: .whitespaces)
+        guard searchState.isActive,
+              searchState.scope == .project(projectID),
+              !query.isEmpty
+        else { return project.tracks }
+        return project.tracks.filter {
+            $0.title.localizedCaseInsensitiveContains(query)
+        }
     }
 
     var body: some View {
@@ -72,6 +84,9 @@ struct ProjectDetailView: View {
         } message: {
             Text("This will permanently delete the project and all of its tracks.")
         }
+        .onDisappear {
+            searchState.deactivateIfMatching(scope: .project(projectID))
+        }
     }
 
     // MARK: - Main content
@@ -111,6 +126,7 @@ struct ProjectDetailView: View {
                 let coverSize = geo.size.width / 1.375
                 ProjectCoverView(
                     gradient: project.gradient,
+                    coverImage: store.coverImage(for: project),
                     size: coverSize,
                     cornerRadius: 20,
                     showVinyl: true,
@@ -149,18 +165,26 @@ struct ProjectDetailView: View {
             addTracksButton(project: project)
                 .padding(.horizontal, 20)
 
-            if !project.tracks.isEmpty {
+            let tracks = filteredTracks(for: project)
+            if searchState.isActive,
+               searchState.scope == .project(projectID),
+               !searchState.text.trimmingCharacters(in: .whitespaces).isEmpty,
+               tracks.isEmpty {
+                ContentUnavailableView.search(text: searchState.text)
+                    .padding(.top, 32)
+            } else if !tracks.isEmpty {
                 VStack(spacing: 0) {
-                    ForEach(Array(project.tracks.enumerated()), id: \.element.id) { index, track in
+                    ForEach(Array(tracks.enumerated()), id: \.element.id) { index, track in
                         TrackRow(
                             track: track,
                             index: index + 1,
                             project: project,
+                            accentColor: store.accentColor(for: project),
                             onShowInfo: { trackForInfo = track }
                         )
                         .padding(.horizontal, 20)
 
-                        if index < project.tracks.count - 1 {
+                        if index < tracks.count - 1 {
                             Divider()
                                 .padding(.leading, 20 + 28 + 12)
                         }
@@ -203,6 +227,7 @@ struct ProjectDetailView: View {
             HStack(spacing: 8) {
                 ProjectCoverThumbnail(
                     gradient: project.gradient,
+                    coverImage: store.coverImage(for: project),
                     size: 28,
                     cornerRadius: 7
                 )
@@ -237,7 +262,8 @@ struct ProjectDetailView: View {
                 }
 
                 Button {
-                    // search
+                    player.isShowingNowPlaying = false
+                    searchState.activate(scope: .project(projectID), placeholder: "Search tracks")
                 } label: {
                     Image(systemName: "magnifyingglass")
                         .font(.system(size: 14, weight: .medium))
@@ -261,7 +287,7 @@ struct ProjectDetailView: View {
                         Button {
                             store.removeProjectDownloads(project.id)
                         } label: {
-                            Label("Remove Downloads", systemImage: "arrow.down.to.line")
+                            Label("Remove Downloads", systemImage: "arrow.down.circle.fill")
                         }
                     }
                     Button(role: .destructive) {
@@ -366,6 +392,7 @@ private struct TrackRow: View {
     let track: Track
     let index: Int
     let project: Project
+    let accentColor: Color
     let onShowInfo: () -> Void
 
     @State private var playHapticTick = 0
@@ -384,7 +411,7 @@ private struct TrackRow: View {
                     VStack(alignment: .leading, spacing: 3) {
                         Text(track.title)
                             .font(.system(size: 15, weight: .semibold))
-                            .foregroundStyle(isActive ? Color.accentColor : .primary)
+                            .foregroundStyle(isActive ? accentColor : .primary)
                             .lineLimit(1)
 
                         HStack(spacing: 4) {
@@ -425,7 +452,7 @@ private struct TrackRow: View {
     @ViewBuilder
     private var trackNumber: some View {
         if isActive && player.isPlaying {
-            PlayingBarsIndicator()
+            PlayingBarsIndicator(accentColor: accentColor)
                 .frame(width: 16, height: 16)
         } else {
             Text("\(index)")
@@ -438,13 +465,14 @@ private struct TrackRow: View {
 // MARK: - Playing bars indicator
 
 private struct PlayingBarsIndicator: View {
+    let accentColor: Color
     @State private var animating = false
 
     var body: some View {
         HStack(spacing: 2) {
             ForEach([0.6, 1.0, 0.75], id: \.self) { height in
                 RoundedRectangle(cornerRadius: 1.5)
-                    .fill(Color.accentColor)
+                    .fill(accentColor)
                     .frame(width: 3, height: animating ? 16 * height : 4)
                     .animation(
                         .easeInOut(duration: 0.4 + height * 0.2)

@@ -56,7 +56,7 @@ actor AudioFileCache {
                 try FileManager.default.removeItem(at: destination)
             }
             try await CloudPaths.audioReference(storagePath: storagePath)
-                .writeAsync(toFile: destination, onProgress: onProgress)
+                .writeToFileAsync(destination, onProgress: onProgress)
             return destination
         }
 
@@ -81,12 +81,24 @@ actor AudioFileCache {
     }
 
     func delete(storagePath: String) async {
-        try? await CloudPaths.audioReference(storagePath: storagePath).delete()
+        try? await CloudPaths.storageReference(storagePath: storagePath).delete()
+    }
+
+    func download(storagePath: String, to destination: URL) async throws {
+        try FileManager.default.createDirectory(
+            at: destination.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        if FileManager.default.fileExists(atPath: destination.path) {
+            try FileManager.default.removeItem(at: destination)
+        }
+        try await CloudPaths.storageReference(storagePath: storagePath)
+            .writeToFileAsync(destination, onProgress: nil)
     }
 }
 
 private extension StorageReference {
-    func writeAsync(toFile url: URL, onProgress: (@Sendable (Double) -> Void)? = nil) async throws {
+    func writeToFileAsync(_ url: URL, onProgress: (@Sendable (Double) -> Void)? = nil) async throws {
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             let task = write(toFile: url)
             var finished = false

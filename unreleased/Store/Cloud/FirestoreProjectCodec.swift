@@ -3,7 +3,7 @@ import Foundation
 
 enum FirestoreProjectCodec {
     static func encode(_ project: Project) -> [String: Any] {
-        [
+        var payload: [String: Any] = [
             "id": project.id.uuidString,
             "name": project.name,
             "gradient": encodeGradient(project.gradient),
@@ -11,6 +11,13 @@ enum FirestoreProjectCodec {
             "createdDate": Timestamp(date: project.createdDate),
             "updatedDate": Timestamp(date: project.updatedDate),
         ]
+        if let coverStoragePath = project.coverStoragePath {
+            payload["coverStoragePath"] = coverStoragePath
+        }
+        if let accentColorHex = project.accentColorHex {
+            payload["accentColorHex"] = accentColorHex
+        }
+        return payload
     }
 
     static func decode(_ document: DocumentSnapshot) -> Project? {
@@ -31,6 +38,11 @@ enum FirestoreProjectCodec {
             id: id,
             name: name,
             gradient: gradient,
+            coverImageFileName: data["coverStoragePath"] != nil
+                ? "\(id.uuidString).jpg"
+                : nil,
+            coverStoragePath: data["coverStoragePath"] as? String,
+            accentColorHex: data["accentColorHex"] as? String,
             tracks: tracks,
             createdDate: created.dateValue(),
             updatedDate: updated.dateValue()

@@ -3,6 +3,7 @@ import SwiftUI
 struct MoveTrackView: View {
     @Environment(ProjectStore.self) private var store
     @Environment(AudioPlayer.self) private var player
+    @Environment(PlayerToastCenter.self) private var toastCenter
     @Environment(AuthManager.self) private var auth
     let track: Track
     let sourceProjectID: UUID
@@ -135,7 +136,12 @@ struct MoveTrackView: View {
             moveTrack(to: project.id)
         } label: {
             HStack(spacing: 14) {
-                ProjectCoverThumbnail(gradient: project.gradient, size: 48, cornerRadius: 10)
+                ProjectCoverThumbnail(
+                    gradient: project.gradient,
+                    coverImage: store.coverImage(for: project),
+                    size: 48,
+                    cornerRadius: 10
+                )
 
                 VStack(alignment: .leading, spacing: 3) {
                     Text(project.name)
@@ -160,6 +166,10 @@ struct MoveTrackView: View {
     // MARK: - Actions
 
     private func moveTrack(to destinationProjectID: UUID) {
+        let destinationName = store.projects
+            .first(where: { $0.id == destinationProjectID })?
+            .name ?? "project"
+
         store.moveTrack(track, from: sourceProjectID, to: destinationProjectID)
 
         if player.currentTrack?.id == track.id,
@@ -168,6 +178,9 @@ struct MoveTrackView: View {
         }
 
         onMoved()
+        DispatchQueue.main.async {
+            toastCenter.showTrackMoved(to: destinationName)
+        }
     }
 }
 
@@ -180,5 +193,6 @@ struct MoveTrackView: View {
     )
     .environment(ProjectStore())
     .environment(AudioPlayer(store: ProjectStore()))
+    .environment(PlayerToastCenter())
     .environment(AuthManager())
 }

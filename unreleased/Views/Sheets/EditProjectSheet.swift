@@ -8,6 +8,7 @@ struct EditProjectSheet: View {
 
     @State private var name: String = ""
     @State private var gradient: GradientTheme = GradientTheme.presets[0]
+    @State private var coverImage: UIImage?
     @FocusState private var nameIsFocused: Bool
 
     var body: some View {
@@ -25,29 +26,38 @@ struct EditProjectSheet: View {
             .navigationTitle("Edit Project")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
+                ToolbarItem(placement: .topBarLeading) {
                     Button("Cancel") { dismiss() }
+                        .fixedSize(horizontal: true, vertical: false)
+                        .padding(8)
                 }
-                ToolbarItem(placement: .confirmationAction) {
+                ToolbarItem(placement: .topBarTrailing) {
                     Button("Save") { save() }
                         .fontWeight(.semibold)
+                        .fixedSize(horizontal: true, vertical: false)
+                        .padding(8)
                 }
             }
         }
         .onAppear {
             name = project.name
             gradient = project.gradient
+            coverImage = store.coverImage(for: project)
         }
     }
 
     @ViewBuilder
     private var coverPreview: some View {
         VStack(spacing: 12) {
-            ProjectCoverView(gradient: gradient, size: 160, cornerRadius: 20, showVinyl: true)
+            ProjectCoverView(gradient: gradient, coverImage: coverImage, size: 160, cornerRadius: 20, showVinyl: true)
                 .animation(.smooth(duration: 0.35), value: gradient)
+                .animation(.smooth(duration: 0.35), value: coverImage != nil)
 
             Button {
-                withAnimation(.smooth) { gradient = .random() }
+                withAnimation(.smooth) {
+                    coverImage = nil
+                    gradient = .random()
+                }
             } label: {
                 Label("Randomize", systemImage: "shuffle")
                     .font(.system(size: 14, weight: .medium))
@@ -82,11 +92,11 @@ struct EditProjectSheet: View {
     @ViewBuilder
     private var gradientSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Cover Color")
+            Text("Cover")
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(.secondary)
 
-            GradientPickerView(selected: $gradient)
+            GradientPickerView(selected: $gradient, coverImage: $coverImage)
         }
     }
 
@@ -95,7 +105,30 @@ struct EditProjectSheet: View {
         let trimmed = name.trimmingCharacters(in: .whitespaces)
         updated.name = trimmed.isEmpty ? "untitled project" : trimmed
         updated.gradient = gradient
+        updated.accentColorHex = store.resolvedAccentHex(gradient: gradient, coverImage: coverImage)
+
+        if let coverImage {
+            if updated.coverImageFileName != nil {
+                store.deleteCoverImage(fileName: updated.coverImageFileName)
+            }
+            if let previousCloudPath = updated.coverStoragePath {
+                store.deleteCoverFromCloud(storagePath: previousCloudPath)
+                updated.coverStoragePath = nil
+            }
+            updated.coverImageFileName = store.saveCoverImage(coverImage, projectID: project.id)
+        } else if updated.coverImageFileName != nil {
+            store.deleteCoverImage(fileName: updated.coverImageFileName)
+            updated.coverImageFileName = nil
+            if let previousCloudPath = updated.coverStoragePath {
+                store.deleteCoverFromCloud(storagePath: previousCloudPath)
+                updated.coverStoragePath = nil
+            }
+        }
+
         store.updateProject(updated)
+        if updated.coverImageFileName != nil {
+            store.enqueueCoverUpload(projectID: project.id)
+        }
         dismiss()
     }
 }

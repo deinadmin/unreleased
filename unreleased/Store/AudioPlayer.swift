@@ -526,7 +526,9 @@ final class AudioPlayer {
     }
 
     private func refreshNowPlayingArtwork(for project: Project) {
-        guard let image = project.gradient.artworkImage() else {
+        let image = store.coverImage(for: project)?.squareArtworkImage()
+            ?? project.gradient.artworkImage()
+        guard let image else {
             nowPlayingArtwork = nil
             return
         }

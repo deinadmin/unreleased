@@ -6,6 +6,7 @@ struct ContentView: View {
     @State private var player: AudioPlayer
     @State private var navigationPath = NavigationPath()
     @State private var toastCenter = PlayerToastCenter()
+    @State private var searchState = AppSearchState()
 
     /// Matches `safeAreaBar` clearance above the mini player.
     private let miniPlayerReservedHeight: CGFloat = 66
@@ -16,8 +17,12 @@ struct ContentView: View {
         player.currentTrack != nil && !player.isShowingNowPlaying
     }
 
+    private var showsBottomChrome: Bool {
+        searchState.isActive || showsMiniPlayer
+    }
+
     private var toastBottomInset: CGFloat {
-        showsMiniPlayer
+        showsBottomChrome
             ? miniPlayerReservedHeight + toastSpacingAbovePlayer
             : toastBottomInsetWithoutPlayer
     }
@@ -43,7 +48,7 @@ struct ContentView: View {
             }
             // Reserve room + native progressive blur under scroll content (iOS 26+)
             .safeAreaBar(edge: .bottom, spacing: 0) {
-                if player.currentTrack != nil, !player.isShowingNowPlaying {
+                if searchState.isActive || (player.currentTrack != nil && !player.isShowingNowPlaying) {
                     Color.clear.frame(height: 66)
                 }
             }
@@ -60,7 +65,7 @@ struct ContentView: View {
                 }
             }
 
-            if let toast = toastCenter.toast, !player.isShowingNowPlaying {
+            if let toast = toastCenter.toast, !player.isShowingNowPlaying, !searchState.isActive {
                 PlayerToastBanner(toast: toast)
                     .padding(.bottom, toastBottomInset)
                     .frame(maxWidth: .infinity)
@@ -73,8 +78,18 @@ struct ContentView: View {
                     )
             }
 
-            // ── Unified morphing player (mini ↔ full) ────────────────────────────
-            if player.currentTrack != nil {
+            // ── Mini player or search bar ────────────────────────────────────────
+            if searchState.isActive {
+                PlayerSearchBar()
+                    .frame(maxWidth: .infinity, alignment: .bottom)
+                    .zIndex(3)
+                    .transition(
+                        .asymmetric(
+                            insertion: .opacity.combined(with: .offset(y: 10)),
+                            removal: .opacity.combined(with: .offset(y: 8))
+                        )
+                    )
+            } else if player.currentTrack != nil {
                 PlayerView()
                     .environment(player)
                     .environment(store)
@@ -93,6 +108,8 @@ struct ContentView: View {
         .environment(store)
         .environment(player)
         .environment(toastCenter)
+        .environment(searchState)
+        .animation(.spring(response: 0.38, dampingFraction: 0.86), value: searchState.isActive)
         .environment(\.navigateToTrackNotes) { trackID, projectID in
             navigationPath.append(TrackNotesRoute(trackID: trackID, projectID: projectID))
         }

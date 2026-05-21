@@ -6,6 +6,7 @@ struct CreateProjectSheet: View {
 
     @State private var name: String = ""
     @State private var gradient: GradientTheme = .random()
+    @State private var coverImage: UIImage?
     @State private var isShowingDocumentPicker = false
     @State private var isImporting = false
     @FocusState private var nameIsFocused: Bool
@@ -27,13 +28,19 @@ struct CreateProjectSheet: View {
             .navigationTitle("New Project")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
+                ToolbarItem(placement: .topBarLeading) {
                     Button("Cancel") { dismiss() }
+                        .buttonStyle(.borderless)
+                        .fixedSize(horizontal: true, vertical: false)
+                        .padding(8)
                 }
-                ToolbarItem(placement: .confirmationAction) {
+                ToolbarItem(placement: .topBarTrailing) {
                     Button("Create") { createProject() }
+                        .buttonStyle(.borderless)
                         .fontWeight(.semibold)
                         .disabled(trimmedName.isEmpty)
+                        .fixedSize(horizontal: true, vertical: false)
+                        .padding(8)
                 }
             }
         }
@@ -45,10 +52,12 @@ struct CreateProjectSheet: View {
     @ViewBuilder
     private var coverPreview: some View {
         VStack(spacing: 12) {
-            ProjectCoverView(gradient: gradient, size: 160, cornerRadius: 20, showVinyl: true)
+            ProjectCoverView(gradient: gradient, coverImage: coverImage, size: 160, cornerRadius: 20, showVinyl: true)
                 .animation(.smooth(duration: 0.35), value: gradient)
+                .animation(.smooth(duration: 0.35), value: coverImage != nil)
 
             Button {
+                coverImage = nil
                 gradient = .random()
             } label: {
                 Label("Randomize", systemImage: "shuffle")
@@ -84,18 +93,25 @@ struct CreateProjectSheet: View {
     @ViewBuilder
     private var gradientSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Cover Color")
+            Text("Cover")
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(.secondary)
 
-            GradientPickerView(selected: $gradient)
+            GradientPickerView(selected: $gradient, coverImage: $coverImage)
         }
     }
 
     private func createProject() {
         let finalName = trimmedName.isEmpty ? "untitled project" : trimmedName
-        let project = Project(name: finalName, gradient: gradient)
+        var project = Project(name: finalName, gradient: gradient)
+        project.accentColorHex = store.resolvedAccentHex(gradient: gradient, coverImage: coverImage)
+        if let coverImage, let fileName = store.saveCoverImage(coverImage, projectID: project.id) {
+            project.coverImageFileName = fileName
+        }
         store.addProject(project)
+        if project.coverImageFileName != nil {
+            store.enqueueCoverUpload(projectID: project.id)
+        }
         onCreated?(project)
         dismiss()
     }

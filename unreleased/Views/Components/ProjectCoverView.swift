@@ -11,6 +11,7 @@ import SwiftUI
 /// `size = availableWidth / 1.375` to keep everything on screen.
 struct ProjectCoverView: View {
     let gradient: GradientTheme
+    var coverImage: UIImage? = nil
     var size: CGFloat = 260
     var cornerRadius: CGFloat = 20
     var showVinyl: Bool = true
@@ -23,6 +24,19 @@ struct ProjectCoverView: View {
 
     private static let layoutDuration: TimeInterval = 0.5
     private static let layoutAnimation = Animation.easeInOut(duration: layoutDuration)
+
+    @ViewBuilder
+    private var coverSquare: some View {
+        if let coverImage {
+            Image(uiImage: coverImage)
+                .resizable()
+                .scaledToFill()
+                .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+        } else {
+            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                .fill(gradient.gradient)
+        }
+    }
 
     @State private var isSpinning = false
     @State private var spinTask: Task<Void, Never>?
@@ -41,8 +55,7 @@ struct ProjectCoverView: View {
                     .offset(x: isPlaying ? vinylPlayX : 0)
             }
 
-            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                .fill(gradient.gradient)
+            coverSquare
                 .frame(width: size, height: size)
                 .shadow(color: .black.opacity(0.2), radius: 20, x: 0, y: 8)
                 .offset(x: isPlaying ? -shift : 0)
@@ -105,12 +118,22 @@ struct VinylRecordView: View {
 
 struct ProjectCoverThumbnail: View {
     let gradient: GradientTheme
+    var coverImage: UIImage? = nil
     var size: CGFloat = 56
     var cornerRadius: CGFloat = 12
 
     var body: some View {
-        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-            .fill(gradient.gradient)
-            .frame(width: size, height: size)
+        Group {
+            if let coverImage {
+                Image(uiImage: coverImage)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .fill(gradient.gradient)
+            }
+        }
+        .frame(width: size, height: size)
+        .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
     }
 }

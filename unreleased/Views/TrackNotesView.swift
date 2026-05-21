@@ -45,6 +45,7 @@ struct TrackNotesView: View {
             saveTask?.cancel()
             store.updateTrackNotes(draftNotes, trackID: trackID, projectID: projectID)
         }
+        .tint(project.map { store.accentColor(for: $0) } ?? .accentColor)
     }
 
     private var notesEditor: some View {

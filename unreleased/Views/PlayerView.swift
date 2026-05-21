@@ -136,7 +136,7 @@ struct PlayerView: View {
                 topTrailingRadius: cardTopTrailing,
                 style: .continuous
             )
-            .fill(Color(white: isExpanded ? 0.10 : 0.13))
+            .fill(isExpanded ? Color(white: 0.10) : PlayerChrome.surfaceBackground)
             .shadow(
                 color: .black.opacity(isExpanded ? 0.45 : 0.35),
                 radius: isExpanded ? 40 : 18,
@@ -181,7 +181,7 @@ struct PlayerView: View {
                         .foregroundStyle(.white)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 4)
-                        .background(Color.black, in: Capsule())
+                        .background(PlayerChrome.surfaceBackground, in: Capsule())
                         .fixedSize()
                         .transition(
                             .scale(scale: 0.88, anchor: .bottom)
@@ -234,6 +234,7 @@ struct PlayerView: View {
             ZStack {
                 PlayerCoverGradient(
                     gradient: project.gradient.gradient,
+                    coverImage: store.coverImage(for: project),
                     isExpanded: isExpanded,
                     isPlaying: player.isPlaying
                 )
@@ -546,6 +547,7 @@ struct PlayerView: View {
 
 private struct PlayerCoverGradient: View {
     let gradient: LinearGradient
+    var coverImage: UIImage? = nil
     let isExpanded: Bool
     let isPlaying: Bool
 
@@ -554,10 +556,19 @@ private struct PlayerCoverGradient: View {
     }
 
     var body: some View {
-        Circle()
-            .fill(gradient)
-            .scaleEffect(scale)
-            .animation(isExpanded ? .smooth(duration: 0.4) : nil, value: isPlaying)
+        Group {
+            if let coverImage {
+                Image(uiImage: coverImage)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                Circle()
+                    .fill(gradient)
+            }
+        }
+        .clipShape(Circle())
+        .scaleEffect(scale)
+        .animation(isExpanded ? .smooth(duration: 0.4) : nil, value: isPlaying)
     }
 }
 

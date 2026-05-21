@@ -29,6 +29,13 @@ final class ProjectStore {
         return folder
     }
 
+    var coverImagesURL: URL {
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let folder = docs.appendingPathComponent("CoverImages", isDirectory: true)
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        return folder
+    }
+
     private var syncService: ProjectSyncService?
     private var downloadTasks: [UUID: Task<Void, Never>] = [:]
     private var suppressSync = false
@@ -56,6 +63,7 @@ final class ProjectStore {
         let service = ProjectSyncService(
             userID: userID,
             audioDirectory: audioFilesURL,
+            coverDirectory: coverImagesURL,
             snapshotProvider: { [weak self] in
                 self?.projects ?? []
             },
@@ -64,6 +72,9 @@ final class ProjectStore {
             },
             trackUpdater: { [weak self] projectID, track, persistLocally in
                 self?.applyTrackUpdate(track, projectID: projectID, persistLocally: persistLocally)
+            },
+            projectPatcher: { [weak self] projectID, patch, persistLocally in
+                self?.applyProjectPatch(projectID: projectID, patch: patch, persistLocally: persistLocally)
             },
             projectRemover: { [weak self] projectID, persistLocally in
                 self?.removeProjectLocally(id: projectID, persistLocally: persistLocally)
@@ -96,6 +107,8 @@ final class ProjectStore {
             deleteAudioFile(fileName: $0.fileName)
             deleteDownloadedFile(fileName: $0.fileName)
         }
+        deleteCoverImage(fileName: project.coverImageFileName)
+        deleteCoverFromCloud(storagePath: project.coverStoragePath)
         projects.removeAll { $0.id == project.id }
         save()
 
@@ -152,6 +165,70 @@ final class ProjectStore {
         projects[destIdx].tracks.append(track)
         projects[destIdx].updatedDate = Date()
         save()
+    }
+
+    // MARK: - Cover images
+
+    func coverImage(for project: Project) -> UIImage? {
+        loadCoverImage(fileName: project.coverImageFileName)
+    }
+
+    func loadCoverImage(fileName: String?) -> UIImage? {
+        guard let fileName else { return nil }
+        let url = coverImagesURL.appendingPathComponent(fileName)
+        guard let data = try? Data(contentsOf: url) else { return nil }
+        return UIImage(data: data)
+    }
+
+    @discardableResult
+    func saveCoverImage(_ image: UIImage, projectID: UUID) -> String? {
+        let fileName = "\(projectID.uuidString).jpg"
+        let url = coverImagesURL.appendingPathComponent(fileName)
+        guard let data = image.jpegData(compressionQuality: 0.85) else { return nil }
+        do {
+            try data.write(to: url, options: .atomic)
+            return fileName
+        } catch {
+            print("ProjectStore: cover save failed — \(error)")
+            return nil
+        }
+    }
+
+    func deleteCoverImage(fileName: String?) {
+        guard let fileName else { return }
+        let url = coverImagesURL.appendingPathComponent(fileName)
+        try? FileManager.default.removeItem(at: url)
+    }
+
+    func accentColor(for project: Project) -> Color {
+        if let image = coverImage(for: project) {
+            return ProjectAccentColor.color(hex: ProjectAccentColor.hex(from: image))
+        }
+        return ProjectAccentColor.color(hex: ProjectAccentColor.hex(from: project.gradient))
+    }
+
+    func resolvedAccentHex(gradient: GradientTheme, coverImage: UIImage?) -> String {
+        if let coverImage {
+            return ProjectAccentColor.hex(from: coverImage)
+        }
+        return ProjectAccentColor.hex(from: gradient)
+    }
+
+    func enqueueCoverUpload(projectID: UUID) {
+        syncService?.enqueueCoverUpload(projectID: projectID)
+    }
+
+    func deleteCoverFromCloud(storagePath: String?) {
+        guard let storagePath else { return }
+        let service = syncService
+        Task { await service?.deleteCoverFromCloud(storagePath: storagePath) }
+    }
+
+    func hasLocalCoverFile(for project: Project) -> Bool {
+        guard let fileName = project.coverImageFileName else { return false }
+        return FileManager.default.fileExists(
+            atPath: coverImagesURL.appendingPathComponent(fileName).path
+        )
     }
 
     // MARK: - Audio Import
@@ -284,6 +361,17 @@ final class ProjectStore {
         save()
     }
 
+    func updateTrackTitle(_ title: String, trackID: UUID, projectID: UUID) {
+        guard let pIdx = projects.firstIndex(where: { $0.id == projectID }),
+              let tIdx = projects[pIdx].tracks.firstIndex(where: { $0.id == trackID })
+        else { return }
+
+        guard projects[pIdx].tracks[tIdx].title != title else { return }
+        projects[pIdx].tracks[tIdx].title = title
+        projects[pIdx].updatedDate = Date()
+        save()
+    }
+
     /// Analyzes waveform from a local audio file. Call after playback has cached the track. Never synced to Firestore.
     func analyzeWaveformIfNeeded(for track: Track, in projectID: UUID) {
         guard track.waveformData == nil,
@@ -364,6 +452,29 @@ final class ProjectStore {
             persistLocalOnly()
         }
         suppressSync = false
+        syncService?.schedulePush()
+
+        for project in projects where project.coverStoragePath != nil {
+            syncService?.enqueueCoverDownload(projectID: project.id)
+        }
+    }
+
+    private func applyProjectPatch(
+        projectID: UUID,
+        patch: ProjectSyncService.ProjectPatch,
+        persistLocally: Bool
+    ) {
+        guard let index = projects.firstIndex(where: { $0.id == projectID }) else { return }
+        if let coverStoragePath = patch.coverStoragePath {
+            projects[index].coverStoragePath = coverStoragePath
+        }
+        if let accentColorHex = patch.accentColorHex {
+            projects[index].accentColorHex = accentColorHex
+        }
+        projects[index].updatedDate = Date()
+        if persistLocally {
+            persistLocalOnly()
+        }
     }
 
     private func applyTrackUpdate(_ track: Track, projectID: UUID, persistLocally: Bool) {

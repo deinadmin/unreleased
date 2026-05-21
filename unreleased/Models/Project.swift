@@ -33,10 +33,13 @@ struct GradientTheme: Codable, Hashable, Sendable {
         GradientTheme(colors: ["#11998E", "#38EF7D"], startX: 0, startY: 0, endX: 1, endY: 1),
         GradientTheme(colors: ["#2980B9", "#8E44AD"], startX: 0, startY: 0, endX: 1, endY: 1),
         GradientTheme(colors: ["#FFECD2", "#FCB69F"], startX: 0, startY: 1, endX: 1, endY: 0),
-        GradientTheme(colors: ["#FFF1EB", "#ACE0F9"], startX: 0, startY: 0, endX: 1, endY: 1),
         GradientTheme(colors: ["#D4FC79", "#96E6A1"], startX: 0, startY: 0, endX: 1, endY: 1),
         GradientTheme(colors: ["#E0C3FC", "#8EC5FC"], startX: 0, startY: 0, endX: 1, endY: 1),
         GradientTheme(colors: ["#F77062", "#FE5196"], startX: 0, startY: 0, endX: 1, endY: 1),
+        GradientTheme(colors: ["#43E97B", "#38F9D7"], startX: 0, startY: 0, endX: 1, endY: 1),
+        GradientTheme(colors: ["#FA709A", "#FEE140"], startX: 0, startY: 0, endX: 1, endY: 1),
+        GradientTheme(colors: ["#30CFD0", "#330867"], startX: 0, startY: 0, endX: 1, endY: 1),
+        GradientTheme(colors: ["#89F7FE", "#66A6FF"], startX: 0, startY: 0, endX: 1, endY: 1),
     ]
 
     static func random() -> GradientTheme {
@@ -132,6 +135,12 @@ struct Project: Identifiable, Codable, Sendable {
     var id: UUID
     var name: String
     var gradient: GradientTheme
+    /// Local filename in the app's CoverImages directory. Nil when using gradient only.
+    var coverImageFileName: String?
+    /// Firebase Storage path for the cover image. Nil until uploaded.
+    var coverStoragePath: String?
+    /// Hex accent used for the active track and notes editor (e.g. `#667EEA`).
+    var accentColorHex: String?
     var tracks: [Track]
     var createdDate: Date
     var updatedDate: Date
@@ -140,6 +149,9 @@ struct Project: Identifiable, Codable, Sendable {
         id: UUID = UUID(),
         name: String = "untitled project",
         gradient: GradientTheme = .random(),
+        coverImageFileName: String? = nil,
+        coverStoragePath: String? = nil,
+        accentColorHex: String? = nil,
         tracks: [Track] = [],
         createdDate: Date = Date(),
         updatedDate: Date = Date()
@@ -147,6 +159,9 @@ struct Project: Identifiable, Codable, Sendable {
         self.id = id
         self.name = name
         self.gradient = gradient
+        self.coverImageFileName = coverImageFileName
+        self.coverStoragePath = coverStoragePath
+        self.accentColorHex = accentColorHex
         self.tracks = tracks
         self.createdDate = createdDate
         self.updatedDate = updatedDate
@@ -157,6 +172,7 @@ struct Project: Identifiable, Codable, Sendable {
     }
 
     var formattedDuration: String {
+        if tracks.isEmpty { return "0 min" }
         let total = Int(totalDuration)
         let minutes = total / 60
         if minutes == 0 { return "< 1 min" }
@@ -166,9 +182,29 @@ struct Project: Identifiable, Codable, Sendable {
     var trackCountText: String {
         tracks.count == 1 ? "1 track" : "\(tracks.count) tracks"
     }
+
+    var usesCoverImage: Bool {
+        coverImageFileName != nil || coverStoragePath != nil
+    }
 }
 
 // MARK: - Color hex helper
+
+extension UIImage {
+    @MainActor
+    func squareArtworkImage(size: CGFloat = 600) -> UIImage? {
+        let renderer = ImageRenderer(
+            content: Image(uiImage: self)
+                .resizable()
+                .scaledToFill()
+                .frame(width: size, height: size)
+                .clipped()
+        )
+        renderer.scale = 2
+        renderer.isOpaque = true
+        return renderer.uiImage
+    }
+}
 
 extension Color {
     init(hex: String) {

@@ -18,7 +18,15 @@ enum CloudPaths {
         "users/\(userID)/audio/\(trackID.uuidString.lowercased()).\(fileExtension)"
     }
 
-    static func audioReference(storagePath: String) -> StorageReference {
+    static func coverStoragePath(userID: String, projectID: UUID) -> String {
+        "users/\(userID)/covers/\(projectID.uuidString.lowercased()).jpg"
+    }
+
+    static func storageReference(storagePath: String) -> StorageReference {
         Storage.storage().reference(withPath: storagePath)
+    }
+
+    static func audioReference(storagePath: String) -> StorageReference {
+        storageReference(storagePath: storagePath)
     }
 }
