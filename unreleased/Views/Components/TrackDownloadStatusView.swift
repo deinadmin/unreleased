@@ -6,14 +6,13 @@ struct TrackDownloadStatusView: View {
     let track: Track
 
     var body: some View {
-        if store.isDownloading(track.id) {
-            ProgressView()
-                .scaleEffect(0.55)
-                .frame(width: 12, height: 12)
-        } else if store.isTrackDownloaded(track) {
-            Image(systemName: "arrow.down.circle.fill")
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
+        if store.isDownloading(track.id) || store.isTrackDownloaded(track) {
+            DownloadCircleIndicator(
+                symbolPointSize: 11,
+                isDownloading: store.isDownloading(track.id),
+                isFilled: store.isTrackDownloaded(track),
+                iconColor: .secondary
+            )
         }
     }
 }

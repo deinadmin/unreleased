@@ -84,9 +84,6 @@ struct ProjectDetailView: View {
         } message: {
             Text("This will permanently delete the project and all of its tracks.")
         }
-        .onDisappear {
-            searchState.deactivateIfMatching(scope: .project(projectID))
-        }
     }
 
     // MARK: - Main content
@@ -96,6 +93,7 @@ struct ProjectDetailView: View {
         ScrollView {
             VStack(spacing: 0) {
                 headerSection(project: project)
+                    .equatable()
                     .padding(.horizontal, 20)
                     .padding(.top, 24)
                     .onScrollVisibilityChange(threshold: 0.1) { visible in
@@ -116,47 +114,21 @@ struct ProjectDetailView: View {
         player.currentProject?.id == project.id && player.isPlaying
     }
 
-    @ViewBuilder
-    private func headerSection(project: Project) -> some View {
-        VStack(spacing: 0) {
-            // Total visual width when playing = size × 1.375, so:
-            //   size = availableWidth / 1.375
-            // This keeps the cover + vinyl within the padded container in both states.
-            GeometryReader { geo in
-                let coverSize = geo.size.width / 1.375
-                ProjectCoverView(
-                    gradient: project.gradient,
-                    coverImage: store.coverImage(for: project),
-                    size: coverSize,
-                    cornerRadius: 20,
-                    showVinyl: true,
-                    isPlaying: isThisProjectPlaying(project)
-                )
-                // Center the square frame inside the GeometryReader.
-                .frame(width: geo.size.width, height: coverSize, alignment: .center)
-            }
-            // height = width / 1.375 matches the cover square height.
-            .aspectRatio(1.375, contentMode: .fit)
+    private func headerDownloadState(for project: Project) -> ProjectHeaderDownloadState {
+        ProjectHeaderDownloadState(
+            isDownloading: project.tracks.contains { store.isDownloading($0.id) },
+            isFullyDownloaded: store.projectIsFullyDownloaded(project),
+            hasPendingDownloads: store.projectHasPendingDownloads(project)
+        )
+    }
 
-            HStack(alignment: .center) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(project.name)
-                        .font(.system(size: 26, weight: .bold))
-                        .foregroundStyle(.primary)
-
-                    HStack(spacing: 4) {
-                        Text("carlowav • \(project.trackCountText) • \(project.formattedDuration)")
-                            .font(.system(size: 14))
-                            .foregroundStyle(.secondary)
-                    }
-                }
-
-                Spacer()
-
-                PlayButton(project: project)
-            }
-            .padding(.top, 16)
-        }
+    private func headerSection(project: Project) -> ProjectDetailHeaderSection {
+        ProjectDetailHeaderSection(
+            project: project,
+            coverImage: store.coverImage(for: project),
+            isPlaying: isThisProjectPlaying(project),
+            downloadState: headerDownloadState(for: project)
+        )
     }
 
     @ViewBuilder
@@ -272,23 +244,15 @@ struct ProjectDetailView: View {
 
                 Menu {
                     Button {
+                        isShowingDocumentPicker = true
+                    } label: {
+                        Label("Add tracks", systemImage: "plus")
+                    }
+                    .disabled(isImporting)
+                    Button {
                         isShowingEdit = true
                     } label: {
                         Label("Edit", systemImage: "pencil")
-                    }
-                    if store.projectHasPendingDownloads(project) {
-                        Button {
-                            store.downloadProject(project.id)
-                        } label: {
-                            Label("Download", systemImage: "arrow.down.circle")
-                        }
-                    }
-                    if store.projectIsFullyDownloaded(project) {
-                        Button {
-                            store.removeProjectDownloads(project.id)
-                        } label: {
-                            Label("Remove Downloads", systemImage: "arrow.down.circle.fill")
-                        }
                     }
                     Button(role: .destructive) {
                         showDeleteConfirm = true
@@ -338,6 +302,132 @@ struct ProjectDetailView: View {
         }
         store.deleteProject(project)
         dismiss()
+    }
+}
+
+// MARK: - Project header (isolated from search-driven list updates)
+
+private struct ProjectHeaderDownloadState: Equatable {
+    var isDownloading: Bool
+    var isFullyDownloaded: Bool
+    var hasPendingDownloads: Bool
+}
+
+private struct ProjectDetailHeaderSection: View, Equatable {
+    let project: Project
+    let coverImage: UIImage?
+    let isPlaying: Bool
+    let downloadState: ProjectHeaderDownloadState
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.project.id == rhs.project.id
+            && lhs.isPlaying == rhs.isPlaying
+            && lhs.project.name == rhs.project.name
+            && lhs.project.trackCountText == rhs.project.trackCountText
+            && lhs.project.formattedDuration == rhs.project.formattedDuration
+            && lhs.project.gradient == rhs.project.gradient
+            && lhs.coverImage === rhs.coverImage
+            && lhs.downloadState == rhs.downloadState
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // Total visual width when playing = size × 1.375, so:
+            //   size = availableWidth / 1.375
+            // This keeps the cover + vinyl within the padded container in both states.
+            GeometryReader { geo in
+                let coverSize = geo.size.width / 1.375
+                ProjectCoverView(
+                    gradient: project.gradient,
+                    coverImage: coverImage,
+                    size: coverSize,
+                    cornerRadius: 20,
+                    showVinyl: true,
+                    isPlaying: isPlaying
+                )
+                .frame(width: geo.size.width, height: coverSize, alignment: .center)
+            }
+            .aspectRatio(1.375, contentMode: .fit)
+
+            HStack(alignment: .center) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(project.name)
+                        .font(.system(size: 26, weight: .bold))
+                        .foregroundStyle(.primary)
+
+                    HStack(spacing: 4) {
+                        Text("carlowav • \(project.trackCountText) • \(project.formattedDuration)")
+                            .font(.system(size: 14))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Spacer()
+
+                HStack(spacing: 8) {
+                    ProjectDownloadButton(project: project, downloadState: downloadState)
+                    PlayButton(project: project)
+                }
+            }
+            .padding(.top, 16)
+        }
+    }
+}
+
+// MARK: - Project download button
+
+private struct ProjectDownloadButton: View {
+    @Environment(ProjectStore.self) private var store
+
+    let project: Project
+    let downloadState: ProjectHeaderDownloadState
+
+    @State private var showRemoveDownloadConfirm = false
+
+    private var isVisible: Bool {
+        !project.tracks.isEmpty
+            && (downloadState.isDownloading
+                || downloadState.isFullyDownloaded
+                || downloadState.hasPendingDownloads)
+    }
+
+    var body: some View {
+        if isVisible {
+            Button(action: tap) {
+                DownloadCircleIndicator(
+                    symbolPointSize: 22,
+                    isDownloading: downloadState.isDownloading,
+                    isFilled: downloadState.isFullyDownloaded
+                )
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(downloadState.isDownloading)
+            .accessibilityLabel(downloadAccessibilityLabel)
+            .alert("Remove Downloads?", isPresented: $showRemoveDownloadConfirm) {
+                Button("Remove", role: .destructive) {
+                    store.removeProjectDownloads(project.id)
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("All offline copies for this project will be deleted from your device.")
+            }
+        }
+    }
+
+    private var downloadAccessibilityLabel: String {
+        if downloadState.isDownloading { return "Downloading project" }
+        if downloadState.isFullyDownloaded { return "Remove project downloads" }
+        return "Download project"
+    }
+
+    private func tap() {
+        if downloadState.isFullyDownloaded {
+            showRemoveDownloadConfirm = true
+        } else {
+            store.downloadProject(project.id)
+        }
     }
 }
 

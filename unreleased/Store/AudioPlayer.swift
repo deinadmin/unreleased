@@ -540,7 +540,7 @@ final class AudioPlayer {
         guard let track = currentTrack, let project = currentProject else { return }
         var info: [String: Any] = [
             MPMediaItemPropertyTitle: track.title,
-            MPMediaItemPropertyAlbumTitle: project.name,
+            MPMediaItemPropertyArtist: project.name,
             MPNowPlayingInfoPropertyElapsedPlaybackTime: currentTime,
             MPMediaItemPropertyPlaybackDuration: duration,
             MPNowPlayingInfoPropertyPlaybackRate: isPlaying ? 1.0 : 0.0,

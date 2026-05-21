@@ -24,6 +24,23 @@ final class AuthManager {
         return nil
     }
 
+    var displayName: String {
+        if let name = user?.displayName?.trimmingCharacters(in: .whitespaces), !name.isEmpty {
+            return name
+        }
+        if let email = user?.email,
+           let local = email.split(separator: "@").first,
+           !local.isEmpty {
+            return String(local)
+        }
+        if let label = accountLabel { return label }
+        return "Account"
+    }
+
+    var photoURL: URL? {
+        user?.photoURL
+    }
+
     /// Listener handle is removed from `deinit` (nonisolated); storage must not be MainActor-only.
     nonisolated(unsafe) private var authListener: AuthStateDidChangeListenerHandle?
     private var currentNonce: String?

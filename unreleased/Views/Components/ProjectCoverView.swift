@@ -40,6 +40,24 @@ struct ProjectCoverView: View {
 
     @State private var isSpinning = false
     @State private var spinTask: Task<Void, Never>?
+    @State private var layoutIsPlaying: Bool
+
+    init(
+        gradient: GradientTheme,
+        coverImage: UIImage? = nil,
+        size: CGFloat = 260,
+        cornerRadius: CGFloat = 20,
+        showVinyl: Bool = true,
+        isPlaying: Bool = false
+    ) {
+        self.gradient = gradient
+        self.coverImage = coverImage
+        self.size = size
+        self.cornerRadius = cornerRadius
+        self.showVinyl = showVinyl
+        self.isPlaying = isPlaying
+        _layoutIsPlaying = State(initialValue: isPlaying)
+    }
 
     var body: some View {
         ZStack {
@@ -52,33 +70,44 @@ struct ProjectCoverView: View {
                             : .linear(duration: 0),   // instant reset — vinyl is hidden at this point
                         value: isSpinning
                     )
-                    .offset(x: isPlaying ? vinylPlayX : 0)
+                    .offset(x: layoutIsPlaying ? vinylPlayX : 0)
             }
 
             coverSquare
                 .frame(width: size, height: size)
                 .shadow(color: .black.opacity(0.2), radius: 20, x: 0, y: 8)
-                .offset(x: isPlaying ? -shift : 0)
+                .offset(x: layoutIsPlaying ? -shift : 0)
         }
-        .animation(Self.layoutAnimation, value: isPlaying)
+        .geometryGroup()
         .frame(width: size, height: size)
-        .onChange(of: isPlaying, initial: true) { _, playing in
-            spinTask?.cancel()
-            if playing {
-                // One frame at 0° so repeatForever always starts from a clean origin.
+        .onAppear {
+            updateSpinning(isPlaying, restartRotation: !isSpinning)
+        }
+        .onChange(of: isPlaying) { _, playing in
+            withAnimation(Self.layoutAnimation) {
+                layoutIsPlaying = playing
+            }
+            updateSpinning(playing, restartRotation: true)
+        }
+    }
+
+    private func updateSpinning(_ playing: Bool, restartRotation: Bool) {
+        spinTask?.cancel()
+        if playing {
+            guard restartRotation else { return }
+            // One frame at 0° so repeatForever always starts from a clean origin.
+            isSpinning = false
+            spinTask = Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(16))
+                guard !Task.isCancelled, isPlaying else { return }
+                isSpinning = true
+            }
+        } else {
+            // Keep spinning through the slide-in; reset only once hidden behind the cover.
+            spinTask = Task { @MainActor in
+                try? await Task.sleep(for: .seconds(Self.layoutDuration))
+                guard !Task.isCancelled, !isPlaying else { return }
                 isSpinning = false
-                spinTask = Task { @MainActor in
-                    try? await Task.sleep(for: .milliseconds(16))
-                    guard !Task.isCancelled, isPlaying else { return }
-                    isSpinning = true
-                }
-            } else {
-                // Keep spinning through the slide-in; reset only once hidden behind the cover.
-                spinTask = Task { @MainActor in
-                    try? await Task.sleep(for: .seconds(Self.layoutDuration))
-                    guard !Task.isCancelled, !isPlaying else { return }
-                    isSpinning = false
-                }
             }
         }
     }

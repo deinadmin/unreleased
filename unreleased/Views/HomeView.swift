@@ -3,11 +3,9 @@ import SwiftUI
 struct HomeView: View {
     @Environment(ProjectStore.self) private var store
     @Environment(AudioPlayer.self) private var player
-    @Environment(AuthManager.self) private var auth
     @Environment(AppSearchState.self) private var searchState
 
     @State private var isShowingCreate = false
-    @State private var isShowingAccount = false
     @State private var isShowingDocumentPicker = false
     @State private var isImporting = false
     @State private var navigateToProjectID: UUID? = nil
@@ -44,9 +42,6 @@ struct HomeView: View {
         }
         .navigationTitle("unreleased")
         .toolbar { toolbarContent }
-        .onDisappear {
-            searchState.deactivateIfMatching(scope: .library)
-        }
         .sheet(isPresented: $isShowingCreate) {
             CreateProjectSheet { project in
                 navigateToProjectID = project.id
@@ -60,18 +55,6 @@ struct HomeView: View {
                 },
                 onCancel: { isShowingDocumentPicker = false }
             )
-        }
-        .confirmationDialog("Account", isPresented: $isShowingAccount, titleVisibility: .visible) {
-            Button("Sign Out", role: .destructive) {
-                player.stop()
-                store.configureSync(userID: nil)
-                auth.signOut()
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            if let label = auth.accountLabel {
-                Text("Signed in as \(label)")
-            }
         }
     }
 
@@ -132,7 +115,7 @@ struct HomeView: View {
                     NavigationLink(value: project.id) {
                         ProjectCard(project: project)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.scale)
                 }
             }
             .padding(.horizontal, 20)
@@ -164,13 +147,12 @@ struct HomeView: View {
                         .frame(width: 32, height: 32)
                 }
 
-                Button {
-                    isShowingAccount = true
-                } label: {
+                NavigationLink(value: ProfileRoute()) {
                     Image(systemName: "person")
                         .font(.system(size: 14, weight: .medium))
                         .frame(width: 32, height: 32)
                 }
+                .buttonStyle(.plain)
             }
         }
 

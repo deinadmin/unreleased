@@ -15,6 +15,7 @@ struct TrackInfoSheet: View {
     @State private var detentBeforeMove: PresentationDetent = .medium
     @State private var isShowingMove = false
     @State private var showDeleteConfirm = false
+    @State private var showRemoveDownloadConfirm = false
     @State private var showRenameAlert = false
     @State private var renameText = ""
 
@@ -70,6 +71,14 @@ struct TrackInfoSheet: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("This will remove the track from the project.")
+        }
+        .alert("Remove Download?", isPresented: $showRemoveDownloadConfirm) {
+            Button("Remove", role: .destructive) {
+                store.removeDownload(liveTrack, in: project.id)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("The offline copy of this track will be deleted from your device.")
         }
     }
 
@@ -191,7 +200,7 @@ struct TrackInfoSheet: View {
 
         if store.isTrackDownloaded(liveTrack) {
             actions.append(TrackInfoAction(title: "Remove download", systemImage: "arrow.down.circle.fill") {
-                store.removeDownload(liveTrack, in: project.id)
+                showRemoveDownloadConfirm = true
             })
         } else if store.isDownloading(liveTrack.id) {
             actions.append(TrackInfoAction(title: "Downloading…", systemImage: "arrow.down.circle") {})

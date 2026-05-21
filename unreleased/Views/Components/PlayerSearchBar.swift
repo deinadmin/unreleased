@@ -1,5 +1,4 @@
 import SwiftUI
-import UIKit
 
 /// Bottom bar shown in place of the mini player while search is active.
 struct PlayerSearchBar: View {
@@ -53,6 +52,7 @@ struct PlayerSearchBar: View {
             .autocorrectionDisabled()
             .focused($isFocused)
             .submitLabel(.search)
+            .onSubmit(submitSearch)
         }
         .padding(.leading, leadingInset)
         .padding(.trailing, endCapRadius + closeSize / 2 + 6)
@@ -70,10 +70,11 @@ struct PlayerSearchBar: View {
                 }
                 .frame(width: closeSize, height: closeSize)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.scale)
             .accessibilityLabel("Close search")
             .padding(.trailing, closeTrailingInset)
         }
+        .geometryGroup()
         .shadow(
             color: .black.opacity(isDark ? 0.35 : 0.12),
             radius: isDark ? 18 : 10,
@@ -83,24 +84,21 @@ struct PlayerSearchBar: View {
         .padding(.horizontal, sideMargin)
         .padding(.bottom, 8)
         .onAppear {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+            // Next run loop — TextField must be in the hierarchy before focus sticks.
+            DispatchQueue.main.async {
                 isFocused = true
             }
         }
     }
 
+    private func submitSearch() {
+        guard searchState.text.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+        closeSearch()
+    }
+
     private func closeSearch() {
         isFocused = false
-        UIApplication.shared.sendAction(
-            #selector(UIResponder.resignFirstResponder),
-            to: nil,
-            from: nil,
-            for: nil
-        )
-        Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(280))
-            searchState.deactivate(dismissKeyboard: false)
-        }
+        searchState.deactivate(dismissKeyboard: true)
     }
 }
 

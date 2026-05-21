@@ -1,7 +1,7 @@
 import SwiftUI
 import UIKit
 
-/// Unified mini ↔ full player: one card shape morphs in place (no insert/remove swap).
+/// Unified mini ↔ full player: one card shape morphs in place.
 struct PlayerView: View {
     @Environment(AudioPlayer.self) private var player
     @Environment(ProjectStore.self) private var store
