@@ -9,6 +9,7 @@ struct EditProjectSheet: View {
     @State private var name: String = ""
     @State private var gradient: GradientTheme = GradientTheme.presets[0]
     @State private var coverImage: UIImage?
+    @State private var previewVinylGradient: GradientTheme? = nil
     @FocusState private var nameIsFocused: Bool
 
     var body: some View {
@@ -43,13 +44,25 @@ struct EditProjectSheet: View {
             name = project.name
             gradient = project.gradient
             coverImage = store.coverImage(for: project)
+            if let img = store.coverImage(for: project) {
+                let (start, end) = ProjectAccentColor.gradientHexPair(from: img)
+                previewVinylGradient = GradientTheme(colors: [start, end], startX: 0, startY: 0, endX: 1, endY: 1)
+            }
+        }
+        .onChange(of: coverImage) { _, newImage in
+            if let newImage {
+                let (start, end) = ProjectAccentColor.gradientHexPair(from: newImage)
+                previewVinylGradient = GradientTheme(colors: [start, end], startX: 0, startY: 0, endX: 1, endY: 1)
+            } else {
+                previewVinylGradient = nil
+            }
         }
     }
 
     @ViewBuilder
     private var coverPreview: some View {
         VStack(spacing: 12) {
-            ProjectCoverView(gradient: gradient, coverImage: coverImage, size: 160, cornerRadius: 20, showVinyl: true)
+            ProjectCoverView(gradient: gradient, coverImage: coverImage, vinylGradient: previewVinylGradient, size: 160, cornerRadius: 20, showVinyl: true)
                 .animation(.smooth(duration: 0.35), value: gradient)
                 .animation(.smooth(duration: 0.35), value: coverImage != nil)
 
@@ -106,6 +119,7 @@ struct EditProjectSheet: View {
         updated.name = trimmed.isEmpty ? "untitled project" : trimmed
         updated.gradient = gradient
         updated.accentColorHex = store.resolvedAccentHex(gradient: gradient, coverImage: coverImage)
+        updated.coverGradientColors = store.resolvedCoverGradientColors(coverImage: coverImage)
 
         if let coverImage {
             if updated.coverImageFileName != nil {

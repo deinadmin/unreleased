@@ -10,10 +10,25 @@ struct HomeView: View {
     @State private var isImporting = false
     @State private var navigateToProjectID: UUID? = nil
 
+    @State private var contextMenuProject: Project? = nil
+    @State private var isShowingContextEdit = false
+    @State private var isShowingContextDocumentPicker = false
+    @State private var showContextDeleteConfirm = false
+    @State private var isImportingToExisting = false
+
     private let columns = [
         GridItem(.flexible(), spacing: 16),
         GridItem(.flexible(), spacing: 16),
     ]
+
+    private var showsBottomChrome: Bool {
+        searchState.isActive || (player.currentTrack != nil && !player.isShowingNowPlaying)
+    }
+
+    /// Extra scroll inset when the floating mini player or search bar is visible (matches project detail).
+    private var scrollBottomPadding: CGFloat {
+        showsBottomChrome ? 100 : 24
+    }
 
     private var filteredProjects: [Project] {
         let query = searchState.text.trimmingCharacters(in: .whitespaces)
@@ -55,6 +70,34 @@ struct HomeView: View {
                 },
                 onCancel: { isShowingDocumentPicker = false }
             )
+        }
+        .sheet(isPresented: $isShowingContextEdit) {
+            if let project = contextMenuProject {
+                EditProjectSheet(project: project)
+            }
+        }
+        .sheet(isPresented: $isShowingContextDocumentPicker) {
+            if let project = contextMenuProject {
+                DocumentPicker(
+                    onPick: { urls in
+                        isShowingContextDocumentPicker = false
+                        importTracksToExisting(urls: urls, into: project)
+                    },
+                    onCancel: { isShowingContextDocumentPicker = false }
+                )
+            }
+        }
+        .alert("Delete Project?", isPresented: $showContextDeleteConfirm) {
+            Button("Delete", role: .destructive) {
+                if let project = contextMenuProject {
+                    if player.currentProject?.id == project.id { player.stop() }
+                    store.deleteProject(project)
+                    contextMenuProject = nil
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This will permanently delete the project and all of its tracks.")
         }
     }
 
@@ -116,12 +159,35 @@ struct HomeView: View {
                         ProjectCard(project: project)
                     }
                     .buttonStyle(.scale)
+                    .contextMenu {
+                        Button {
+                            contextMenuProject = project
+                            isShowingContextDocumentPicker = true
+                        } label: {
+                            Label("Add Tracks", systemImage: "plus")
+                        }
+
+                        Button {
+                            contextMenuProject = project
+                            isShowingContextEdit = true
+                        } label: {
+                            Label("Edit", systemImage: "pencil")
+                        }
+
+                        Button(role: .destructive) {
+                            contextMenuProject = project
+                            showContextDeleteConfirm = true
+                        } label: {
+                            Label("Delete", systemImage: "trash")
+                        }
+                    }
                 }
             }
             .padding(.horizontal, 20)
             .padding(.top, 8)
-            .padding(.bottom, 24)
+            .padding(.bottom, scrollBottomPadding)
         }
+        .animation(.smooth(duration: 0.35), value: scrollBottomPadding)
     }
 
     // MARK: - Toolbar
@@ -170,6 +236,19 @@ struct HomeView: View {
     }
 
     // MARK: - Import helpers
+
+    private func importTracksToExisting(urls: [URL], into project: Project) {
+        guard !urls.isEmpty else { return }
+        isImportingToExisting = true
+        Task {
+            for url in urls {
+                if let track = try? await store.importAudioFile(from: url) {
+                    store.addTrack(track, to: project.id)
+                }
+            }
+            isImportingToExisting = false
+        }
+    }
 
     private func importAndCreateProject(urls: [URL]) {
         guard !urls.isEmpty else { return }

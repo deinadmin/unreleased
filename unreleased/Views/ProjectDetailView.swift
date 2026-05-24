@@ -126,6 +126,7 @@ struct ProjectDetailView: View {
         ProjectDetailHeaderSection(
             project: project,
             coverImage: store.coverImage(for: project),
+            vinylGradient: store.vinylGradient(for: project),
             isPlaying: isThisProjectPlaying(project),
             downloadState: headerDownloadState(for: project)
         )
@@ -316,6 +317,7 @@ private struct ProjectHeaderDownloadState: Equatable {
 private struct ProjectDetailHeaderSection: View, Equatable {
     let project: Project
     let coverImage: UIImage?
+    let vinylGradient: GradientTheme
     let isPlaying: Bool
     let downloadState: ProjectHeaderDownloadState
 
@@ -326,6 +328,7 @@ private struct ProjectDetailHeaderSection: View, Equatable {
             && lhs.project.trackCountText == rhs.project.trackCountText
             && lhs.project.formattedDuration == rhs.project.formattedDuration
             && lhs.project.gradient == rhs.project.gradient
+            && lhs.vinylGradient == rhs.vinylGradient
             && lhs.coverImage === rhs.coverImage
             && lhs.downloadState == rhs.downloadState
     }
@@ -340,6 +343,7 @@ private struct ProjectDetailHeaderSection: View, Equatable {
                 ProjectCoverView(
                     gradient: project.gradient,
                     coverImage: coverImage,
+                    vinylGradient: vinylGradient,
                     size: coverSize,
                     cornerRadius: 20,
                     showVinyl: true,

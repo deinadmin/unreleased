@@ -17,6 +17,9 @@ enum FirestoreProjectCodec {
         if let accentColorHex = project.accentColorHex {
             payload["accentColorHex"] = accentColorHex
         }
+        if let coverGradientColors = project.coverGradientColors {
+            payload["coverGradientColors"] = coverGradientColors
+        }
         return payload
     }
 
@@ -43,6 +46,7 @@ enum FirestoreProjectCodec {
                 : nil,
             coverStoragePath: data["coverStoragePath"] as? String,
             accentColorHex: data["accentColorHex"] as? String,
+            coverGradientColors: data["coverGradientColors"] as? [String],
             tracks: tracks,
             createdDate: created.dateValue(),
             updatedDate: updated.dateValue()

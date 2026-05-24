@@ -15,6 +15,7 @@ struct PlayerView: View {
     @State private var isShowingTrackInfo = false
     @State private var isShowingQueue = false
     @State private var isShowingNotes = false
+    @State private var bottomAccessoryHapticTrigger = 0
     /// Flips to true once the insertion-spring has settled so the matched-
     /// geometry hero cover can take over from the static placeholder cover.
     @State private var heroSettled = false
@@ -107,7 +108,7 @@ struct PlayerView: View {
                     // preventing the matched-geometry resolution from jittering.
                     .geometryGroup()
                     // Press-scale for the mini-player play/pause tap target.
-                    .scaleEffect(!isExpanded && isCoverPressed ? 0.88 : 1.0)
+                    .scaleEffect((!isExpanded || isShowingQueue || isShowingNotes) && isCoverPressed ? 0.88 : 1.0)
                     .animation(
                         .spring(response: 0.22, dampingFraction: 0.65),
                         value: isCoverPressed
@@ -376,8 +377,8 @@ struct PlayerView: View {
             isPlaying: player.isPlaying,
             isLoadingAudio: player.isLoadingAudio,
             loadingProgress: player.loadingProgress,
-            showsMiniOverlay: !isExpanded,
-            showsShadow: isExpanded && !isShowingQueue,
+            showsMiniOverlay: !isExpanded || isShowingQueue || isShowingNotes,
+            showsShadow: isExpanded && !isShowingQueue && !isShowingNotes,
             playbackProgress: targetScrubProgress ?? (isScrubbing ? liveScrubProgress : player.playbackProgress),
             isScrubbing: isScrubbing,
             duration: player.duration
@@ -567,8 +568,8 @@ struct PlayerView: View {
                 .padding(.horizontal, 20)
 
             upNextSectionHeader
-                .padding(.top, 22)
-                .padding(.horizontal, 24)
+                .padding(.top, 10)
+                .padding(.horizontal, 19)
                 .padding(.bottom, 6)
 
             queueScrollList
@@ -585,7 +586,7 @@ struct PlayerView: View {
                 .tracking(0.6)
 
             HStack(spacing: 12) {
-                coverSlot(size: 52, isTapToPlay: false)
+                coverSlot(size: 52, isTapToPlay: true)
 
                 VStack(alignment: .leading, spacing: 3) {
                     Text(track.title)
@@ -599,9 +600,6 @@ struct PlayerView: View {
                 }
 
                 Spacer(minLength: 0)
-
-                NowPlayingPulseIcon(isPlaying: player.isPlaying)
-                    .padding(.trailing, 4)
             }
         }
     }
@@ -738,6 +736,7 @@ struct PlayerView: View {
     private var bottomAccessories: some View {
         HStack(spacing: 0) {
             bottomAccessoryButton(icon: "doc.text", label: "notes", isActive: isShowingNotes) {
+                bottomAccessoryHapticTrigger += 1
                 withAnimation(.spring(response: 0.34, dampingFraction: 0.84)) {
                     isShowingNotes.toggle()
                     if isShowingNotes { isShowingQueue = false }
@@ -748,6 +747,7 @@ struct PlayerView: View {
                 label: "queue",
                 isActive: isShowingQueue
             ) {
+                bottomAccessoryHapticTrigger += 1
                 withAnimation(.spring(response: 0.34, dampingFraction: 0.84)) {
                     isShowingQueue.toggle()
                     if isShowingQueue { isShowingNotes = false }
@@ -757,6 +757,7 @@ struct PlayerView: View {
                 isShowingTrackInfo = true
             }
         }
+        .sensoryFeedback(.selection, trigger: bottomAccessoryHapticTrigger)
     }
 
     private static let bottomAccessoryHeight: CGFloat = 48
@@ -784,7 +785,6 @@ struct PlayerView: View {
             .frame(maxWidth: .infinity)
             .contentShape(Rectangle())
         }
-        .sensoryFeedback(.selection, trigger: isActive)
     }
 
     // MARK: - Notes view
@@ -797,8 +797,8 @@ struct PlayerView: View {
                 .padding(.horizontal, 20)
 
             notesSectionHeader(track: track)
-                .padding(.top, 22)
-                .padding(.horizontal, 24)
+                .padding(.top, 10)
+                .padding(.horizontal, 19)
                 .padding(.bottom, 6)
 
             notesScrollContent(track: track)
@@ -1048,7 +1048,7 @@ private struct HeroCoverView: View {
 
                 // Mini-bar dim layer (fades out when the player expands).
                 Circle()
-                    .fill(.black.opacity(0.18))
+                    .glassEffect(.regular)
                     .opacity(showsMiniOverlay ? 1 : 0)
 
                 // Mini-bar play/pause icon (or loading indicator).

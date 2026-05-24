@@ -141,6 +141,8 @@ struct Project: Identifiable, Codable, Sendable {
     var coverStoragePath: String?
     /// Hex accent used for the active track and notes editor (e.g. `#667EEA`).
     var accentColorHex: String?
+    /// Two hex colors extracted from the cover image for the vinyl gradient. Nil when using a preset gradient.
+    var coverGradientColors: [String]?
     var tracks: [Track]
     var createdDate: Date
     var updatedDate: Date
@@ -152,6 +154,7 @@ struct Project: Identifiable, Codable, Sendable {
         coverImageFileName: String? = nil,
         coverStoragePath: String? = nil,
         accentColorHex: String? = nil,
+        coverGradientColors: [String]? = nil,
         tracks: [Track] = [],
         createdDate: Date = Date(),
         updatedDate: Date = Date()
@@ -162,6 +165,7 @@ struct Project: Identifiable, Codable, Sendable {
         self.coverImageFileName = coverImageFileName
         self.coverStoragePath = coverStoragePath
         self.accentColorHex = accentColorHex
+        self.coverGradientColors = coverGradientColors
         self.tracks = tracks
         self.createdDate = createdDate
         self.updatedDate = updatedDate

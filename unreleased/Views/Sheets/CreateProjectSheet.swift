@@ -7,6 +7,7 @@ struct CreateProjectSheet: View {
     @State private var name: String = ""
     @State private var gradient: GradientTheme = .random()
     @State private var coverImage: UIImage?
+    @State private var previewVinylGradient: GradientTheme? = nil
     @State private var isShowingDocumentPicker = false
     @State private var isImporting = false
     @FocusState private var nameIsFocused: Bool
@@ -45,6 +46,14 @@ struct CreateProjectSheet: View {
             }
         }
         .sheet(isPresented: $isShowingDocumentPicker) {}
+        .onChange(of: coverImage) { _, newImage in
+            if let newImage {
+                let (start, end) = ProjectAccentColor.gradientHexPair(from: newImage)
+                previewVinylGradient = GradientTheme(colors: [start, end], startX: 0, startY: 0, endX: 1, endY: 1)
+            } else {
+                previewVinylGradient = nil
+            }
+        }
     }
 
     private var trimmedName: String { name.trimmingCharacters(in: .whitespaces) }
@@ -52,7 +61,7 @@ struct CreateProjectSheet: View {
     @ViewBuilder
     private var coverPreview: some View {
         VStack(spacing: 12) {
-            ProjectCoverView(gradient: gradient, coverImage: coverImage, size: 160, cornerRadius: 20, showVinyl: true)
+            ProjectCoverView(gradient: gradient, coverImage: coverImage, vinylGradient: previewVinylGradient, size: 160, cornerRadius: 20, showVinyl: true)
                 .animation(.smooth(duration: 0.35), value: gradient)
                 .animation(.smooth(duration: 0.35), value: coverImage != nil)
 
@@ -105,6 +114,7 @@ struct CreateProjectSheet: View {
         let finalName = trimmedName.isEmpty ? "untitled project" : trimmedName
         var project = Project(name: finalName, gradient: gradient)
         project.accentColorHex = store.resolvedAccentHex(gradient: gradient, coverImage: coverImage)
+        project.coverGradientColors = store.resolvedCoverGradientColors(coverImage: coverImage)
         if let coverImage, let fileName = store.saveCoverImage(coverImage, projectID: project.id) {
             project.coverImageFileName = fileName
         }

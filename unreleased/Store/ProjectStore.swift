@@ -225,6 +225,22 @@ final class ProjectStore {
         return ProjectAccentColor.hex(from: gradient)
     }
 
+    /// Returns the two hex gradient stop colors extracted from `coverImage`, or nil when no image is provided.
+    func resolvedCoverGradientColors(coverImage: UIImage?) -> [String]? {
+        guard let coverImage else { return nil }
+        let (start, end) = ProjectAccentColor.gradientHexPair(from: coverImage)
+        return [start, end]
+    }
+
+    /// Returns a `GradientTheme` suitable for the vinyl ring:
+    /// uses cover-extracted colors when available, otherwise falls back to the project's preset gradient.
+    func vinylGradient(for project: Project) -> GradientTheme {
+        if let colors = project.coverGradientColors, colors.count >= 2 {
+            return GradientTheme(colors: [colors[0], colors[1]], startX: 0, startY: 0, endX: 1, endY: 1)
+        }
+        return project.gradient
+    }
+
     func enqueueCoverUpload(projectID: UUID) {
         syncService?.enqueueCoverUpload(projectID: projectID)
     }
@@ -495,6 +511,9 @@ final class ProjectStore {
         }
         if let accentColorHex = patch.accentColorHex {
             projects[index].accentColorHex = accentColorHex
+        }
+        if let coverGradientColors = patch.coverGradientColors {
+            projects[index].coverGradientColors = coverGradientColors
         }
         projects[index].updatedDate = Date()
         if persistLocally {

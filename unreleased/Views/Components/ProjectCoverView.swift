@@ -12,6 +12,8 @@ import SwiftUI
 struct ProjectCoverView: View {
     let gradient: GradientTheme
     var coverImage: UIImage? = nil
+    /// When provided, overrides the vinyl center gradient (used when cover-image colors are extracted).
+    var vinylGradient: GradientTheme? = nil
     var size: CGFloat = 260
     var cornerRadius: CGFloat = 20
     var showVinyl: Bool = true
@@ -60,6 +62,7 @@ struct ProjectCoverView: View {
     init(
         gradient: GradientTheme,
         coverImage: UIImage? = nil,
+        vinylGradient: GradientTheme? = nil,
         size: CGFloat = 260,
         cornerRadius: CGFloat = 20,
         showVinyl: Bool = true,
@@ -67,6 +70,7 @@ struct ProjectCoverView: View {
     ) {
         self.gradient = gradient
         self.coverImage = coverImage
+        self.vinylGradient = vinylGradient
         self.size = size
         self.cornerRadius = cornerRadius
         self.showVinyl = showVinyl
@@ -77,7 +81,7 @@ struct ProjectCoverView: View {
     var body: some View {
         ZStack {
             if showVinyl {
-                VinylRecordView(gradient: gradient, diameter: size * 0.75)
+                VinylRecordView(gradient: vinylGradient ?? gradient, diameter: size * 0.75)
                     .rotationEffect(.degrees(isSpinning ? 360 : 0))
                     .animation(
                         isSpinning

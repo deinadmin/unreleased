@@ -7,6 +7,7 @@ final class ProjectSyncService {
     struct ProjectPatch {
         var coverStoragePath: String?
         var accentColorHex: String?
+        var coverGradientColors: [String]?
     }
 
     typealias ProjectSnapshotProvider = () -> [Project]
@@ -254,7 +255,7 @@ final class ProjectSyncService {
             )
             projectPatcher(
                 projectID,
-                ProjectPatch(coverStoragePath: storagePath, accentColorHex: project.accentColorHex),
+                ProjectPatch(coverStoragePath: storagePath, accentColorHex: project.accentColorHex, coverGradientColors: project.coverGradientColors),
                 true
             )
             schedulePush()

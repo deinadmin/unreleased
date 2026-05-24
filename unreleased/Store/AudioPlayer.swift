@@ -41,7 +41,7 @@ final class AudioPlayer {
 
     init(store: ProjectStore) {
         self.store = store
-        setupAudioSession()
+        configureAudioSessionCategory()
         setupRemoteCommands()
         setupInterruptionHandling()
     }
@@ -132,6 +132,8 @@ final class AudioPlayer {
         currentProject = project
         duration = track.duration
         currentTime = 0
+
+        setupAudioSession()
 
         let item = AVPlayerItem(url: fileURL)
         player = AVPlayer(playerItem: item)
@@ -534,6 +536,18 @@ final class AudioPlayer {
             try AVAudioSession.sharedInstance().setActive(true)
         } catch {
             print("AudioPlayer: session setup failed — \(error)")
+        }
+    }
+
+    private func configureAudioSessionCategory() {
+        do {
+            try AVAudioSession.sharedInstance().setCategory(
+                .playback,
+                mode: .default,
+                options: []
+            )
+        } catch {
+            print("AudioPlayer: category setup failed — \(error)")
         }
     }
 
