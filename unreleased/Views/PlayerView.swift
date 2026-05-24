@@ -13,8 +13,24 @@ struct PlayerView: View {
     @State private var miniScrubPillVisible = false
     @State private var miniScrubProgress: Double = 0
     @State private var isShowingTrackInfo = false
+    @State private var isShowingQueue = false
+    @State private var isShowingNotes = false
+    /// Flips to true once the insertion-spring has settled so the matched-
+    /// geometry hero cover can take over from the static placeholder cover.
+    @State private var heroSettled = false
+    /// Cancellation handle for the delayed settle task.
+    @State private var heroSettleTask: Task<Void, Never>? = nil
+    /// Tracks whether the mini-player cover button is being held down so the
+    /// hero cover (and its placeholder) can show a press-scale effect.
+    @State private var isCoverPressed = false
+
+    @Namespace private var morph
 
     private let compactHeight: CGFloat = 50
+    /// Height of the area between drag handle and bottom accessories when the
+    /// expanded player is shown. Used to keep the queue view's middle area the
+    /// same size as the player view so toggling between them feels stable.
+    private static let expandedMiddleHeight: CGFloat = 478
     /// Space between the mini player bar and the floating scrub time pill.
     private let miniWaveformWidth: CGFloat = 130
     private var miniScrubPillLift: CGFloat { compactHeight + 8 }
@@ -45,12 +61,25 @@ struct PlayerView: View {
     private var cardBottomTrailing: CGFloat { isExpanded ? bottomCardRadius : compactCornerRadius }
 
     private var compactCoverSize: CGFloat { compactHeight - compactCoverInset * 2 }
-    private var coverSize: CGFloat { isExpanded ? 200 : compactCoverSize }
+
+    /// Latest project metadata from the store (name, cover, gradient).
+    private var liveProject: Project? {
+        guard let id = player.currentProject?.id else { return nil }
+        return store.projects.first(where: { $0.id == id }) ?? player.currentProject
+    }
+
+    /// Latest track metadata from the store (title, waveform, etc.).
+    private var liveTrack: Track? {
+        guard let trackID = player.currentTrack?.id,
+              let project = liveProject
+        else { return player.currentTrack }
+        return project.tracks.first(where: { $0.id == trackID }) ?? player.currentTrack
+    }
 
     // MARK: - Body
 
     var body: some View {
-        if let track = player.currentTrack, let project = player.currentProject {
+        if let track = liveTrack, let project = liveProject {
             ZStack(alignment: .bottom) {
                 playerCard(track: track, project: project)
                     .padding(.horizontal, sideMargin)
@@ -58,7 +87,29 @@ struct PlayerView: View {
                     // Mini: keep the existing float above the home indicator.
                     .padding(.bottom, isExpanded ? sideMargin : 8)
                     .ignoresSafeArea(edges: isExpanded ? .bottom : [])
+
+                // Hero cover lives in this stable coordinate space (a sibling of the card,
+                // not inside its overlay) so matched geometry resolves cleanly while the
+                // card itself is animating between sizes/positions.
+                // Hidden until heroSettled: the miniBar placeholder cover handles the
+                // visual during the insertion spring. Once settled the hero snaps into
+                // place with no secondary animation (matchedGeometryEffect is already
+                // at the correct position when it becomes visible).
+                heroCover(project: project)
+                    // Isolates the hero's geometry group from the ZStack's
+                    // coordinate-space changes as the card expands/collapses,
+                    // preventing the matched-geometry resolution from jittering.
+                    .geometryGroup()
+                    // Press-scale for the mini-player play/pause tap target.
+                    .scaleEffect(!isExpanded && isCoverPressed ? 0.88 : 1.0)
+                    .animation(
+                        .spring(response: 0.22, dampingFraction: 0.65),
+                        value: isCoverPressed
+                    )
+                    .opacity(heroSettled ? 1 : 0)
+                    .animation(.none, value: heroSettled)
             }
+            .frame(maxWidth: .infinity)
             // Always apply drag offset — gating on isExpanded caused instant snap on dismiss/snap-back.
             .offset(y: offset)
             .transaction { transaction in
@@ -69,20 +120,45 @@ struct PlayerView: View {
             .onAppear {
                 offset = 0
                 lastDragTranslation = 0
+                // Wait for the insertion spring to fully settle before revealing the
+                // matched-geometry hero cover. During this window the mini bar shows
+                // a static placeholder cover so there is no visible gap. 0.55 s is
+                // comfortably past the longest insertion spring (response 0.44 s).
+                heroSettleTask?.cancel()
+                heroSettleTask = Task { @MainActor in
+                    try? await Task.sleep(for: .seconds(0.55))
+                    guard !Task.isCancelled else { return }
+                    heroSettled = true
+                }
+            }
+            .onDisappear {
+                heroSettled = false
+                heroSettleTask?.cancel()
+                heroSettleTask = nil
             }
             .onChange(of: player.isShowingNowPlaying) { _, showing in
                 offset = 0
                 lastDragTranslation = 0
-                if showing { dismissKeyboard() }
+                if showing {
+                    dismissKeyboard()
+                    // Player is expanding — settle the hero immediately so the
+                    // mini→full morph animation is visible from the first frame.
+                    heroSettleTask?.cancel()
+                    heroSettleTask = nil
+                    heroSettled = true
+                } else {
+                    isShowingQueue = false
+                    isShowingNotes = false
+                }
             }
             .sheet(isPresented: $isShowingTrackInfo) {
-                if let track = player.currentTrack, let project = player.currentProject {
+                if let track = liveTrack, let project = liveProject {
                     TrackInfoSheet(
                         track: track,
                         project: project,
                         onOpenNotes: {
                             isShowingTrackInfo = false
-                            navigateToTrackNotes(track.id, project.id)
+                            openTrackNotes()
                         }
                     )
                 }
@@ -99,31 +175,23 @@ struct PlayerView: View {
                 dragHandle
                     .padding(.top, 12)
 
-                expandedTitle(track: track, project: project)
-                    .padding(.top, 16)
-                    .padding(.horizontal, 24)
-            }
-
-            coverSection(track: track, project: project)
-                .padding(.top, isExpanded ? 18 : 0)
-
-            if isExpanded {
-                waveformSection(track: track)
-                    .padding(.horizontal, 24)
-                    .padding(.top, 20)
-
-                timeRow
-                    .padding(.horizontal, 24)
-                    .padding(.top, 6)
-
-                transportControls
-                    .padding(.horizontal, 20)
-                    .padding(.top, 20)
+                Group {
+                    if isShowingQueue {
+                        queueExpandedMiddle(track: track, project: project)
+                    } else if isShowingNotes {
+                        notesExpandedMiddle(track: track, project: project)
+                    } else {
+                        playerExpandedMiddle(track: track, project: project)
+                    }
+                }
+                .frame(height: Self.expandedMiddleHeight)
 
                 bottomAccessories
                     .padding(.top, 16)
                     .padding(.horizontal, 8)
                     .padding(.bottom, bottomInset)
+            } else {
+                miniBar(track: track, project: project)
             }
         }
         .frame(maxWidth: .infinity)
@@ -204,84 +272,39 @@ struct PlayerView: View {
         return "\(current) / \(total)"
     }
 
-    // MARK: - Cover (single hero element)
+    // MARK: - Mini bar
 
     @ViewBuilder
-    private func coverSection(track: Track, project: Project) -> some View {
-        ZStack(alignment: isExpanded ? .center : .leading) {
-            if isExpanded {
-                PlayerCoverGlow(gradient: project.gradient.gradient, coverSize: coverSize, isPlaying: player.isPlaying)
-                    .allowsHitTesting(false)
-            }
-
-            if !isExpanded {
-                compactRow(track: track, project: project)
-            }
-
-            coverArt(project: project)
-                .padding(.leading, isExpanded ? 0 : compactCoverInset)
-                .padding(.vertical, isExpanded ? 0 : compactCoverInset)
-                .frame(maxWidth: .infinity, alignment: isExpanded ? .center : .leading)
-        }
-        .frame(height: isExpanded ? nil : compactHeight)
-    }
-
-    @ViewBuilder
-    private func coverArt(project: Project) -> some View {
-        Button {
-            if !isExpanded { player.togglePlayPause() }
-        } label: {
-            ZStack {
-                PlayerCoverGradient(
-                    gradient: project.gradient.gradient,
-                    coverImage: store.coverImage(for: project),
-                    isExpanded: isExpanded,
-                    isPlaying: player.isPlaying
-                )
-                .shadow(color: .black.opacity(isExpanded ? 0.4 : 0), radius: 26, x: 0, y: 10)
-
-                Circle()
-                    .fill(.black.opacity(isExpanded ? 0 : 0.18))
-
-                if !isExpanded {
-                    miniCoverOverlay
-                }
-            }
-            .frame(width: coverSize, height: coverSize)
-            .contentShape(Circle())
-        }
-        .buttonStyle(.scale)
-        .disabled(isExpanded || player.isLoadingAudio)
-        .sensoryFeedback(.impact(weight: .medium), trigger: player.isPlaying)
-    }
-
-    @ViewBuilder
-    private var miniCoverOverlay: some View {
-        if player.isLoadingAudio {
-            Group {
-                if player.loadingProgress > 0 {
-                    ProgressView(value: player.loadingProgress)
-                        .progressViewStyle(.circular)
-                } else {
-                    ProgressView()
-                        .progressViewStyle(.circular)
-                }
-            }
-            .tint(.white)
-            .scaleEffect(0.9)
-        } else {
-            Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
-                .font(.system(size: 14, weight: .bold))
-                .foregroundStyle(.white)
-                .animation(nil, value: player.isPlaying)
-        }
-    }
-
-    @ViewBuilder
-    private func compactRow(track: Track, project: Project) -> some View {
+    private func miniBar(track: Track, project: Project) -> some View {
         HStack(spacing: 0) {
-            Color.clear
-                .frame(width: compactHeight)
+            // ZStack lets the matched-geometry anchor (coverSlot) and the static
+            // placeholder cover occupy the same cell. The placeholder is shown while
+            // the insertion spring is running so the hero cover can reveal itself
+            // only after the spring has settled (avoiding the "giant circle shrinks
+            // into place" glitch that matchedGeometryEffect produces on first appear).
+            ZStack {
+                coverSlot(size: compactCoverSize, isTapToPlay: true)
+                if !heroSettled {
+                    HeroCoverView(
+                        gradient: project.gradient.gradient,
+                        coverImage: store.coverImage(for: project),
+                        isPlaying: player.isPlaying,
+                        isLoadingAudio: player.isLoadingAudio,
+                        loadingProgress: player.loadingProgress,
+                        showsMiniOverlay: true,
+                        showsShadow: false
+                    )
+                    .allowsHitTesting(false)
+                    .scaleEffect(isCoverPressed ? 0.88 : 1.0)
+                    .animation(
+                        .spring(response: 0.22, dampingFraction: 0.65),
+                        value: isCoverPressed
+                    )
+                    .transition(.identity)
+                }
+            }
+            .frame(width: compactCoverSize, height: compactCoverSize)
+            .padding(.leading, compactCoverInset)
 
             Button {
                 player.isShowingNowPlaying = true
@@ -296,14 +319,69 @@ struct PlayerView: View {
                         .foregroundStyle(.white.opacity(0.55))
                         .lineLimit(1)
                 }
-                .padding(.leading, 4)
+                .padding(.leading, 4 + compactCoverInset)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
+
             waveformSection(track: track)
                 .frame(width: miniWaveformWidth, height: 26)
                 .padding(.trailing, 10)
         }
         .frame(height: compactHeight)
+    }
+
+    // MARK: - Shared morphing cover (same circle in every player state)
+
+    /// Invisible anchor placed at each position the cover can occupy.
+    /// Only one slot lives in the hierarchy at a time, so matched geometry
+    /// interpolates the hero cover between consecutive slots.
+    @ViewBuilder
+    private func coverSlot(size: CGFloat, isTapToPlay: Bool) -> some View {
+        Group {
+            if isTapToPlay {
+                Button {
+                    player.togglePlayPause()
+                } label: {
+                    Color.clear.contentShape(Circle())
+                }
+                // Feeds isPressed state back so heroCover can show the
+                // scale-down effect while the button is being held.
+                .buttonStyle(CoverPressButtonStyle(isPressed: $isCoverPressed))
+                .disabled(player.isLoadingAudio)
+                .sensoryFeedback(.impact(weight: .medium), trigger: player.isPlaying)
+            } else {
+                Color.clear
+            }
+        }
+        .frame(width: size, height: size)
+        .matchedGeometryEffect(id: "cover", in: morph, isSource: true)
+    }
+
+    /// The single visible cover. Lives in an overlay so it smoothly resizes
+    /// and moves between the mini, expanded and queue slots.
+    @ViewBuilder
+    private func heroCover(project: Project) -> some View {
+        HeroCoverView(
+            gradient: project.gradient.gradient,
+            coverImage: store.coverImage(for: project),
+            isPlaying: player.isPlaying,
+            isLoadingAudio: player.isLoadingAudio,
+            loadingProgress: player.loadingProgress,
+            showsMiniOverlay: !isExpanded,
+            showsShadow: isExpanded && !isShowingQueue
+        )
+        .id(coverArtIdentity(for: project))
+        .matchedGeometryEffect(id: "cover", in: morph, isSource: false)
+        .allowsHitTesting(false)
+        // Belt-and-suspenders: completely disable animations on the hero while
+        // the insertion spring is still running. The placeholder cover in miniBar
+        // handles the visual during this window.
+        .transaction { tx in
+            if !heroSettled { tx.disablesAnimations = true }
+        }
+        // Mini player: block implicit play/pause transitions on the matched-geometry
+        // group (expanded scale animation is handled inside HeroCoverView).
+        .animation(isExpanded ? nil : .none, value: player.isPlaying)
     }
 
     // MARK: - Waveform
@@ -410,13 +488,229 @@ struct PlayerView: View {
         }
     }
 
+    // MARK: - Expanded middle compositions
+
+    @ViewBuilder
+    private func playerExpandedMiddle(track: Track, project: Project) -> some View {
+        VStack(spacing: 0) {
+            expandedTitle(track: track, project: project)
+                .padding(.top, 16)
+                .padding(.horizontal, 24)
+
+            coverSlot(size: 200, isTapToPlay: false)
+                .padding(.top, 18)
+
+            waveformSection(track: track)
+                .padding(.horizontal, 24)
+                .padding(.top, 20)
+
+            timeRow
+                .padding(.horizontal, 24)
+                .padding(.top, 6)
+
+            transportControls
+                .padding(.horizontal, 20)
+                .padding(.top, 20)
+
+            Spacer(minLength: 0)
+        }
+    }
+
+    // MARK: - Queue view
+
+    @ViewBuilder
+    private func queueExpandedMiddle(track: Track, project: Project) -> some View {
+        VStack(spacing: 0) {
+            nowPlayingSection(track: track, project: project)
+                .padding(.top, 14)
+                .padding(.horizontal, 20)
+
+            upNextSectionHeader
+                .padding(.top, 22)
+                .padding(.horizontal, 24)
+                .padding(.bottom, 6)
+
+            queueScrollList
+                .frame(maxHeight: .infinity)
+        }
+    }
+
+    @ViewBuilder
+    private func nowPlayingSection(track: Track, project: Project) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("NOW PLAYING")
+                .font(.system(size: 11, weight: .bold))
+                .foregroundStyle(.white.opacity(0.45))
+                .tracking(0.6)
+
+            HStack(spacing: 12) {
+                coverSlot(size: 52, isTapToPlay: false)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(track.title)
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                    Text(project.name)
+                        .font(.system(size: 12))
+                        .foregroundStyle(.white.opacity(0.55))
+                        .lineLimit(1)
+                }
+
+                Spacer(minLength: 0)
+
+                NowPlayingPulseIcon(isPlaying: player.isPlaying)
+                    .padding(.trailing, 4)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var upNextSectionHeader: some View {
+        HStack {
+            Text("UP NEXT")
+                .font(.system(size: 11, weight: .bold))
+                .foregroundStyle(.white.opacity(0.45))
+                .tracking(0.6)
+
+            Spacer()
+
+            if !player.queue.isEmpty {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        player.clearQueue()
+                    }
+                } label: {
+                    Text("Clear")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.6))
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var queueScrollList: some View {
+        let entries = player.queueItems
+        if entries.isEmpty {
+            queueEmptyState
+        } else {
+            ScrollView(.vertical, showsIndicators: false) {
+                LazyVStack(spacing: 0) {
+                    ForEach(Array(entries.enumerated()), id: \.element.item.id) { index, entry in
+                        queueRow(item: entry.item, track: entry.track, project: entry.project)
+                            .padding(.horizontal, 20)
+                        if index < entries.count - 1 {
+                            Divider()
+                                .overlay(Color.white.opacity(0.06))
+                                .padding(.leading, 20 + 44 + 12)
+                        }
+                    }
+                }
+                .padding(.vertical, 4)
+                .padding(.bottom, 8)
+            }
+            .mask(scrollFadeMask)
+        }
+    }
+
+    /// Gradient mask applied to both the queue and notes scroll views.
+    /// Only the bottom edge fades — the scroll view's own clipping handles the
+    /// top, and a top fade would eat into the first visible item at rest.
+    private var scrollFadeMask: some View {
+        VStack(spacing: 0) {
+            Color.black
+            LinearGradient(colors: [.black, .black.opacity(0.75), .clear], startPoint: .top, endPoint: .bottom)
+                .frame(height: 30)
+        }
+    }
+
+    private var queueEmptyState: some View {
+        VStack(spacing: 6) {
+            Image(systemName: "music.note.list")
+                .font(.system(size: 28, weight: .light))
+                .foregroundStyle(.white.opacity(0.35))
+            Text("Nothing queued")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.6))
+            Text("Add tracks from any project to play them next.")
+                .font(.system(size: 12))
+                .foregroundStyle(.white.opacity(0.4))
+                .multilineTextAlignment(.center)
+        }
+        .padding(.horizontal, 32)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    @ViewBuilder
+    private func queueRow(item: QueuedItem, track: Track, project: Project) -> some View {
+        HStack(spacing: 12) {
+            Button {
+                withAnimation(.spring(response: 0.34, dampingFraction: 0.84)) {
+                    isShowingQueue = false
+                }
+                player.playQueueItem(id: item.id)
+            } label: {
+                HStack(spacing: 12) {
+                    ProjectCoverThumbnail(
+                        gradient: project.gradient,
+                        coverImage: store.coverImage(for: project),
+                        size: 44,
+                        cornerRadius: 9
+                    )
+
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(track.title)
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .lineLimit(1)
+                        Text(project.name)
+                            .font(.system(size: 11))
+                            .foregroundStyle(.white.opacity(0.5))
+                            .lineLimit(1)
+                    }
+
+                    Spacer(minLength: 0)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    player.removeQueueItem(id: item.id)
+                }
+            } label: {
+                Image(systemName: "minus.circle.fill")
+                    .font(.system(size: 19))
+                    .foregroundStyle(.white.opacity(0.4))
+                    .frame(width: 36, height: 36)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Remove from queue")
+        }
+        .padding(.vertical, 8)
+    }
+
     private var bottomAccessories: some View {
         HStack(spacing: 0) {
-            bottomAccessoryButton(icon: "doc.text", label: "notes") {
-                openTrackNotes()
+            bottomAccessoryButton(icon: "doc.text", label: "notes", isActive: isShowingNotes) {
+                withAnimation(.spring(response: 0.34, dampingFraction: 0.84)) {
+                    isShowingNotes.toggle()
+                    if isShowingNotes { isShowingQueue = false }
+                }
             }
-            bottomAccessoryButton(icon: "square.and.arrow.up", label: "share") {
-                shareCurrentTrack()
+            bottomAccessoryButton(
+                icon: "list.bullet",
+                label: "queue",
+                isActive: isShowingQueue
+            ) {
+                withAnimation(.spring(response: 0.34, dampingFraction: 0.84)) {
+                    isShowingQueue.toggle()
+                    if isShowingQueue { isShowingNotes = false }
+                }
             }
             bottomAccessoryButton(icon: "ellipsis", label: "options") {
                 isShowingTrackInfo = true
@@ -429,6 +723,7 @@ struct PlayerView: View {
     private func bottomAccessoryButton(
         icon: String,
         label: String,
+        isActive: Bool = false,
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
@@ -443,9 +738,86 @@ struct PlayerView: View {
                     .minimumScaleFactor(0.8)
                     .frame(height: 14)
             }
-            .foregroundStyle(.white.opacity(0.48))
+            .foregroundStyle(isActive ? .white : .white.opacity(0.48))
             .frame(height: Self.bottomAccessoryHeight)
             .frame(maxWidth: .infinity)
+            .contentShape(Rectangle())
+        }
+        .sensoryFeedback(.selection, trigger: isActive)
+    }
+
+    // MARK: - Notes view
+
+    @ViewBuilder
+    private func notesExpandedMiddle(track: Track, project: Project) -> some View {
+        VStack(spacing: 0) {
+            nowPlayingSection(track: track, project: project)
+                .padding(.top, 14)
+                .padding(.horizontal, 20)
+
+            notesSectionHeader(track: track)
+                .padding(.top, 22)
+                .padding(.horizontal, 24)
+                .padding(.bottom, 6)
+
+            notesScrollContent(track: track)
+                .frame(maxHeight: .infinity)
+        }
+    }
+
+    @ViewBuilder
+    private func notesSectionHeader(track: Track) -> some View {
+        HStack {
+            Text("NOTES")
+                .font(.system(size: 11, weight: .bold))
+                .foregroundStyle(.white.opacity(0.45))
+                .tracking(0.6)
+
+            Spacer()
+
+            Button {
+                openTrackNotes()
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "pencil")
+                        .font(.system(size: 11, weight: .semibold))
+                    Text("Edit")
+                        .font(.system(size: 12, weight: .semibold))
+                }
+                .foregroundStyle(.white.opacity(0.6))
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    @ViewBuilder
+    private func notesScrollContent(track: Track) -> some View {
+        if track.notes.isEmpty {
+            VStack(spacing: 6) {
+                Image(systemName: "doc.text")
+                    .font(.system(size: 28, weight: .light))
+                    .foregroundStyle(.white.opacity(0.35))
+                Text("No notes yet")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.6))
+                Text("Tap Edit to start writing.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.white.opacity(0.4))
+                    .multilineTextAlignment(.center)
+            }
+            .padding(.horizontal, 32)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            ScrollView(.vertical, showsIndicators: false) {
+                Text(track.notes)
+                    .font(.system(size: 15))
+                    .foregroundStyle(.white.opacity(0.88))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 24)
+                    .padding(.top, 4)
+                    .padding(.bottom, 16)
+            }
+            .mask(scrollFadeMask)
         }
     }
 
@@ -519,8 +891,13 @@ struct PlayerView: View {
         )
     }
 
+    private func coverArtIdentity(for project: Project) -> String {
+        let gradientKey = project.gradient.colors.joined(separator: "-")
+        return "\(project.id.uuidString)-\(project.coverImageFileName ?? "none")-\(gradientKey)"
+    }
+
     private func openTrackNotes() {
-        guard let track = player.currentTrack, let project = player.currentProject else { return }
+        guard let track = liveTrack, let project = liveProject else { return }
         let trackID = track.id
         let projectID = project.id
         player.isShowingNowPlaying = false
@@ -528,63 +905,119 @@ struct PlayerView: View {
             navigateToTrackNotes(trackID, projectID)
         }
     }
+}
 
-    private func shareCurrentTrack() {
-        guard let track = player.currentTrack else { return }
-        let url = store.hasDownloadedFile(for: track)
-            ? store.downloadedFileURL(for: track)
-            : store.audioFileURL(for: track)
-        guard FileManager.default.fileExists(atPath: url.path) else { return }
-        let av = UIActivityViewController(activityItems: [url], applicationActivities: nil)
-        if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-           let window = scene.windows.first {
-            window.rootViewController?.present(av, animated: true)
-        }
+// MARK: - Now playing pulse icon
+
+private struct NowPlayingPulseIcon: View {
+    let isPlaying: Bool
+
+    var body: some View {
+        Image(systemName: "waveform")
+            .font(.system(size: 16, weight: .semibold))
+            .foregroundStyle(.white)
+            .symbolEffect(.variableColor.iterative.reversing, options: .repeating, isActive: isPlaying)
     }
 }
 
-// MARK: - Cover artwork (animations isolated from play/pause icons)
+// MARK: - Hero cover (the single visible circle that morphs across player states)
 
-private struct PlayerCoverGradient: View {
+private struct HeroCoverView: View {
     let gradient: LinearGradient
-    var coverImage: UIImage? = nil
-    let isExpanded: Bool
+    let coverImage: UIImage?
     let isPlaying: Bool
+    let isLoadingAudio: Bool
+    let loadingProgress: Double
+    let showsMiniOverlay: Bool
+    let showsShadow: Bool
 
-    private var scale: CGFloat {
-        isExpanded ? (isPlaying ? 1.0 : 0.93) : 1
+    /// Subtle "paused = slightly shrunken" feel in the expanded player view.
+    private var coverScale: CGFloat {
+        showsShadow ? (isPlaying ? 1.0 : 0.93) : 1.0
     }
 
-    var body: some View {
+    @ViewBuilder
+    private var coverArtwork: some View {
         Group {
             if let coverImage {
-                Image(uiImage: coverImage)
-                    .resizable()
-                    .scaledToFill()
+                ZStack {
+                    Circle().fill(Color(white: 0.12))
+                    Image(uiImage: coverImage)
+                        .resizable()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .scaledToFill()
+                        .clipped()
+                        .contentTransition(.identity)
+                }
             } else {
-                Circle()
-                    .fill(gradient)
+                Circle().fill(gradient)
             }
         }
         .clipShape(Circle())
-        .scaleEffect(scale)
-        .animation(isExpanded ? .smooth(duration: 0.4) : nil, value: isPlaying)
+        .animation(nil, value: isPlaying)
+        .scaleEffect(coverScale)
+        .animation(showsShadow ? .smooth(duration: 0.4) : nil, value: isPlaying)
+    }
+
+    var body: some View {
+        ZStack {
+
+            // Cover artwork clipped to a circle.
+            coverArtwork
+                .background {
+                    Circle()
+                        .fill(.black.opacity(0.001))
+                        .shadow(
+                            color: .black.opacity(showsShadow ? 0.4 : 0),
+                            radius: showsShadow ? 26 : 0,
+                            x: 0,
+                            y: showsShadow ? 10 : 0
+                        )
+                }
+
+            // Mini-bar dim layer (fades out when the player expands).
+            Circle()
+                .fill(.black.opacity(0.18))
+                .opacity(showsMiniOverlay ? 1 : 0)
+
+            // Mini-bar play/pause icon (or loading indicator).
+            Group {
+                if isLoadingAudio {
+                    Group {
+                        if loadingProgress > 0 {
+                            ProgressView(value: loadingProgress)
+                                .progressViewStyle(.circular)
+                        } else {
+                            ProgressView()
+                                .progressViewStyle(.circular)
+                        }
+                    }
+                    .tint(.white)
+                    .scaleEffect(0.9)
+                } else {
+                    Image(systemName: isPlaying ? "pause.fill" : "play.fill")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundStyle(.white)
+                        .animation(nil, value: isPlaying)
+                }
+            }
+            .opacity(showsMiniOverlay ? 1 : 0)
+        }
+        .aspectRatio(1, contentMode: .fit)
     }
 }
 
-private struct PlayerCoverGlow: View {
-    let gradient: LinearGradient
-    let coverSize: CGFloat
-    let isPlaying: Bool
+// MARK: - Cover press button style
 
-    private var scale: CGFloat { isPlaying ? 1.0 : 0.93 }
+/// Transparent button style that forwards `isPressed` state to a binding so
+/// the hero cover (which lives outside the button label) can animate in sync.
+private struct CoverPressButtonStyle: ButtonStyle {
+    @Binding var isPressed: Bool
 
-    var body: some View {
-        Circle()
-            .fill(gradient.opacity(0.18))
-            .frame(width: coverSize + 26, height: coverSize + 26)
-            .scaleEffect(scale)
-            .blur(radius: 16)
-            .animation(.smooth(duration: 0.4), value: isPlaying)
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .onChange(of: configuration.isPressed) { _, pressed in
+                isPressed = pressed
+            }
     }
 }

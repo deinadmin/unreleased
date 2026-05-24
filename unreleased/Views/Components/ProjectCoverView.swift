@@ -28,14 +28,29 @@ struct ProjectCoverView: View {
     @ViewBuilder
     private var coverSquare: some View {
         if let coverImage {
-            Image(uiImage: coverImage)
-                .resizable()
-                .scaledToFill()
-                .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+            ZStack {
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .fill(Color(white: 0.12))
+                Image(uiImage: coverImage)
+                    .resizable()
+                    .frame(width: size, height: size)
+                    .scaledToFill()
+                    .clipped()
+                    .contentTransition(.identity)
+            }
+            .frame(width: size, height: size)
+            .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+            .animation(nil, value: isPlaying)
         } else {
             RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                 .fill(gradient.gradient)
+                .frame(width: size, height: size)
         }
+    }
+
+    private var coverShadowShape: some View {
+        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+            .fill(.black.opacity(0.001))
     }
 
     @State private var isSpinning = false
@@ -67,18 +82,19 @@ struct ProjectCoverView: View {
                     .animation(
                         isSpinning
                             ? .linear(duration: 3.5).repeatForever(autoreverses: false)
-                            : .linear(duration: 0),   // instant reset — vinyl is hidden at this point
+                            : .linear(duration: 0),
                         value: isSpinning
                     )
                     .offset(x: layoutIsPlaying ? vinylPlayX : 0)
             }
 
             coverSquare
-                .frame(width: size, height: size)
-                .shadow(color: .black.opacity(0.2), radius: 20, x: 0, y: 8)
+                .background {
+                    coverShadowShape
+                        .shadow(color: .black.opacity(0.2), radius: 20, x: 0, y: 8)
+                }
                 .offset(x: layoutIsPlaying ? -shift : 0)
         }
-        .geometryGroup()
         .frame(width: size, height: size)
         .onAppear {
             updateSpinning(isPlaying, restartRotation: !isSpinning)
@@ -156,13 +172,15 @@ struct ProjectCoverThumbnail: View {
             if let coverImage {
                 Image(uiImage: coverImage)
                     .resizable()
+                    .frame(width: size, height: size)
                     .scaledToFill()
+                    .clipped()
             } else {
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                     .fill(gradient.gradient)
+                    .frame(width: size, height: size)
             }
         }
-        .frame(width: size, height: size)
         .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
     }
 }

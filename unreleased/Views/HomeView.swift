@@ -215,14 +215,17 @@ private struct ProjectCard: View {
                     if let coverImage {
                         Image(uiImage: coverImage)
                             .resizable()
+                            .frame(maxWidth: .infinity)
+                            .aspectRatio(1, contentMode: .fit)
                             .scaledToFill()
+                            .clipped()
                     } else {
                         RoundedRectangle(cornerRadius: 16, style: .continuous)
                             .fill(project.gradient.gradient)
+                            .aspectRatio(1, contentMode: .fit)
+                            .frame(maxWidth: .infinity)
                     }
                 }
-                .aspectRatio(1, contentMode: .fit)
-                .frame(maxWidth: .infinity)
                 .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
 
                 if !project.tracks.isEmpty {

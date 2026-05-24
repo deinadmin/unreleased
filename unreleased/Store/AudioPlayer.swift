@@ -20,9 +20,15 @@ final class AudioPlayer {
     /// Download progress 0…1 while `isLoadingAudio`; indeterminate UI when 0.
     var loadingProgress: Double = 0
     /// User-queued tracks (played next, in order) before the rest of the current project.
-    private(set) var queueTrackIDs: [UUID] = []
+    /// Universal — items may come from any project and persist across project changes.
+    private(set) var queue: [QueuedItem] = []
 
     private let store: ProjectStore
+    /// Origin context (project + track position) for what plays after the queue empties.
+    /// Updated on direct plays only; preserved while queued tracks (from other projects)
+    /// are playing so that the original project's remaining tracks resume after the queue.
+    private var contextProjectID: UUID?
+    private var contextTrackID: UUID?
     private var shuffleOrder: [UUID] = []
     private var shuffleIndex: Int = 0
     private var player: AVPlayer?
@@ -42,30 +48,34 @@ final class AudioPlayer {
 
     // MARK: - Playback Control
 
-    func play(track: Track, in project: Project, fileURL: URL) {
+    func play(track: Track, in project: Project, fileURL: URL, fromQueue: Bool = false) {
         if currentTrack?.id == track.id, !isLoadingAudio {
             togglePlayPause()
             return
+        }
+        if !fromQueue {
+            contextProjectID = project.id
+            contextTrackID = track.id
         }
         cancelLoad()
         isLoadingAudio = false
         loadingProgress = 0
-        startPlayback(track: track, in: project, fileURL: fileURL)
+        startPlayback(track: track, in: project, fileURL: fileURL, fromQueue: fromQueue)
     }
 
     /// Shows the mini player immediately; downloads uncached audio in the background.
-    func play(track: Track, in project: Project) {
+    func play(track: Track, in project: Project, fromQueue: Bool = false) {
         if currentTrack?.id == track.id, !isLoadingAudio {
             togglePlayPause()
             return
         }
+        if !fromQueue {
+            contextProjectID = project.id
+            contextTrackID = track.id
+        }
 
         cancelLoad()
         tearDownPlayer()
-
-        if currentProject?.id != project.id {
-            queueTrackIDs = []
-        }
 
         currentTrack = track
         currentProject = project
@@ -78,7 +88,7 @@ final class AudioPlayer {
         if store.hasCachedAudio(for: track) {
             isLoadingAudio = false
             loadingProgress = 0
-            startPlayback(track: track, in: project, fileURL: store.audioFileURL(for: track))
+            startPlayback(track: track, in: project, fileURL: store.audioFileURL(for: track), fromQueue: fromQueue)
             return
         }
 
@@ -108,17 +118,14 @@ final class AudioPlayer {
                     return
                 }
 
-                self.startPlayback(track: track, in: project, fileURL: url)
+                self.startPlayback(track: track, in: project, fileURL: url, fromQueue: fromQueue)
             }
         }
     }
 
-    private func startPlayback(track: Track, in project: Project, fileURL: URL) {
+    private func startPlayback(track: Track, in project: Project, fileURL: URL, fromQueue: Bool = false) {
         tearDownPlayer()
 
-        if currentProject?.id != project.id {
-            queueTrackIDs = []
-        }
         dequeueIfQueued(track.id)
 
         currentTrack = track
@@ -139,7 +146,9 @@ final class AudioPlayer {
 
         addTimeObserver()
         refreshNowPlayingArtwork(for: project)
-        if isShuffleEnabled {
+        // Only resync shuffle when this play is part of the active context — queued tracks
+        // from foreign projects should not clobber the shuffleOrder of the context project.
+        if isShuffleEnabled, !fromQueue {
             syncShuffleIndex(for: track.id)
         }
         player?.play()
@@ -180,21 +189,58 @@ final class AudioPlayer {
         isLooping.toggle()
     }
 
-    /// Appends a track to the end of the queue (before upcoming project tracks). No-op if not in the current project.
-    func addToQueue(_ track: Track) {
-        guard let project = currentProject,
-              project.tracks.contains(where: { $0.id == track.id }) else { return }
-        queueTrackIDs.append(track.id)
+    /// Appends a track to the end of the universal queue. Tracks from any project are allowed.
+    /// If nothing is currently playing, the added track starts playing immediately.
+    func addToQueue(_ track: Track, in project: Project) {
+        guard currentTrack != nil else {
+            play(track: track, in: project)
+            return
+        }
+        queue.append(QueuedItem(trackID: track.id, projectID: project.id))
+    }
+
+    func removeQueueItem(id: UUID) {
+        queue.removeAll { $0.id == id }
+    }
+
+    func clearQueue() {
+        queue = []
+    }
+
+    /// Plays a specific queued item, removing it and everything queued before it.
+    /// Preserves the origin context so the original project resumes after the queue empties.
+    func playQueueItem(id: UUID) {
+        guard let index = queue.firstIndex(where: { $0.id == id }) else { return }
+        let item = queue[index]
+        guard let project = store.projects.first(where: { $0.id == item.projectID }),
+              let track = project.tracks.first(where: { $0.id == item.trackID }) else {
+            queue.remove(at: index)
+            return
+        }
+        if index > 0 {
+            queue.removeSubrange(0..<index)
+        }
+        play(track: track, in: project, fromQueue: true)
     }
 
     func isQueued(_ trackID: UUID) -> Bool {
-        queueTrackIDs.contains(trackID)
+        queue.contains { $0.trackID == trackID }
+    }
+
+    /// Resolved queued items with their current track and project metadata. Skips dead entries.
+    var queueItems: [(item: QueuedItem, track: Track, project: Project)] {
+        queue.compactMap { item in
+            guard let project = store.projects.first(where: { $0.id == item.projectID }),
+                  let track = project.tracks.first(where: { $0.id == item.trackID })
+            else { return nil }
+            return (item, track, project)
+        }
     }
 
     /// Next track in the project (wraps to the first after the last).
     func skipForward() {
         guard let next = adjacentTrack(offset: 1) else { return }
-        play(track: next.track, in: next.project)
+        play(track: next.track, in: next.project, fromQueue: next.fromQueue)
     }
 
     /// Restart if past 1.5s; otherwise previous track (wraps to the last from the first).
@@ -205,7 +251,7 @@ final class AudioPlayer {
             return
         }
         guard let previous = adjacentTrack(offset: -1) else { return }
-        play(track: previous.track, in: previous.project)
+        play(track: previous.track, in: previous.project, fromQueue: previous.fromQueue)
     }
 
     func stop() {
@@ -215,7 +261,9 @@ final class AudioPlayer {
         tearDownPlayer()
         currentTrack = nil
         currentProject = nil
-        queueTrackIDs = []
+        contextProjectID = nil
+        contextTrackID = nil
+        queue = []
         isPlaying = false
         currentTime = 0
         duration = 0
@@ -235,7 +283,7 @@ final class AudioPlayer {
 
     private func handlePlaybackEnded() {
         if isLooping, let track = currentTrack, let project = currentProject {
-            play(track: track, in: project)
+            play(track: track, in: project, fromQueue: true)
             return
         }
 
@@ -245,7 +293,7 @@ final class AudioPlayer {
             updateNowPlayingInfo()
             return
         }
-        play(track: next.track, in: next.project)
+        play(track: next.track, in: next.project, fromQueue: next.fromQueue)
     }
 
     private func cancelLoad() {
@@ -264,18 +312,33 @@ final class AudioPlayer {
         return tracks.firstIndex { $0.id == currentTrack.id }
     }
 
-    private func adjacentTrack(offset: Int) -> (track: Track, project: Project)? {
-        guard let projectID = currentProject?.id,
-              let project = store.projects.first(where: { $0.id == projectID }) else { return nil }
+    private func adjacentTrack(offset: Int) -> (track: Track, project: Project, fromQueue: Bool)? {
+        if offset > 0 {
+            // Queue always takes precedence for forward navigation.
+            if let first = queueItems.first {
+                return (first.track, first.project, true)
+            }
+            // No queue: resume from the origin context project remainder.
+            if let next = contextRemainder().first {
+                return (next.track, next.project, false)
+            }
+            // Wrap around inside the context project (or current project as fallback).
+            if let project = contextProject() ?? liveCurrentProject(),
+               let first = project.tracks.first {
+                return (first, project, false)
+            }
+            return nil
+        }
+
+        // Backward navigation operates on the currently visible project.
+        guard let project = liveCurrentProject() else { return nil }
         let tracks = project.tracks
         guard !tracks.isEmpty else { return nil }
 
-        if offset > 0, let next = upcomingTracks(in: project).first {
-            return (next, project)
-        }
-
         if isShuffleEnabled, offset < 0 {
-            return shuffledAdjacentTrack(offset: offset, in: project, tracks: tracks)
+            guard let result = shuffledAdjacentTrack(offset: offset, in: project, tracks: tracks)
+            else { return nil }
+            return (result.track, result.project, false)
         }
 
         let index: Int
@@ -285,30 +348,71 @@ final class AudioPlayer {
             index = offset > 0 ? 0 : tracks.count - 1
         }
 
-        return (tracks[index], project)
+        return (tracks[index], project, false)
     }
 
-    /// Queued tracks first, then remaining project tracks after the current song.
-    private func upcomingTracks(in project: Project) -> [Track] {
-        guard let currentID = currentTrack?.id,
-              let currentIdx = project.tracks.firstIndex(where: { $0.id == currentID })
+    /// Queued items (universal, in order) followed by the remaining tracks of the
+    /// origin context project. Shuffle only reorders the project remainder, never the queue.
+    private func upcomingItems() -> [(track: Track, project: Project)] {
+        var result: [(Track, Project)] = queueItems.map { ($0.track, $0.project) }
+        for entry in contextRemainder() {
+            result.append((entry.track, entry.project))
+        }
+        return result
+    }
+
+    /// Tracks remaining in the origin context project after the context track.
+    /// Falls back to the currently playing project/track when no context is set yet.
+    private func contextRemainder() -> [(track: Track, project: Project)] {
+        let projectID = contextProjectID ?? currentProject?.id
+        let trackID = contextTrackID ?? currentTrack?.id
+        guard let projectID, let trackID,
+              let project = store.projects.first(where: { $0.id == projectID }),
+              let idx = project.tracks.firstIndex(where: { $0.id == trackID })
         else { return [] }
 
-        var upcoming: [Track] = []
-        for id in queueTrackIDs {
-            if let track = project.tracks.first(where: { $0.id == id }) {
-                upcoming.append(track)
-            }
-        }
-
         let remainder: [Track]
-        if isShuffleEnabled {
-            remainder = shuffledRemainderAfterCurrent(in: project, currentIdx: currentIdx)
+        if isShuffleEnabled, shuffleOrder.contains(trackID) {
+            remainder = shuffledRemainderAfterCurrent(in: project, currentIdx: idx)
         } else {
-            remainder = Array(project.tracks[(currentIdx + 1)...])
+            remainder = Array(project.tracks[(idx + 1)...])
         }
-        upcoming.append(contentsOf: remainder)
-        return upcoming
+        return remainder.map { ($0, project) }
+    }
+
+    private func contextProject() -> Project? {
+        guard let id = contextProjectID else { return nil }
+        return store.projects.first(where: { $0.id == id })
+    }
+
+    private func liveCurrentProject() -> Project? {
+        guard let id = currentProject?.id else { return nil }
+        return store.projects.first(where: { $0.id == id })
+    }
+
+    private func liveCurrentTrack(in project: Project) -> Track? {
+        guard let id = currentTrack?.id else { return nil }
+        return project.tracks.first(where: { $0.id == id })
+    }
+
+    /// Refreshes cached track/project metadata after renames or project edits.
+    func syncCurrentItemFromStore() {
+        guard let project = liveCurrentProject(),
+              let track = liveCurrentTrack(in: project)
+        else { return }
+
+        let metadataChanged = currentTrack?.title != track.title
+            || currentProject?.name != project.name
+            || currentProject?.coverImageFileName != project.coverImageFileName
+            || currentProject?.gradient != project.gradient
+            || currentProject?.accentColorHex != project.accentColorHex
+
+        currentTrack = track
+        currentProject = project
+
+        guard metadataChanged else { return }
+        refreshNowPlayingArtwork(for: project)
+        updateNowPlayingInfo()
     }
 
     private func shuffledRemainderAfterCurrent(in project: Project, currentIdx: Int) -> [Track] {
@@ -319,10 +423,12 @@ final class AudioPlayer {
             regenerateShuffleOrder()
         }
 
-        guard let currentID = currentTrack?.id,
-              let orderIdx = shuffleOrder.firstIndex(of: currentID)
-        else {
-            return tracks.filter { $0.id != currentTrack?.id }
+        // Use the requested project track at currentIdx as the pivot — this lets the
+        // context project's remainder be computed correctly even while a queued track
+        // from a foreign project is the actually playing track.
+        let pivotID = tracks[currentIdx].id
+        guard let orderIdx = shuffleOrder.firstIndex(of: pivotID) else {
+            return tracks.filter { $0.id != pivotID }
         }
 
         var result: [Track] = []
@@ -335,8 +441,8 @@ final class AudioPlayer {
     }
 
     private func dequeueIfQueued(_ trackID: UUID) {
-        guard let index = queueTrackIDs.firstIndex(of: trackID) else { return }
-        queueTrackIDs.remove(at: index)
+        guard let index = queue.firstIndex(where: { $0.trackID == trackID }) else { return }
+        queue.remove(at: index)
     }
 
     private func regenerateShuffleOrder() {
@@ -555,5 +661,19 @@ final class AudioPlayer {
         guard seconds.isFinite else { return "0:00" }
         let total = Int(max(0, seconds))
         return String(format: "%d:%02d", total / 60, total % 60)
+    }
+}
+
+/// Universal queue entry. Each entry has its own identity so duplicate tracks
+/// (and removal of a specific instance) can be modelled cleanly later if needed.
+struct QueuedItem: Identifiable, Hashable, Sendable {
+    let id: UUID
+    let trackID: UUID
+    let projectID: UUID
+
+    init(id: UUID = UUID(), trackID: UUID, projectID: UUID) {
+        self.id = id
+        self.trackID = trackID
+        self.projectID = projectID
     }
 }

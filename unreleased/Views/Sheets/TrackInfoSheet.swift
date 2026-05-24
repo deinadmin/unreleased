@@ -189,7 +189,7 @@ struct TrackInfoSheet: View {
                 showRenameAlert = true
             },
             TrackInfoAction(title: "Replace audio", systemImage: "waveform.badge.plus"),
-            TrackInfoAction(title: "Notes", systemImage: "note.text") {
+            TrackInfoAction(title: "Edit notes", systemImage: "doc.text") {
                 dismiss()
                 DispatchQueue.main.async {
                     onOpenNotes()
@@ -210,15 +210,13 @@ struct TrackInfoSheet: View {
             })
         }
 
-        if player.currentProject?.id == project.id {
-            actions.append(TrackInfoAction(title: "Add to queue", systemImage: "text.line.first.and.arrowtriangle.forward") {
-                player.addToQueue(liveTrack)
-                dismiss()
-                DispatchQueue.main.async {
-                    toastCenter.showTrackQueued()
-                }
-            })
-        }
+        actions.append(TrackInfoAction(title: "Add to queue", systemImage: "text.line.first.and.arrowtriangle.forward") {
+            player.addToQueue(liveTrack, in: project)
+            dismiss()
+            DispatchQueue.main.async {
+                toastCenter.showTrackQueued()
+            }
+        })
         return actions
     }
 

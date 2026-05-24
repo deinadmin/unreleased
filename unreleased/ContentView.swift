@@ -2,13 +2,11 @@ import SwiftUI
 
 struct ContentView: View {
     @Environment(AuthManager.self) private var auth
-    @Environment(\.scenePhase) private var scenePhase
     @State private var store = ProjectStore()
     @State private var player: AudioPlayer
     @State private var navigationPath = NavigationPath()
     @State private var toastCenter = PlayerToastCenter()
     @State private var searchState = AppSearchState()
-    @State private var wasInBackground = false
 
     /// Matches `safeAreaBar` clearance above the mini player.
     private let miniPlayerReservedHeight: CGFloat = 66
@@ -31,8 +29,10 @@ struct ContentView: View {
 
     init() {
         let store = ProjectStore()
+        let player = AudioPlayer(store: store)
+        store.audioPlayer = player
         _store = State(initialValue: store)
-        _player = State(initialValue: AudioPlayer(store: store))
+        _player = State(initialValue: player)
     }
 
     var body: some View {
@@ -104,33 +104,17 @@ struct ContentView: View {
             }
         }
         .ignoresSafeArea(edges: player.isShowingNowPlaying ? .bottom : [])
-        // Slower open, snappier close — keyed off the destination state.
+        // Snappier open, fast close — keyed off the destination state.
         .animation(
             .spring(
-                response: player.isShowingNowPlaying ? 0.48 : 0.30,
-                dampingFraction: player.isShowingNowPlaying ? 0.82 : 0.86
+                response: player.isShowingNowPlaying ? 0.38 : 0.30,
+                dampingFraction: player.isShowingNowPlaying ? 0.88 : 0.86
             ),
             value: player.isShowingNowPlaying
         )
         .animation(.smooth(duration: 0.35), value: player.currentTrack?.id)
         .task(id: auth.signedInUserID) {
             store.configureSync(userID: auth.signedInUserID)
-        }
-        .onChange(of: scenePhase) { _, newPhase in
-            switch newPhase {
-            case .background:
-                wasInBackground = true
-            case .active:
-                if wasInBackground, player.currentTrack != nil {
-                    if searchState.isActive {
-                        searchState.deactivate()
-                    }
-                    player.isShowingNowPlaying = true
-                }
-                wasInBackground = false
-            default:
-                break
-            }
         }
     }
 

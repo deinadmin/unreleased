@@ -95,7 +95,7 @@ struct EmailPasswordAuthView: View {
         .padding(.horizontal, AuthChrome.horizontalPadding)
         .padding(.top, 8)
         .padding(.bottom, 12)
-        .background(Color.white.ignoresSafeArea())
+        .background(AuthChrome.pageBackground.ignoresSafeArea())
         .navigationBarBackButtonHidden(true)
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
@@ -153,10 +153,10 @@ struct EmailPasswordAuthView: View {
         }
         .padding(.horizontal, 16)
         .frame(height: 56)
-        .background(Color(white: 0.96), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .background(AuthChrome.elevatedFill, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .strokeBorder(Color.black.opacity(0.06), lineWidth: 1)
+                .strokeBorder(AuthChrome.borderColor, lineWidth: 1)
         }
     }
 

@@ -53,7 +53,7 @@ struct WelcomeView: View {
                 .padding(.horizontal, 40)
                 .padding(.bottom, 16)
         }
-        .background(Color.white.ignoresSafeArea())
+        .background(AuthChrome.pageBackground.ignoresSafeArea())
         .navigationBarHidden(true)
         .navigationDestination(for: AuthRoute.self) { route in
             switch route {

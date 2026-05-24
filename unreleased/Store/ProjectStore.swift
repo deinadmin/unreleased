@@ -39,6 +39,10 @@ final class ProjectStore {
     private var syncService: ProjectSyncService?
     private var downloadTasks: [UUID: Task<Void, Never>] = [:]
     private var suppressSync = false
+    /// Stable `UIImage` instances so SwiftUI doesn't crossfade covers on unrelated state updates.
+    private var coverImageCache: [String: UIImage] = [:]
+    /// Kept weak so store updates can refresh lock-screen / Control Center metadata.
+    weak var audioPlayer: AudioPlayer?
 
     init() {
         load()
@@ -99,6 +103,7 @@ final class ProjectStore {
         updated.updatedDate = Date()
         projects[index] = updated
         save()
+        audioPlayer?.syncCurrentItemFromStore()
     }
 
     func deleteProject(_ project: Project) {
@@ -175,9 +180,13 @@ final class ProjectStore {
 
     func loadCoverImage(fileName: String?) -> UIImage? {
         guard let fileName else { return nil }
+        if let cached = coverImageCache[fileName] { return cached }
         let url = coverImagesURL.appendingPathComponent(fileName)
-        guard let data = try? Data(contentsOf: url) else { return nil }
-        return UIImage(data: data)
+        guard let data = try? Data(contentsOf: url),
+              let image = UIImage(data: data)
+        else { return nil }
+        coverImageCache[fileName] = image
+        return image
     }
 
     @discardableResult
@@ -187,6 +196,7 @@ final class ProjectStore {
         guard let data = image.jpegData(compressionQuality: 0.85) else { return nil }
         do {
             try data.write(to: url, options: .atomic)
+            coverImageCache[fileName] = image
             return fileName
         } catch {
             print("ProjectStore: cover save failed — \(error)")
@@ -196,6 +206,7 @@ final class ProjectStore {
 
     func deleteCoverImage(fileName: String?) {
         guard let fileName else { return }
+        coverImageCache.removeValue(forKey: fileName)
         let url = coverImagesURL.appendingPathComponent(fileName)
         try? FileManager.default.removeItem(at: url)
     }
@@ -370,6 +381,7 @@ final class ProjectStore {
         projects[pIdx].tracks[tIdx].title = title
         projects[pIdx].updatedDate = Date()
         save()
+        audioPlayer?.syncCurrentItemFromStore()
     }
 
     /// Analyzes waveform from a local audio file. Call after playback has cached the track. Never synced to Firestore.

@@ -6,7 +6,9 @@ enum AuthChrome {
     static let socialButtonHeight: CGFloat = 56
     static let primaryButtonHeight: CGFloat = 56
     static let horizontalPadding: CGFloat = 28
-    static let socialFill = Color(white: 0.96)
+    static let pageBackground = Color(.systemBackground)
+    static let elevatedFill = Color(.secondarySystemBackground)
+    static let borderColor = Color.primary.opacity(0.06)
 
     static let headlineFont = Font.system(size: 26, weight: .bold)
     static let bodyFont = Font.system(size: 15)
@@ -14,6 +16,8 @@ enum AuthChrome {
 }
 
 struct AuthAppMark: View {
+    @Environment(\.colorScheme) private var colorScheme
+
     var size: CGFloat = 112
     var cornerRadius: CGFloat = 28
 
@@ -28,11 +32,16 @@ struct AuthAppMark: View {
     var body: some View {
         ZStack {
             RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                .fill(Color.white)
-                .shadow(color: .black.opacity(0.08), radius: 24, x: 0, y: 10)
+                .fill(AuthChrome.elevatedFill)
+                .shadow(
+                    color: .black.opacity(colorScheme == .dark ? 0.35 : 0.08),
+                    radius: 24,
+                    x: 0,
+                    y: 10
+                )
                 .overlay {
                     RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                        .strokeBorder(Color.black.opacity(0.06), lineWidth: 1)
+                        .strokeBorder(AuthChrome.borderColor, lineWidth: 1)
                 }
 
             ProjectCoverView(
@@ -63,10 +72,10 @@ struct AuthSocialButton: View {
             }
             .frame(maxWidth: .infinity)
             .frame(height: AuthChrome.socialButtonHeight)
-            .background(AuthChrome.socialFill, in: Capsule())
+            .background(AuthChrome.elevatedFill, in: Capsule())
             .overlay {
                 Capsule()
-                    .strokeBorder(Color.black.opacity(0.06), lineWidth: 1)
+                    .strokeBorder(AuthChrome.borderColor, lineWidth: 1)
             }
         }
         .buttonStyle(.scale)
@@ -83,94 +92,40 @@ enum AuthSocialIcon {
         case .apple:
             Image(systemName: "apple.logo")
                 .font(.system(size: 20, weight: .medium))
-                .foregroundStyle(.black)
+                .foregroundStyle(.primary)
         case .google:
-            GoogleGLogo()
-                .fixedSize()
+            Image("Google")
+                .resizable()
+                .scaledToFit()
         }
-    }
-}
-
-/// Google "G" mark — square layout so it isn't stretched by the social button height.
-private struct GoogleGLogo: View {
-    private let blue = Color(red: 66 / 255, green: 133 / 255, blue: 244 / 255)
-    private let red = Color(red: 234 / 255, green: 67 / 255, blue: 53 / 255)
-    private let yellow = Color(red: 251 / 255, green: 188 / 255, blue: 5 / 255)
-    private let green = Color(red: 52 / 255, green: 168 / 255, blue: 83 / 255)
-
-    var body: some View {
-        GeometryReader { geo in
-            let side = min(geo.size.width, geo.size.height)
-            let center = CGPoint(x: geo.size.width / 2, y: geo.size.height / 2)
-            let outer = side * 0.48
-            let inner = side * 0.30
-            let stroke = side * 0.18
-
-            ZStack {
-                ringSegment(center: center, outer: outer, inner: inner, start: -45, end: 45, color: blue)
-                ringSegment(center: center, outer: outer, inner: inner, start: 45, end: 135, color: yellow)
-                ringSegment(center: center, outer: outer, inner: inner, start: 135, end: 225, color: green)
-                ringSegment(center: center, outer: outer, inner: inner, start: 225, end: 315, color: red)
-
-                // Horizontal bar of the G
-                Path { path in
-                    path.addRect(
-                        CGRect(
-                            x: center.x - stroke * 0.05,
-                            y: center.y - stroke / 2,
-                            width: outer * 0.95,
-                            height: stroke
-                        )
-                    )
-                }
-                .fill(blue)
-            }
-        }
-        .aspectRatio(1, contentMode: .fit)
-        .frame(width: 20, height: 20)
-    }
-
-    private func ringSegment(
-        center: CGPoint,
-        outer: CGFloat,
-        inner: CGFloat,
-        start: Double,
-        end: Double,
-        color: Color
-    ) -> some View {
-        Path { path in
-            path.addArc(
-                center: center,
-                radius: outer,
-                startAngle: .degrees(start),
-                endAngle: .degrees(end),
-                clockwise: false
-            )
-            path.addArc(
-                center: center,
-                radius: inner,
-                startAngle: .degrees(end),
-                endAngle: .degrees(start),
-                clockwise: true
-            )
-            path.closeSubpath()
-        }
-        .fill(color)
     }
 }
 
 struct AuthPrimaryButton: View {
+    @Environment(\.colorScheme) private var colorScheme
+
     let title: String
     var isEnabled: Bool = true
     var isLoading: Bool = false
     var action: () -> Void
+
+    private var buttonFill: Color {
+        guard isEnabled else {
+            return colorScheme == .dark ? Color.white.opacity(0.35) : Color.black.opacity(0.35)
+        }
+        return colorScheme == .dark ? .white : .black
+    }
+
+    private var labelColor: Color {
+        colorScheme == .dark ? .black : .white
+    }
 
     var body: some View {
         Button(action: action) {
             ZStack {
                 if isLoading {
                     ProgressView()
-                        .tint(.white)
+                        .tint(labelColor)
                 } else {
                     Text(title)
                         .font(.system(size: 17, weight: .bold))
@@ -178,8 +133,8 @@ struct AuthPrimaryButton: View {
             }
             .frame(maxWidth: .infinity)
             .frame(height: AuthChrome.primaryButtonHeight)
-            .background(isEnabled ? Color.black : Color.black.opacity(0.35), in: Capsule())
-            .foregroundStyle(.white)
+            .background(buttonFill, in: Capsule())
+            .foregroundStyle(labelColor)
         }
         .buttonStyle(.scale)
         .disabled(!isEnabled || isLoading)

@@ -54,7 +54,9 @@ private struct CoverPhotoSwatch: View {
                 if let image {
                     Image(uiImage: image)
                         .resizable()
+                        .frame(width: 60, height: 60)
                         .scaledToFill()
+                        .clipped()
                         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                 } else {
                     Image(systemName: "photo.on.rectangle")
