@@ -23,6 +23,12 @@ struct PlayerView: View {
     /// Tracks whether the mini-player cover button is being held down so the
     /// hero cover (and its placeholder) can show a press-scale effect.
     @State private var isCoverPressed = false
+    /// Live scrubbing progress during waveform drag (used for cover rotation).
+    @State private var liveScrubProgress: Double = 0
+    /// Whether we're currently scrubbing (used for timestamp updates).
+    @State private var isScrubbing: Bool = false
+    /// Target progress position after a seek completes — displayed until player catches up.
+    @State private var targetScrubProgress: Double? = nil
 
     @Namespace private var morph
 
@@ -292,7 +298,10 @@ struct PlayerView: View {
                         isLoadingAudio: player.isLoadingAudio,
                         loadingProgress: player.loadingProgress,
                         showsMiniOverlay: true,
-                        showsShadow: false
+                        showsShadow: false,
+                        playbackProgress: player.playbackProgress,
+                        isScrubbing: false,
+                        duration: player.duration
                     )
                     .allowsHitTesting(false)
                     .scaleEffect(isCoverPressed ? 0.88 : 1.0)
@@ -368,7 +377,10 @@ struct PlayerView: View {
             isLoadingAudio: player.isLoadingAudio,
             loadingProgress: player.loadingProgress,
             showsMiniOverlay: !isExpanded,
-            showsShadow: isExpanded && !isShowingQueue
+            showsShadow: isExpanded && !isShowingQueue,
+            playbackProgress: targetScrubProgress ?? (isScrubbing ? liveScrubProgress : player.playbackProgress),
+            isScrubbing: isScrubbing,
+            duration: player.duration
         )
         .id(coverArtIdentity(for: project))
         .matchedGeometryEffect(id: "cover", in: morph, isSource: false)
@@ -397,12 +409,32 @@ struct PlayerView: View {
             onScrubOverlayChange: !isExpanded ? { visible, progress in
                 miniScrubPillVisible = visible
                 miniScrubProgress = progress
+                isScrubbing = visible
             } : nil,
             visibleBars: isExpanded ? 44 : 38,
-            onSeek: { p in player.seek(to: p * player.duration) }
+            onScrubProgress: { progress in
+                liveScrubProgress = progress
+                isScrubbing = true
+            },
+            onSeek: { p in
+                targetScrubProgress = p
+                isScrubbing = false
+                player.seek(to: p * player.duration)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    targetScrubProgress = nil
+                }
+            }
         )
         .frame(height: isExpanded ? 60 : 26)
         .frame(maxWidth: isExpanded ? .infinity : nil)
+        .onChange(of: player.currentTime) { _, _ in
+            if let target = targetScrubProgress {
+                let tolerance = player.duration * 0.01
+                if abs(player.currentTime - target * player.duration) < tolerance {
+                    targetScrubProgress = nil
+                }
+            }
+        }
     }
 
     // MARK: - Expanded sections
@@ -429,8 +461,17 @@ struct PlayerView: View {
     }
 
     private var timeRow: some View {
-        HStack {
-            Text(player.formattedCurrentTime)
+        let displayTime: TimeInterval
+        if let target = targetScrubProgress {
+            displayTime = target * player.duration
+        } else if isScrubbing {
+            displayTime = liveScrubProgress * player.duration
+        } else {
+            displayTime = player.currentTime
+        }
+        let displayFormatted = formatPlaybackTime(displayTime)
+        return HStack {
+            Text(displayFormatted)
             Spacer()
             Text(player.formattedDuration)
         }
@@ -930,14 +971,38 @@ private struct HeroCoverView: View {
     let loadingProgress: Double
     let showsMiniOverlay: Bool
     let showsShadow: Bool
+    /// Current playback progress (0…1), already scrub-adjusted by the parent.
+    let playbackProgress: Double
+    /// True while the user's finger is on the waveform scrubber.
+    let isScrubbing: Bool
+    /// Track duration in seconds — calibrates scrub rotation to match play-speed.
+    let duration: TimeInterval
+
+    // Accumulated rotation in degrees at the last pause/scrub-start.
+    @State private var accumulatedDegrees: Double = 0
+    // Non-nil only while playing (and not scrubbing) so the TimelineView can
+    // advance the angle in real time without needing a SwiftUI animation.
+    @State private var playStartDate: Date? = nil
+    // Progress value at the moment the most recent scrub gesture started,
+    // used to compute rotation delta as the finger moves.
+    @State private var lastScrubProgress: Double = 0
+
+    /// 18 °/s → one full revolution every 20 seconds, matching a slow vinyl spin.
+    private let degreesPerSecond: Double = 18.0
 
     /// Subtle "paused = slightly shrunken" feel in the expanded player view.
     private var coverScale: CGFloat {
         showsShadow ? (isPlaying ? 1.0 : 0.93) : 1.0
     }
 
+    /// Rotation angle at a given instant, accounting for elapsed play time.
+    private func rotationAt(_ date: Date) -> Double {
+        guard let start = playStartDate else { return accumulatedDegrees }
+        return accumulatedDegrees + date.timeIntervalSince(start) * degreesPerSecond
+    }
+
     @ViewBuilder
-    private var coverArtwork: some View {
+    private func coverArtwork(rotation: Double) -> some View {
         Group {
             if let coverImage {
                 ZStack {
@@ -957,53 +1022,96 @@ private struct HeroCoverView: View {
         .animation(nil, value: isPlaying)
         .scaleEffect(coverScale)
         .animation(showsShadow ? .smooth(duration: 0.4) : nil, value: isPlaying)
+        .rotationEffect(.degrees(rotation))
     }
 
     var body: some View {
-        ZStack {
+        // Pause the timeline when not playing or when the user is scrubbing.
+        // Scrub rotation is driven by onChange(of: playbackProgress) instead,
+        // so there is no need for per-frame ticks during a scrub gesture.
+        TimelineView(.animation(minimumInterval: nil, paused: !isPlaying || isScrubbing)) { tl in
+            let degrees = rotationAt(tl.date)
+            ZStack {
 
-            // Cover artwork clipped to a circle.
-            coverArtwork
-                .background {
-                    Circle()
-                        .fill(.black.opacity(0.001))
-                        .shadow(
-                            color: .black.opacity(showsShadow ? 0.4 : 0),
-                            radius: showsShadow ? 26 : 0,
-                            x: 0,
-                            y: showsShadow ? 10 : 0
-                        )
-                }
-
-            // Mini-bar dim layer (fades out when the player expands).
-            Circle()
-                .fill(.black.opacity(0.18))
-                .opacity(showsMiniOverlay ? 1 : 0)
-
-            // Mini-bar play/pause icon (or loading indicator).
-            Group {
-                if isLoadingAudio {
-                    Group {
-                        if loadingProgress > 0 {
-                            ProgressView(value: loadingProgress)
-                                .progressViewStyle(.circular)
-                        } else {
-                            ProgressView()
-                                .progressViewStyle(.circular)
-                        }
+                // Cover artwork clipped to a circle.
+                coverArtwork(rotation: degrees)
+                    .background {
+                        Circle()
+                            .fill(.black.opacity(0.001))
+                            .shadow(
+                                color: .black.opacity(showsShadow ? 0.4 : 0),
+                                radius: showsShadow ? 26 : 0,
+                                x: 0,
+                                y: showsShadow ? 10 : 0
+                            )
                     }
-                    .tint(.white)
-                    .scaleEffect(0.9)
-                } else {
-                    Image(systemName: isPlaying ? "pause.fill" : "play.fill")
-                        .font(.system(size: 14, weight: .bold))
-                        .foregroundStyle(.white)
-                        .animation(nil, value: isPlaying)
+
+                // Mini-bar dim layer (fades out when the player expands).
+                Circle()
+                    .fill(.black.opacity(0.18))
+                    .opacity(showsMiniOverlay ? 1 : 0)
+
+                // Mini-bar play/pause icon (or loading indicator).
+                Group {
+                    if isLoadingAudio {
+                        Group {
+                            if loadingProgress > 0 {
+                                ProgressView(value: loadingProgress)
+                                    .progressViewStyle(.circular)
+                            } else {
+                                ProgressView()
+                                    .progressViewStyle(.circular)
+                            }
+                        }
+                        .tint(.white)
+                        .scaleEffect(0.9)
+                    } else {
+                        Image(systemName: isPlaying ? "pause.fill" : "play.fill")
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundStyle(.white)
+                            .animation(nil, value: isPlaying)
+                    }
                 }
+                .opacity(showsMiniOverlay ? 1 : 0)
             }
-            .opacity(showsMiniOverlay ? 1 : 0)
         }
         .aspectRatio(1, contentMode: .fit)
+        .onAppear {
+            lastScrubProgress = playbackProgress
+            if isPlaying && !isScrubbing {
+                playStartDate = Date()
+            }
+        }
+        // Play/pause: start or freeze the real-time angle accumulator.
+        .onChange(of: isPlaying) { _, playing in
+            if playing && !isScrubbing {
+                playStartDate = Date()
+            } else {
+                accumulatedDegrees = rotationAt(Date())
+                playStartDate = nil
+            }
+        }
+        // Scrub start/end: freeze time-based rotation and hand control to
+        // the playbackProgress onChange below; resume on scrub end.
+        .onChange(of: isScrubbing) { _, scrubbing in
+            if scrubbing {
+                accumulatedDegrees = rotationAt(Date())
+                playStartDate = nil
+                lastScrubProgress = playbackProgress
+            } else if isPlaying {
+                playStartDate = Date()
+            }
+        }
+        // Drive rotation from scrub position. Delta is scaled so that
+        // scrubbing across the entire track rotates the same total angle
+        // as playing the track would — keeping the two motions in sync.
+        .onChange(of: playbackProgress) { _, newProgress in
+            guard isScrubbing else { return }
+            let effectiveDuration = duration > 0 ? duration : 180.0
+            let delta = newProgress - lastScrubProgress
+            accumulatedDegrees += delta * effectiveDuration * degreesPerSecond
+            lastScrubProgress = newProgress
+        }
     }
 }
 

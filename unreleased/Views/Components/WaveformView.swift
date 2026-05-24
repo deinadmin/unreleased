@@ -80,6 +80,8 @@ struct ScrollingMiniWaveformView: View {
     /// When true, reports scrub overlay visibility/progress to the parent (mini player pill).
     var showsScrubTimeOverlay: Bool = false
     var onScrubOverlayChange: ((Bool, Double) -> Void)?
+    /// Called whenever scrubbing happens, with the current scrub progress (0…1).
+    var onScrubProgress: ((Double) -> Void)?
     /// How many bars are visible in the sliding window at once.
     var visibleBars: Int
     var onSeek: ((Double) -> Void)?
@@ -118,6 +120,7 @@ struct ScrollingMiniWaveformView: View {
          showsScrubTimeOverlay: Bool = false,
          onScrubOverlayChange: ((Bool, Double) -> Void)? = nil,
          visibleBars: Int = 38,
+         onScrubProgress: ((Double) -> Void)? = nil,
          onSeek: ((Double) -> Void)? = nil) {
         self.trackID = trackID
         self.waveformData = waveformData
@@ -125,6 +128,7 @@ struct ScrollingMiniWaveformView: View {
         self.duration = duration
         self.showsScrubTimeOverlay = showsScrubTimeOverlay
         self.onScrubOverlayChange = onScrubOverlayChange
+        self.onScrubProgress = onScrubProgress
         self.visibleBars = visibleBars
         self.onSeek = onSeek
         // Seed the anchor from the live progress value so the very first
@@ -198,6 +202,7 @@ struct ScrollingMiniWaveformView: View {
         // Rubber-band only the visuals; integrate on `raw` so momentum math stays stable.
         displayProgress = rubberBandedProgress(raw)
         reportScrubOverlayIfNeeded()
+        reportScrubProgressIfNeeded()
 
         let clamped = min(1, max(0, raw))
         let newIdx = Int(clamped * Double(max(1, effectiveBars.count - 1)))
@@ -221,6 +226,11 @@ struct ScrollingMiniWaveformView: View {
     private func reportScrubOverlayIfNeeded() {
         guard showsScrubTimeOverlay, isScrubbing else { return }
         onScrubOverlayChange?(true, min(1, max(0, displayProgress)))
+    }
+
+    private func reportScrubProgressIfNeeded() {
+        guard isScrubbing else { return }
+        onScrubProgress?(min(1, max(0, displayProgress)))
     }
 
     var body: some View {
@@ -309,6 +319,7 @@ struct ScrollingMiniWaveformView: View {
                             )
                             displayProgress = newP
                             reportScrubOverlayIfNeeded()
+                            reportScrubProgressIfNeeded()
 
                             let clamped = min(1, max(0, newP))
                             let newIdx = Int(clamped * Double(max(1, totalBars - 1)))

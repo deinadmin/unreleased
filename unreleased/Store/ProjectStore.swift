@@ -459,14 +459,27 @@ final class ProjectStore {
 
     private func applyRemoteProjects(_ projects: [Project], persistLocally: Bool) {
         suppressSync = true
-        self.projects = projects
+        // waveformData is a local-only cache never written to Firestore.
+        // Re-apply it from the current store so a remote snapshot doesn't
+        // silently wipe the analyzed waveforms and cause the UI to fall
+        // back to seeded random bars mid-playback.
+        var merged = projects
+        for pIdx in merged.indices {
+            guard let local = self.projects.first(where: { $0.id == merged[pIdx].id }) else { continue }
+            for tIdx in merged[pIdx].tracks.indices where merged[pIdx].tracks[tIdx].waveformData == nil {
+                if let localTrack = local.tracks.first(where: { $0.id == merged[pIdx].tracks[tIdx].id }) {
+                    merged[pIdx].tracks[tIdx].waveformData = localTrack.waveformData
+                }
+            }
+        }
+        self.projects = merged
         if persistLocally {
             persistLocalOnly()
         }
         suppressSync = false
         syncService?.schedulePush()
 
-        for project in projects where project.coverStoragePath != nil {
+        for project in self.projects where project.coverStoragePath != nil {
             syncService?.enqueueCoverDownload(projectID: project.id)
         }
     }
@@ -495,7 +508,12 @@ final class ProjectStore {
         else { return }
 
         suppressSync = true
-        projects[pIdx].tracks[tIdx] = track
+        // Preserve local waveformData — Firestore never stores it.
+        var updatedTrack = track
+        if updatedTrack.waveformData == nil {
+            updatedTrack.waveformData = projects[pIdx].tracks[tIdx].waveformData
+        }
+        projects[pIdx].tracks[tIdx] = updatedTrack
         projects[pIdx].updatedDate = Date()
         if persistLocally {
             persistLocalOnly()
