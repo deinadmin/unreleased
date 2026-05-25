@@ -164,7 +164,7 @@ struct HomeView: View {
                             contextMenuProject = project
                             isShowingContextDocumentPicker = true
                         } label: {
-                            Label("Add Tracks", systemImage: "plus")
+                            Label("Add tracks", systemImage: "plus")
                         }
 
                         Button {
@@ -310,16 +310,15 @@ private struct ProjectCard: View {
                 if !project.tracks.isEmpty {
                     Button(action: playOrPause) {
                         ZStack {
-                            Circle()
-                                .fill(.black.opacity(0.6))
-                                .frame(width: 32, height: 32)
                             Image(systemName: showsPause ? "pause.fill" : "play.fill")
                                 .font(.system(size: 12, weight: .bold))
                                 .foregroundStyle(.white)
                                 .animation(nil, value: showsPause)
                         }
+                        .frame(width: 32, height: 32)
+                        .contentShape(.circle)
                     }
-                    .buttonStyle(.scale)
+                    .glassEffect(.regular.interactive(), in: Circle())
                     .padding(10)
                 }
             }

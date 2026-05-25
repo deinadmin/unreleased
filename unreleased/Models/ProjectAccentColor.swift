@@ -1,9 +1,9 @@
 import SwiftUI
 import UIKit
+import DominantColors
 
 enum ProjectAccentColor {
     private static let fallbackHex = "#667EEA"
-    private static let fallbackRGB = (r: 0.4, g: 0.49, b: 0.92)
 
     // MARK: - Public interface
 
@@ -22,17 +22,21 @@ enum ProjectAccentColor {
         return tunedHex(rgb: middle)
     }
 
-    /// Returns the single best accent hex from a cover image using dominant-color clustering.
+    /// Returns the single most dominant accent hex from a cover image.
     static func hex(from image: UIImage) -> String {
-        let colors = dominantColors(from: image, count: 1)
-        return tunedHex(rgb: colors[0])
+        let colors = extract(from: image, count: 1)
+        guard let first = colors.first else { return fallbackHex }
+        return tunedHex(uiColor: first)
     }
 
-    /// Returns two hex colors from a cover image that make a good gradient.
-    /// The pair is chosen to be visually distinct (≥ 30° hue separation).
+    /// Returns two hex colors from a cover image that form a good gradient.
+    /// DominantColors groups visually similar pixels, so the two results are
+    /// naturally distinct color clusters sorted by frequency.
     static func gradientHexPair(from image: UIImage) -> (String, String) {
-        let colors = dominantColors(from: image, count: 2)
-        return (tunedHex(rgb: colors[0]), tunedHex(rgb: colors[1]))
+        let colors = extract(from: image, count: 2)
+        let start = colors.count > 0 ? tunedHex(uiColor: colors[0]) : fallbackHex
+        let end   = colors.count > 1 ? tunedHex(uiColor: colors[1]) : start
+        return (start, end)
     }
 
     static func color(hex: String?) -> Color {
@@ -40,115 +44,30 @@ enum ProjectAccentColor {
         return Color(hex: hex)
     }
 
-    // MARK: - Core dominant-color analysis
+    // MARK: - Extraction via DominantColors
 
-    /// Extracts up to `count` visually distinct dominant colors using hue-bucket weighted averaging.
-    ///
-    /// Algorithm:
-    /// 1. Renders a 120×120 thumbnail for consistent and fast sampling.
-    /// 2. Filters pixels: saturation > 0.15, brightness 0.22–0.96 (ignores near-black/white/grey).
-    /// 3. Buckets pixels by hue into 36 bins (10° each), weighting by saturation² × brightness score.
-    /// 4. Averages each non-empty bucket to get a representative color.
-    /// 5. Selects up to `count` buckets with at least 30° mutual hue separation (most-dominant first).
-    private static func dominantColors(
-        from image: UIImage,
-        count: Int
-    ) -> [(r: Double, g: Double, b: Double)] {
-        let side = 120
-        let size = CGSize(width: side, height: side)
-        let format = UIGraphicsImageRendererFormat()
-        format.scale = 1
-        format.opaque = true
-        let thumbnail = UIGraphicsImageRenderer(size: size, format: format).image { _ in
-            image.draw(in: CGRect(origin: .zero, size: size))
-        }
-
-        guard let cgImage = thumbnail.cgImage,
-              let data = cgImage.dataProvider?.data,
-              let bytes = CFDataGetBytePtr(data)
-        else { return Array(repeating: fallbackRGB, count: count) }
-
-        let width = cgImage.width
-        let height = cgImage.height
-        let bpp = cgImage.bitsPerPixel / 8
-        guard bpp >= 3 else { return Array(repeating: fallbackRGB, count: count) }
-
-        let numBuckets = 36
-        var rSum = [Double](repeating: 0, count: numBuckets)
-        var gSum = [Double](repeating: 0, count: numBuckets)
-        var bSum = [Double](repeating: 0, count: numBuckets)
-        var wSum = [Double](repeating: 0, count: numBuckets)
-
-        for y in stride(from: 0, to: height, by: 2) {
-            for x in stride(from: 0, to: width, by: 2) {
-                let offset = y * cgImage.bytesPerRow + x * bpp
-                let r = Double(bytes[offset]) / 255
-                let g = Double(bytes[offset + 1]) / 255
-                let b = Double(bytes[offset + 2]) / 255
-
-                var hue: CGFloat = 0
-                var sat: CGFloat = 0
-                var bri: CGFloat = 0
-                var alpha: CGFloat = 0
-                UIColor(red: r, green: g, blue: b, alpha: 1)
-                    .getHue(&hue, saturation: &sat, brightness: &bri, alpha: &alpha)
-
-                let s = Double(sat)
-                let v = Double(bri)
-                guard s > 0.15, v > 0.22, v < 0.96 else { continue }
-
-                // Pixels close to the brightness sweet-spot (≈0.65) score higher.
-                let brightnessScore = max(1.0 - abs(v - 0.65) / 0.65, 0.1)
-                let w = s * s * brightnessScore
-
-                let bucket = min(Int(Double(hue) * Double(numBuckets)), numBuckets - 1)
-                rSum[bucket] += r * w
-                gSum[bucket] += g * w
-                bSum[bucket] += b * w
-                wSum[bucket] += w
-            }
-        }
-
-        struct Bucket {
-            let index: Int
-            let rgb: (r: Double, g: Double, b: Double)
-            let weight: Double
-        }
-
-        var buckets: [Bucket] = []
-        for i in 0..<numBuckets {
-            guard wSum[i] > 0 else { continue }
-            buckets.append(Bucket(
-                index: i,
-                rgb: (rSum[i] / wSum[i], gSum[i] / wSum[i], bSum[i] / wSum[i]),
-                weight: wSum[i]
-            ))
-        }
-
-        guard !buckets.isEmpty else { return Array(repeating: fallbackRGB, count: count) }
-        buckets.sort { $0.weight > $1.weight }
-
-        if count == 1 { return [buckets[0].rgb] }
-
-        // Select up to `count` buckets with ≥ 30° (3 buckets) mutual hue separation.
-        let minSep = numBuckets / 12
-        var selected: [Bucket] = [buckets[0]]
-        for candidate in buckets.dropFirst() {
-            let separated = selected.allSatisfy { existing in
-                let diff = abs(existing.index - candidate.index)
-                return min(diff, numBuckets - diff) >= minSep
-            }
-            if separated { selected.append(candidate) }
-            if selected.count == count { break }
-        }
-
-        while selected.count < count { selected.append(buckets[0]) }
-        return selected.map { $0.rgb }
+    /// Extracts up to `count` dominant UIColors, excluding black / white / grey,
+    /// sorted by pixel frequency. Uses `.fair` quality for a fast pixelate pass.
+    private static func extract(from image: UIImage, count: Int) -> [UIColor] {
+        let colors = try? DominantColors.dominantColors(
+            uiImage: image,
+            quality: .fair,
+            maxCount: count,
+            options: [.excludeBlack, .excludeWhite, .excludeGray],
+            sorting: .frequency
+        )
+        return colors ?? []
     }
 
     // MARK: - Tuning
 
-    /// Clamps saturation and brightness into a display-pleasing range.
+    /// Boosts saturation slightly and clamps brightness into a display-pleasing range.
+    private static func tunedHex(uiColor: UIColor) -> String {
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        uiColor.getRed(&r, green: &g, blue: &b, alpha: &a)
+        return tunedHex(rgb: (Double(r), Double(g), Double(b)))
+    }
+
     private static func tunedHex(_ hex: String) -> String {
         tunedHex(rgb: rgb(from: hex))
     }
@@ -164,9 +83,7 @@ enum ProjectAccentColor {
         let sat = min(max(Double(saturation) * 1.05, 0.42), 0.88)
         let bri = min(max(Double(brightness) * 1.06, 0.50), 0.80)
         let color = UIColor(hue: hue, saturation: sat, brightness: bri, alpha: 1)
-        var r: CGFloat = 0
-        var g: CGFloat = 0
-        var b: CGFloat = 0
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0
         color.getRed(&r, green: &g, blue: &b, alpha: &alpha)
         return String(format: "#%02X%02X%02X", Int(r * 255), Int(g * 255), Int(b * 255))
     }

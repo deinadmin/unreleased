@@ -13,12 +13,16 @@ enum FirestoreProjectCodec {
         ]
         if let coverStoragePath = project.coverStoragePath {
             payload["coverStoragePath"] = coverStoragePath
+        } else {
+            payload["coverStoragePath"] = FieldValue.delete()
         }
         if let accentColorHex = project.accentColorHex {
             payload["accentColorHex"] = accentColorHex
         }
         if let coverGradientColors = project.coverGradientColors {
             payload["coverGradientColors"] = coverGradientColors
+        } else {
+            payload["coverGradientColors"] = FieldValue.delete()
         }
         return payload
     }
@@ -41,9 +45,7 @@ enum FirestoreProjectCodec {
             id: id,
             name: name,
             gradient: gradient,
-            coverImageFileName: data["coverStoragePath"] != nil
-                ? "\(id.uuidString).jpg"
-                : nil,
+            coverImageFileName: (data["coverStoragePath"] as? String).map { URL(fileURLWithPath: $0).lastPathComponent },
             coverStoragePath: data["coverStoragePath"] as? String,
             accentColorHex: data["accentColorHex"] as? String,
             coverGradientColors: data["coverGradientColors"] as? [String],

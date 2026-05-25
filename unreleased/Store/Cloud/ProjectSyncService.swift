@@ -32,6 +32,8 @@ final class ProjectSyncService {
     private var uploadTasks: [UUID: Task<Void, Never>] = [:]
     private var coverUploadTasks: [UUID: Task<Void, Never>] = [:]
     private var coverDownloadTasks: [UUID: Task<Void, Never>] = [:]
+    /// Storage paths that returned 404 — skip retrying until next session.
+    private var failedCoverStoragePaths: Set<String> = []
 
     init(
         userID: String,
@@ -84,6 +86,7 @@ final class ProjectSyncService {
         coverDownloadTasks.values.forEach { $0.cancel() }
         coverDownloadTasks.removeAll()
         lastSyncedUpdated.removeAll()
+        failedCoverStoragePaths.removeAll()
     }
 
     func schedulePush() {
@@ -112,9 +115,10 @@ final class ProjectSyncService {
     }
 
     func enqueueCoverDownload(projectID: UUID) {
-        coverDownloadTasks[projectID]?.cancel()
+        guard coverDownloadTasks[projectID] == nil else { return }
         coverDownloadTasks[projectID] = Task { [weak self] in
             await self?.downloadCover(projectID: projectID)
+            self?.coverDownloadTasks.removeValue(forKey: projectID)
         }
     }
 
@@ -193,7 +197,7 @@ final class ProjectSyncService {
                     enqueueAudioUpload(projectID: project.id, track: track)
                 }
 
-                if project.coverImageFileName != nil {
+                if project.coverImageFileName != nil && project.coverStoragePath == nil {
                     enqueueCoverUpload(projectID: project.id)
                 }
             } catch {
@@ -239,13 +243,14 @@ final class ProjectSyncService {
 
     private func uploadCover(projectID: UUID) async {
         guard let project = snapshotProvider().first(where: { $0.id == projectID }),
-              let fileName = project.coverImageFileName
+              let fileName = project.coverImageFileName,
+              project.coverStoragePath == nil
         else { return }
 
         let localURL = coverDirectory.appendingPathComponent(fileName)
         guard FileManager.default.fileExists(atPath: localURL.path) else { return }
 
-        let storagePath = CloudPaths.coverStoragePath(userID: userID, projectID: projectID)
+        let storagePath = CloudPaths.coverStoragePath(userID: userID, fileName: fileName)
 
         do {
             _ = try await AudioFileCache.shared.upload(
@@ -266,7 +271,8 @@ final class ProjectSyncService {
 
     private func downloadCover(projectID: UUID) async {
         guard let project = snapshotProvider().first(where: { $0.id == projectID }),
-              let storagePath = project.coverStoragePath
+              let storagePath = project.coverStoragePath,
+              !failedCoverStoragePaths.contains(storagePath)
         else { return }
 
         let fileName = project.coverImageFileName ?? "\(projectID.uuidString).jpg"
@@ -277,6 +283,7 @@ final class ProjectSyncService {
         do {
             try await AudioFileCache.shared.download(storagePath: storagePath, to: destination)
         } catch {
+            failedCoverStoragePaths.insert(storagePath)
             print("ProjectSyncService: cover download failed for \(projectID) — \(error)")
         }
     }

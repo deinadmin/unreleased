@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		C367E3892FC3C284008D53DC /* ColorThiefSwift in Frameworks */ = {isa = PBXBuildFile; productRef = C367E3882FC3C284008D53DC /* ColorThiefSwift */; };
+		C367E38C2FC3C2CF008D53DC /* DominantColors in Frameworks */ = {isa = PBXBuildFile; productRef = C367E38B2FC3C2CF008D53DC /* DominantColors */; };
 		C3F169C52FBDF5A800EB18FB /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = C3F169C42FBDF5A800EB18FB /* FirebaseAuth */; };
 		C3F169C72FBDF5A800EB18FB /* FirebaseFirestore in Frameworks */ = {isa = PBXBuildFile; productRef = C3F169C62FBDF5A800EB18FB /* FirebaseFirestore */; };
 		C3F169C92FBDF5A800EB18FB /* FirebaseStorage in Frameworks */ = {isa = PBXBuildFile; productRef = C3F169C82FBDF5A800EB18FB /* FirebaseStorage */; };
@@ -32,6 +34,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				C3F169C52FBDF5A800EB18FB /* FirebaseAuth in Frameworks */,
+				C367E38C2FC3C2CF008D53DC /* DominantColors in Frameworks */,
+				C367E3892FC3C284008D53DC /* ColorThiefSwift in Frameworks */,
 				C3F169C72FBDF5A800EB18FB /* FirebaseFirestore in Frameworks */,
 				C3F169C92FBDF5A800EB18FB /* FirebaseStorage in Frameworks */,
 				C3F169CB2FBDF6A100EB18FB /* FirebaseCore in Frameworks */,
@@ -83,6 +87,8 @@
 				C3F169C62FBDF5A800EB18FB /* FirebaseFirestore */,
 				C3F169C82FBDF5A800EB18FB /* FirebaseStorage */,
 				C3F169CD2FBDF6A100EB18FB /* GoogleSignIn */,
+				C367E3882FC3C284008D53DC /* ColorThiefSwift */,
+				C367E38B2FC3C2CF008D53DC /* DominantColors */,
 			);
 			productName = unreleased;
 			productReference = C3F168C72FBBBE7800EB18FB /* unreleased.app */;
@@ -115,6 +121,8 @@
 			packageReferences = (
 				C3F169C32FBDF5A800EB18FB /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */,
 				C3F169CC2FBDF6A100EB18FB /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */,
+				C367E3872FC3C284008D53DC /* XCRemoteSwiftPackageReference "ColorThiefSwift" */,
+				C367E38A2FC3C2CF008D53DC /* XCRemoteSwiftPackageReference "DominantColors" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = C3F168C82FBBBE7800EB18FB /* Products */;
@@ -348,6 +356,22 @@
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
+		C367E3872FC3C284008D53DC /* XCRemoteSwiftPackageReference "ColorThiefSwift" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/yamoridon/ColorThiefSwift";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 0.5.0;
+			};
+		};
+		C367E38A2FC3C2CF008D53DC /* XCRemoteSwiftPackageReference "DominantColors" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/DenDmitriev/DominantColors";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 1.2.2;
+			};
+		};
 		C3F169C32FBDF5A800EB18FB /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/firebase/firebase-ios-sdk";
@@ -367,6 +391,16 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		C367E3882FC3C284008D53DC /* ColorThiefSwift */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = C367E3872FC3C284008D53DC /* XCRemoteSwiftPackageReference "ColorThiefSwift" */;
+			productName = ColorThiefSwift;
+		};
+		C367E38B2FC3C2CF008D53DC /* DominantColors */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = C367E38A2FC3C2CF008D53DC /* XCRemoteSwiftPackageReference "DominantColors" */;
+			productName = DominantColors;
+		};
 		C3F169C42FBDF5A800EB18FB /* FirebaseAuth */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = C3F169C32FBDF5A800EB18FB /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;

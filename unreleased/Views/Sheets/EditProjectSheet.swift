@@ -43,18 +43,25 @@ struct EditProjectSheet: View {
         .onAppear {
             name = project.name
             gradient = project.gradient
-            coverImage = store.coverImage(for: project)
-            if let img = store.coverImage(for: project) {
-                let (start, end) = ProjectAccentColor.gradientHexPair(from: img)
-                previewVinylGradient = GradientTheme(colors: [start, end], startX: 0, startY: 0, endX: 1, endY: 1)
+            let img = store.coverImage(for: project)
+            coverImage = img
+            if let img {
+                Task.detached(priority: .userInitiated) {
+                    let (start, end) = ProjectAccentColor.gradientHexPair(from: img)
+                    let g = GradientTheme(colors: [start, end], startX: 0, startY: 0, endX: 1, endY: 1)
+                    await MainActor.run { previewVinylGradient = g }
+                }
             }
         }
         .onChange(of: coverImage) { _, newImage in
-            if let newImage {
-                let (start, end) = ProjectAccentColor.gradientHexPair(from: newImage)
-                previewVinylGradient = GradientTheme(colors: [start, end], startX: 0, startY: 0, endX: 1, endY: 1)
-            } else {
+            guard let newImage else {
                 previewVinylGradient = nil
+                return
+            }
+            Task.detached(priority: .userInitiated) {
+                let (start, end) = ProjectAccentColor.gradientHexPair(from: newImage)
+                let g = GradientTheme(colors: [start, end], startX: 0, startY: 0, endX: 1, endY: 1)
+                await MainActor.run { previewVinylGradient = g }
             }
         }
     }

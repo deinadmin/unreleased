@@ -191,7 +191,8 @@ final class ProjectStore {
 
     @discardableResult
     func saveCoverImage(_ image: UIImage, projectID: UUID) -> String? {
-        let fileName = "\(projectID.uuidString).jpg"
+        let version = Int(Date().timeIntervalSince1970)
+        let fileName = "\(projectID.uuidString)-\(version).jpg"
         let url = coverImagesURL.appendingPathComponent(fileName)
         guard let data = image.jpegData(compressionQuality: 0.85) else { return nil }
         do {
@@ -212,8 +213,8 @@ final class ProjectStore {
     }
 
     func accentColor(for project: Project) -> Color {
-        if let image = coverImage(for: project) {
-            return ProjectAccentColor.color(hex: ProjectAccentColor.hex(from: image))
+        if let hex = project.accentColorHex {
+            return ProjectAccentColor.color(hex: hex)
         }
         return ProjectAccentColor.color(hex: ProjectAccentColor.hex(from: project.gradient))
     }
@@ -486,6 +487,11 @@ final class ProjectStore {
                 if let localTrack = local.tracks.first(where: { $0.id == merged[pIdx].tracks[tIdx].id }) {
                     merged[pIdx].tracks[tIdx].waveformData = localTrack.waveformData
                 }
+            }
+            // Delete the stale local cover when the remote project has a different cover file.
+            if let oldFileName = local.coverImageFileName,
+               oldFileName != merged[pIdx].coverImageFileName {
+                deleteCoverImage(fileName: oldFileName)
             }
         }
         self.projects = merged
