@@ -2,8 +2,16 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
-    match /users/{userId}/projects/{projectId} {
-      allow read, write: if request.auth != null && request.auth.uid == userId;
+
+    match /users/{userId} {
+      // Users can read their own plan document; only admins write it via the console.
+      allow read: if request.auth != null && request.auth.uid == userId;
+      allow write: if false;
+
+      match /projects/{projectId} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
     }
+
   }
 }

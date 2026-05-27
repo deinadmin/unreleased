@@ -62,7 +62,7 @@ struct SaveInSheet: View {
         .alert("Storage Full", isPresented: $showStorageLimitAlert) {
             Button("OK", role: .cancel) {}
         } message: {
-            Text("You've used all 5 GB of your storage. Delete some tracks to free up space.")
+            Text("You've used all \(store.formattedStorageLimit) of your storage. Delete some tracks to free up space.")
         }
     }
 

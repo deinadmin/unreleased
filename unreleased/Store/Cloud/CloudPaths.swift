@@ -3,11 +3,14 @@ import FirebaseStorage
 import Foundation
 
 enum CloudPaths {
-    static func projectsCollection(userID: String) -> CollectionReference {
+    static func userDocument(userID: String) -> DocumentReference {
         Firestore.firestore()
             .collection("users")
             .document(userID)
-            .collection("projects")
+    }
+
+    static func projectsCollection(userID: String) -> CollectionReference {
+        userDocument(userID: userID).collection("projects")
     }
 
     static func projectDocument(userID: String, projectID: UUID) -> DocumentReference {

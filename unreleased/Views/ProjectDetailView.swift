@@ -94,7 +94,7 @@ struct ProjectDetailView: View {
         .alert("Storage Full", isPresented: $showStorageLimitAlert) {
             Button("OK", role: .cancel) {}
         } message: {
-            Text("You've used all 5 GB of your storage. Delete some tracks to free up space.")
+            Text("You've used all \(store.formattedStorageLimit) of your storage. Delete some tracks to free up space.")
         }
         .alert("Import Error", isPresented: Binding(get: { importError != nil }, set: { if !$0 { importError = nil } })) {
             Button("OK", role: .cancel) {}

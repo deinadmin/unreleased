@@ -14,8 +14,12 @@ struct ProfileView: View {
                     .padding(.top, 32)
                     .padding(.bottom, 36)
 
+                myPlanSection
+                    .padding(.horizontal, 20)
+
                 settingsSection
                     .padding(.horizontal, 20)
+                    .padding(.top, 24)
 
                 signOutButton
                     .padding(.horizontal, 20)
@@ -53,6 +57,74 @@ struct ProfileView: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.horizontal, 20)
+    }
+
+    // MARK: - My Plan
+
+    private var myPlanSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("My Plan")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .padding(.leading, 4)
+
+            VStack(spacing: 0) {
+                planHeaderRow
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 14)
+
+                if let expiry = store.currentPlan.expiryDescription {
+                    Divider()
+                        .padding(.leading, 56)
+
+                    HStack(spacing: 12) {
+                        Image(systemName: "calendar")
+                            .font(.system(size: 15, weight: .medium))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 28, alignment: .center)
+
+                        Text(expiry)
+                            .font(.system(size: 14))
+                            .foregroundStyle(store.currentPlan.isExpired ? .red : .secondary)
+
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
+                }
+            }
+            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        }
+    }
+
+    private var planHeaderRow: some View {
+        let plan = store.currentPlan
+        let tier = plan.effectiveTier
+        return HStack(spacing: 12) {
+            Image(systemName: tier.icon)
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(tier.tintColor)
+                .frame(width: 28, alignment: .center)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(tier.displayName)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(.primary)
+                Text(tier.storageDescription)
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer(minLength: 0)
+
+            Text(tier.displayName.uppercased())
+                .font(.system(size: 11, weight: .bold))
+                .tracking(0.5)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(tier.tintColor.opacity(0.14), in: Capsule())
+                .foregroundStyle(tier.tintColor)
+        }
     }
 
     // MARK: - Settings

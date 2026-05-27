@@ -37,6 +37,7 @@ final class ProjectStore {
     }
 
     private var syncService: ProjectSyncService?
+    private var planService: UserPlanService?
     private var downloadTasks: [UUID: Task<Void, Never>] = [:]
     private var suppressSync = false
     /// Stable `UIImage` instances so SwiftUI doesn't crossfade covers on unrelated state updates.
@@ -48,34 +49,48 @@ final class ProjectStore {
         load()
     }
 
+    // MARK: - Plan
+
+    var currentPlan: UserPlan = .default
+
     // MARK: - Storage limit
 
-    static let storageLimitBytes: Int64 = 5_000_000_000 // 5 GB (decimal)
+    /// Nil means no cap (unlimited plan).
+    var storageLimitBytes: Int64? {
+        currentPlan.storageLimitBytes
+    }
 
     var totalUsedStorageBytes: Int64 {
         projects.flatMap(\.tracks).reduce(0) { $0 + $1.fileSize }
     }
 
     var freeStorageBytes: Int64 {
-        max(0, Self.storageLimitBytes - totalUsedStorageBytes)
+        guard let limit = storageLimitBytes else { return Int64.max }
+        return max(0, limit - totalUsedStorageBytes)
     }
 
     var storageUsedFraction: Double {
-        min(1.0, Double(totalUsedStorageBytes) / Double(Self.storageLimitBytes))
+        guard let limit = storageLimitBytes, limit > 0 else { return 0 }
+        return min(1.0, Double(totalUsedStorageBytes) / Double(limit))
     }
 
-    var hasStorageCapacity: Bool { freeStorageBytes > 0 }
+    var hasStorageCapacity: Bool {
+        guard let limit = storageLimitBytes else { return true }
+        return totalUsedStorageBytes < limit
+    }
 
     var formattedTotalUsed: String {
         ByteCountFormatter.string(fromByteCount: totalUsedStorageBytes, countStyle: .file)
     }
 
     var formattedStorageLimit: String {
-        ByteCountFormatter.string(fromByteCount: Self.storageLimitBytes, countStyle: .file)
+        guard let limit = storageLimitBytes else { return "Unlimited" }
+        return ByteCountFormatter.string(fromByteCount: limit, countStyle: .file)
     }
 
     var formattedFreeStorage: String {
-        ByteCountFormatter.string(fromByteCount: freeStorageBytes, countStyle: .file)
+        guard storageLimitBytes != nil else { return "Unlimited" }
+        return ByteCountFormatter.string(fromByteCount: freeStorageBytes, countStyle: .file)
     }
 
     // MARK: - Cloud sync
@@ -88,11 +103,23 @@ final class ProjectStore {
     }
 
     func configureSync(userID: String?) {
+        planService?.stop()
+        planService = nil
+
         syncService?.stop()
         syncService = nil
         syncStatus = userID == nil ? .offline : .syncing
 
-        guard let userID else { return }
+        guard let userID else {
+            currentPlan = .default
+            return
+        }
+
+        let plan = UserPlanService()
+        planService = plan
+        plan.start(userID: userID) { [weak self] updated in
+            self?.currentPlan = updated
+        }
 
         let service = ProjectSyncService(
             userID: userID,
