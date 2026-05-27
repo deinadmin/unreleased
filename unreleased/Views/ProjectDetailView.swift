@@ -15,6 +15,7 @@ struct ProjectDetailView: View {
     @State private var isImporting = false
     @State private var isShowingEdit = false
     @State private var importError: String? = nil
+    @State private var showStorageLimitAlert = false
     @State private var trackForInfo: Track? = nil
     @State private var showNavTitle = false
     @State private var showDeleteConfirm = false
@@ -89,6 +90,16 @@ struct ProjectDetailView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("This will permanently delete the project and all of its tracks.")
+        }
+        .alert("Storage Full", isPresented: $showStorageLimitAlert) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("You've used all 5 GB of your storage. Delete some tracks to free up space.")
+        }
+        .alert("Import Error", isPresented: Binding(get: { importError != nil }, set: { if !$0 { importError = nil } })) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(importError ?? "")
         }
     }
 
@@ -178,7 +189,11 @@ struct ProjectDetailView: View {
     @ViewBuilder
     private func addTracksButton(project: Project) -> some View {
         Button {
-            isShowingDocumentPicker = true
+            if store.hasStorageCapacity {
+                isShowingDocumentPicker = true
+            } else {
+                showStorageLimitAlert = true
+            }
         } label: {
             HStack(spacing: 8) {
                 if isImporting {
@@ -255,7 +270,11 @@ struct ProjectDetailView: View {
 
                 Menu {
                     Button {
-                        isShowingDocumentPicker = true
+                        if store.hasStorageCapacity {
+                            isShowingDocumentPicker = true
+                        } else {
+                            showStorageLimitAlert = true
+                        }
                     } label: {
                         Label("Add tracks", systemImage: "plus")
                     }
@@ -285,6 +304,16 @@ struct ProjectDetailView: View {
         isImporting = true
         Task {
             for url in urls {
+                let accessing = url.startAccessingSecurityScopedResource()
+                let fileSize = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int64) ?? 0
+                if accessing { url.stopAccessingSecurityScopedResource() }
+
+                if fileSize > 0, fileSize > store.freeStorageBytes {
+                    let name = url.deletingPathExtension().lastPathComponent
+                    importError = "\"\(name)\" is too large for your remaining storage (\(store.formattedFreeStorage) free). Free up space in Settings → Storage & Sync."
+                    continue
+                }
+
                 do {
                     let track = try await store.importAudioFile(from: url)
                     store.addTrack(track, to: project.id)

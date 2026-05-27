@@ -21,6 +21,8 @@ struct HomeView: View {
     @State private var projectAddingTracks: Project?
     @State private var projectPendingDelete: Project?
     @State private var isImportingToExisting = false
+    @State private var showStorageLimitAlert = false
+    @State private var importError: String? = nil
 
     private let columns = [
         GridItem(.flexible(), spacing: 16),
@@ -112,6 +114,16 @@ struct HomeView: View {
         } message: { _ in
             Text("This will permanently delete the project and all of its tracks.")
         }
+        .alert("Storage Full", isPresented: $showStorageLimitAlert) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("You've used all 5 GB of your storage. Delete some tracks to free up space.")
+        }
+        .alert("Import Error", isPresented: Binding(get: { importError != nil }, set: { if !$0 { importError = nil } })) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(importError ?? "")
+        }
     }
 
     // MARK: - Empty State
@@ -135,7 +147,11 @@ struct HomeView: View {
                 .padding(.horizontal, 40)
 
             Button {
-                isShowingDocumentPicker = true
+                if store.hasStorageCapacity {
+                    isShowingDocumentPicker = true
+                } else {
+                    showStorageLimitAlert = true
+                }
             } label: {
                 HStack {
                     if isImporting {
@@ -173,7 +189,11 @@ struct HomeView: View {
                     }
                     .contextMenu {
                         Button {
-                            projectAddingTracks = project
+                            if store.hasStorageCapacity {
+                                projectAddingTracks = project
+                            } else {
+                                showStorageLimitAlert = true
+                            }
                         } label: {
                             Label("Add tracks", systemImage: "plus")
                         }
@@ -255,6 +275,16 @@ struct HomeView: View {
         isImportingToExisting = true
         Task {
             for url in urls {
+                let accessing = url.startAccessingSecurityScopedResource()
+                let fileSize = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int64) ?? 0
+                if accessing { url.stopAccessingSecurityScopedResource() }
+
+                if fileSize > 0, fileSize > store.freeStorageBytes {
+                    let name = url.deletingPathExtension().lastPathComponent
+                    importError = "\"\(name)\" is too large for your remaining storage (\(store.formattedFreeStorage) free). Free up space in Settings → Storage & Sync."
+                    continue
+                }
+
                 if let track = try? await store.importAudioFile(from: url) {
                     store.addTrack(track, to: project.id)
                 }
@@ -269,9 +299,24 @@ struct HomeView: View {
         Task {
             var tracks: [Track] = []
             for url in urls {
+                let accessing = url.startAccessingSecurityScopedResource()
+                let fileSize = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int64) ?? 0
+                if accessing { url.stopAccessingSecurityScopedResource() }
+
+                if fileSize > 0, fileSize > store.freeStorageBytes {
+                    let name = url.deletingPathExtension().lastPathComponent
+                    importError = "\"\(name)\" is too large for your remaining storage (\(store.formattedFreeStorage) free). Free up space in Settings → Storage & Sync."
+                    continue
+                }
+
                 if let track = try? await store.importAudioFile(from: url) {
                     tracks.append(track)
                 }
+            }
+
+            guard !tracks.isEmpty else {
+                isImporting = false
+                return
             }
 
             let name = tracks.count == 1

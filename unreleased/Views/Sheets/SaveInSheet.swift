@@ -13,6 +13,7 @@ struct SaveInSheet: View {
     @State private var searchText = ""
     @State private var isShowingCreate = false
     @State private var isSaving = false
+    @State private var showStorageLimitAlert = false
 
     private var ownerLabel: String {
         if let email = auth.accountLabel,
@@ -57,6 +58,11 @@ struct SaveInSheet: View {
             CreateProjectSheet { project in
                 saveToProject(project)
             }
+        }
+        .alert("Storage Full", isPresented: $showStorageLimitAlert) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("You've used all 5 GB of your storage. Delete some tracks to free up space.")
         }
     }
 
@@ -106,7 +112,11 @@ struct SaveInSheet: View {
     @ViewBuilder
     private var createProjectRow: some View {
         Button {
-            isShowingCreate = true
+            if store.hasStorageCapacity {
+                isShowingCreate = true
+            } else {
+                showStorageLimitAlert = true
+            }
         } label: {
             HStack(spacing: 14) {
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
@@ -168,6 +178,20 @@ struct SaveInSheet: View {
     // MARK: - Actions
 
     private func saveToProject(_ project: Project) {
+        guard store.hasStorageCapacity else {
+            showStorageLimitAlert = true
+            return
+        }
+
+        let accessing = audioURL.startAccessingSecurityScopedResource()
+        let fileSize = (try? FileManager.default.attributesOfItem(atPath: audioURL.path)[.size] as? Int64) ?? 0
+        if accessing { audioURL.stopAccessingSecurityScopedResource() }
+
+        if fileSize > 0, fileSize > store.freeStorageBytes {
+            showStorageLimitAlert = true
+            return
+        }
+
         isSaving = true
         Task {
             do {

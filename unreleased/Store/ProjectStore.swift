@@ -48,6 +48,36 @@ final class ProjectStore {
         load()
     }
 
+    // MARK: - Storage limit
+
+    static let storageLimitBytes: Int64 = 5_000_000_000 // 5 GB (decimal)
+
+    var totalUsedStorageBytes: Int64 {
+        projects.flatMap(\.tracks).reduce(0) { $0 + $1.fileSize }
+    }
+
+    var freeStorageBytes: Int64 {
+        max(0, Self.storageLimitBytes - totalUsedStorageBytes)
+    }
+
+    var storageUsedFraction: Double {
+        min(1.0, Double(totalUsedStorageBytes) / Double(Self.storageLimitBytes))
+    }
+
+    var hasStorageCapacity: Bool { freeStorageBytes > 0 }
+
+    var formattedTotalUsed: String {
+        ByteCountFormatter.string(fromByteCount: totalUsedStorageBytes, countStyle: .file)
+    }
+
+    var formattedStorageLimit: String {
+        ByteCountFormatter.string(fromByteCount: Self.storageLimitBytes, countStyle: .file)
+    }
+
+    var formattedFreeStorage: String {
+        ByteCountFormatter.string(fromByteCount: freeStorageBytes, countStyle: .file)
+    }
+
     // MARK: - Cloud sync
 
     enum SyncStatus: Equatable {

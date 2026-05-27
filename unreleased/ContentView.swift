@@ -62,6 +62,9 @@ struct ContentView: View {
                     .navigationDestination(for: ProfileRoute.self) { _ in
                         ProfileView()
                     }
+                    .navigationDestination(for: StorageSyncRoute.self) { _ in
+                        StorageSyncView()
+                    }
             }
             // Reserve room + native progressive blur under scroll content (iOS 26+)
             .safeAreaBar(edge: .bottom, spacing: 0) {

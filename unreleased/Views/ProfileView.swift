@@ -66,7 +66,19 @@ struct ProfileView: View {
 
             VStack(spacing: 0) {
                 ForEach(Array(placeholderSettings.enumerated()), id: \.element.id) { index, row in
-                    ProfileSettingsRow(row: row)
+                    if row.id == "storage" {
+                        NavigationLink(value: StorageSyncRoute()) {
+                            ProfileSettingsRowLabel(row: row)
+                        }
+                        .buttonStyle(.plain)
+                    } else {
+                        Button {} label: {
+                            ProfileSettingsRowLabel(row: row)
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(true)
+                        .opacity(0.72)
+                    }
 
                     if index < placeholderSettings.count - 1 {
                         Divider()
@@ -97,7 +109,7 @@ struct ProfileView: View {
         auth.signOut()
     }
 
-    private var placeholderSettings: [ProfileSettingsRow.Model] {
+    private var placeholderSettings: [ProfileSettingsRowLabel.Model] {
         [
             .init(id: "notifications", title: "Notifications", icon: "bell"),
             .init(id: "appearance", title: "Appearance", icon: "circle.lefthalf.filled"),
@@ -155,9 +167,9 @@ private struct ProfileAvatarView: View {
     }
 }
 
-// MARK: - Settings row
+// MARK: - Settings row label
 
-private struct ProfileSettingsRow: View {
+private struct ProfileSettingsRowLabel: View {
     struct Model: Identifiable {
         let id: String
         let title: String
@@ -167,30 +179,25 @@ private struct ProfileSettingsRow: View {
     let row: Model
 
     var body: some View {
-        Button {} label: {
-            HStack(spacing: 12) {
-                Image(systemName: row.icon)
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 28, alignment: .center)
+        HStack(spacing: 12) {
+            Image(systemName: row.icon)
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(.secondary)
+                .frame(width: 28, alignment: .center)
 
-                Text(row.title)
-                    .font(.system(size: 16))
-                    .foregroundStyle(.primary)
+            Text(row.title)
+                .font(.system(size: 16))
+                .foregroundStyle(.primary)
 
-                Spacer(minLength: 0)
+            Spacer(minLength: 0)
 
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(Color(.tertiaryLabel))
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 14)
-            .contentShape(Rectangle())
+            Image(systemName: "chevron.right")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Color(.tertiaryLabel))
         }
-        .buttonStyle(.plain)
-        .disabled(true)
-        .opacity(0.72)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+        .contentShape(Rectangle())
     }
 }
 

@@ -10,9 +10,9 @@
 		C367E3892FC3C284008D53DC /* ColorThiefSwift in Frameworks */ = {isa = PBXBuildFile; productRef = C367E3882FC3C284008D53DC /* ColorThiefSwift */; };
 		C367E38C2FC3C2CF008D53DC /* DominantColors in Frameworks */ = {isa = PBXBuildFile; productRef = C367E38B2FC3C2CF008D53DC /* DominantColors */; };
 		C3A100042FC4000100EB18FB /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3A100062FC4000100EB18FB /* ShareViewController.swift */; };
-		C3A100052FC4000100EB18FB /* AudioImportBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3A100112FC4000100EB18FB /* AudioImportBridge.swift */; };
-		C3A100132FC4000100EB18FB /* SaveInExtensionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3A100142FC4000100EB18FB /* SaveInExtensionView.swift */; };
+		C3A100052FC4000100EB18FB /* unreleased/Store/AudioImportBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3A100112FC4000100EB18FB /* unreleased/Store/AudioImportBridge.swift */; };
 		C3A1000F2FC4000100EB18FB /* SaveInUnreleasedShareExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = C3A100022FC4000100EB18FB /* SaveInUnreleasedShareExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		C3A100132FC4000100EB18FB /* SaveInExtensionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3A100142FC4000100EB18FB /* SaveInExtensionView.swift */; };
 		C3F169C52FBDF5A800EB18FB /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = C3F169C42FBDF5A800EB18FB /* FirebaseAuth */; };
 		C3F169C72FBDF5A800EB18FB /* FirebaseFirestore in Frameworks */ = {isa = PBXBuildFile; productRef = C3F169C62FBDF5A800EB18FB /* FirebaseFirestore */; };
 		C3F169C92FBDF5A800EB18FB /* FirebaseStorage in Frameworks */ = {isa = PBXBuildFile; productRef = C3F169C82FBDF5A800EB18FB /* FirebaseStorage */; };
@@ -48,8 +48,8 @@
 		C3A100022FC4000100EB18FB /* SaveInUnreleasedShareExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = SaveInUnreleasedShareExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		C3A100062FC4000100EB18FB /* ShareViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareViewController.swift; sourceTree = "<group>"; };
 		C3A100072FC4000100EB18FB /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		C3A100112FC4000100EB18FB /* unreleased/Store/AudioImportBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = unreleased/Store/AudioImportBridge.swift; sourceTree = SOURCE_ROOT; };
 		C3A100142FC4000100EB18FB /* SaveInExtensionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SaveInExtensionView.swift; sourceTree = "<group>"; };
-		C3A100112FC4000100EB18FB /* AudioImportBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = unreleased/Store/AudioImportBridge.swift; sourceTree = SOURCE_ROOT; };
 		C3F168C72FBBBE7800EB18FB /* unreleased.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = unreleased.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -86,6 +86,17 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		C3A100032FC4000100EB18FB /* SaveInUnreleasedShareExtension */ = {
+			isa = PBXGroup;
+			children = (
+				C3A100062FC4000100EB18FB /* ShareViewController.swift */,
+				C3A100142FC4000100EB18FB /* SaveInExtensionView.swift */,
+				C3A100072FC4000100EB18FB /* Info.plist */,
+				C3A100112FC4000100EB18FB /* unreleased/Store/AudioImportBridge.swift */,
+			);
+			path = SaveInUnreleasedShareExtension;
+			sourceTree = "<group>";
+		};
 		C3F168BE2FBBBE7800EB18FB = {
 			isa = PBXGroup;
 			children = (
@@ -93,17 +104,6 @@
 				C3A100032FC4000100EB18FB /* SaveInUnreleasedShareExtension */,
 				C3F168C82FBBBE7800EB18FB /* Products */,
 			);
-			sourceTree = "<group>";
-		};
-		C3A100032FC4000100EB18FB /* SaveInUnreleasedShareExtension */ = {
-			isa = PBXGroup;
-			children = (
-				C3A100062FC4000100EB18FB /* ShareViewController.swift */,
-				C3A100142FC4000100EB18FB /* SaveInExtensionView.swift */,
-				C3A100072FC4000100EB18FB /* Info.plist */,
-				C3A100112FC4000100EB18FB /* AudioImportBridge.swift */,
-			);
-			path = SaveInUnreleasedShareExtension;
 			sourceTree = "<group>";
 		};
 		C3F168C82FBBBE7800EB18FB /* Products */ = {
@@ -234,7 +234,7 @@
 			files = (
 				C3A100042FC4000100EB18FB /* ShareViewController.swift in Sources */,
 				C3A100132FC4000100EB18FB /* SaveInExtensionView.swift in Sources */,
-				C3A100052FC4000100EB18FB /* AudioImportBridge.swift in Sources */,
+				C3A100052FC4000100EB18FB /* unreleased/Store/AudioImportBridge.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
