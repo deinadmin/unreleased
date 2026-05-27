@@ -6,11 +6,17 @@ struct EditProjectSheet: View {
 
     let project: Project
 
-    @State private var name: String = ""
-    @State private var gradient: GradientTheme = GradientTheme.presets[0]
+    @State private var name: String
+    @State private var gradient: GradientTheme
     @State private var coverImage: UIImage?
     @State private var previewVinylGradient: GradientTheme? = nil
-    @FocusState private var nameIsFocused: Bool
+
+    init(project: Project, coverImage: UIImage? = nil) {
+        self.project = project
+        _name = State(initialValue: project.name)
+        _gradient = State(initialValue: project.gradient)
+        _coverImage = State(initialValue: coverImage)
+    }
 
     var body: some View {
         NavigationStack {
@@ -41,15 +47,16 @@ struct EditProjectSheet: View {
             }
         }
         .onAppear {
-            name = project.name
-            gradient = project.gradient
-            let img = store.coverImage(for: project)
-            coverImage = img
-            if let img {
-                Task.detached(priority: .userInitiated) {
-                    let (start, end) = ProjectAccentColor.gradientHexPair(from: img)
-                    let g = GradientTheme(colors: [start, end], startX: 0, startY: 0, endX: 1, endY: 1)
-                    await MainActor.run { previewVinylGradient = g }
+            guard previewVinylGradient == nil, let coverImage else { return }
+            Task.detached(priority: .userInitiated) {
+                let (start, end) = ProjectAccentColor.gradientHexPair(from: coverImage)
+                let g = GradientTheme(colors: [start, end], startX: 0, startY: 0, endX: 1, endY: 1)
+                await MainActor.run {
+                    var transaction = Transaction()
+                    transaction.disablesAnimations = true
+                    withTransaction(transaction) {
+                        previewVinylGradient = g
+                    }
                 }
             }
         }
@@ -70,8 +77,6 @@ struct EditProjectSheet: View {
     private var coverPreview: some View {
         VStack(spacing: 12) {
             ProjectCoverView(gradient: gradient, coverImage: coverImage, vinylGradient: previewVinylGradient, size: 160, cornerRadius: 20, showVinyl: true)
-                .animation(.smooth(duration: 0.35), value: gradient)
-                .animation(.smooth(duration: 0.35), value: coverImage != nil)
 
             Button {
                 withAnimation(.smooth) {
@@ -97,15 +102,9 @@ struct EditProjectSheet: View {
 
             TextField("untitled project", text: $name)
                 .font(.system(size: 17))
-                .focused($nameIsFocused)
                 .padding(14)
                 .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                 .onSubmit { save() }
-        }
-        .onAppear {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
-                nameIsFocused = true
-            }
         }
     }
 

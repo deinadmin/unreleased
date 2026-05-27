@@ -40,6 +40,7 @@ struct PlayerView: View {
     private static let expandedMiddleHeight: CGFloat = 478
     /// Space between the mini player bar and the floating scrub time pill.
     private let miniWaveformWidth: CGFloat = 130
+    private let miniWaveformHeight: CGFloat = 36
     private var miniScrubPillLift: CGFloat { compactHeight + 8 }
     private let compactCoverInset: CGFloat = 4
     private let sideMargin: CGFloat = 12
@@ -283,42 +284,42 @@ struct PlayerView: View {
 
     @ViewBuilder
     private func miniBar(track: Track, project: Project) -> some View {
-        HStack(spacing: 0) {
-            // ZStack lets the matched-geometry anchor (coverSlot) and the static
-            // placeholder cover occupy the same cell. The placeholder is shown while
-            // the insertion spring is running so the hero cover can reveal itself
-            // only after the spring has settled (avoiding the "giant circle shrinks
-            // into place" glitch that matchedGeometryEffect produces on first appear).
-            ZStack {
-                coverSlot(size: compactCoverSize, isTapToPlay: true)
-                if !heroSettled {
-                    HeroCoverView(
-                        gradient: project.gradient.gradient,
-                        coverImage: store.coverImage(for: project),
-                        isPlaying: player.isPlaying,
-                        isLoadingAudio: player.isLoadingAudio,
-                        loadingProgress: player.loadingProgress,
-                        showsMiniOverlay: true,
-                        showsShadow: false,
-                        playbackProgress: player.playbackProgress,
-                        isScrubbing: false,
-                        duration: player.duration
-                    )
-                    .allowsHitTesting(false)
-                    .scaleEffect(isCoverPressed ? 0.88 : 1.0)
-                    .animation(
-                        .spring(response: 0.22, dampingFraction: 0.65),
-                        value: isCoverPressed
-                    )
-                    .transition(.identity)
+        Button {
+            player.isShowingNowPlaying = true
+        } label: {
+            HStack(spacing: 0) {
+                // ZStack lets the matched-geometry anchor (coverSlot) and the static
+                // placeholder cover occupy the same cell. The placeholder is shown while
+                // the insertion spring is running so the hero cover can reveal itself
+                // only after the spring has settled (avoiding the "giant circle shrinks
+                // into place" glitch that matchedGeometryEffect produces on first appear).
+                ZStack {
+                    coverSlot(size: compactCoverSize, isTapToPlay: true)
+                    if !heroSettled {
+                        HeroCoverView(
+                            gradient: project.gradient.gradient,
+                            coverImage: store.coverImage(for: project),
+                            isPlaying: player.isPlaying,
+                            isLoadingAudio: player.isLoadingAudio,
+                            loadingProgress: player.loadingProgress,
+                            showsMiniOverlay: true,
+                            showsShadow: false,
+                            playbackProgress: player.playbackProgress,
+                            isScrubbing: false,
+                            duration: player.duration
+                        )
+                        .allowsHitTesting(false)
+                        .scaleEffect(isCoverPressed ? 0.88 : 1.0)
+                        .animation(
+                            .spring(response: 0.22, dampingFraction: 0.65),
+                            value: isCoverPressed
+                        )
+                        .transition(.identity)
+                    }
                 }
-            }
-            .frame(width: compactCoverSize, height: compactCoverSize)
-            .padding(.leading, compactCoverInset)
+                .frame(width: compactCoverSize, height: compactCoverSize)
+                .padding(.leading, compactCoverInset)
 
-            Button {
-                player.isShowingNowPlaying = true
-            } label: {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(track.title)
                         .font(.system(size: 13, weight: .semibold))
@@ -331,13 +332,15 @@ struct PlayerView: View {
                 }
                 .padding(.leading, 4 + compactCoverInset)
                 .frame(maxWidth: .infinity, alignment: .leading)
-            }
 
-            waveformSection(track: track)
-                .frame(width: miniWaveformWidth, height: 26)
-                .padding(.trailing, 10)
+                waveformSection(track: track)
+                    .frame(width: miniWaveformWidth, height: miniWaveformHeight)
+                    .padding(.trailing, 10)
+            }
+            .frame(height: compactHeight)
+            .contentShape(Rectangle())
         }
-        .frame(height: compactHeight)
+        .buttonStyle(.plain)
     }
 
     // MARK: - Shared morphing cover (same circle in every player state)
@@ -854,7 +857,7 @@ struct PlayerView: View {
                     .font(.system(size: 15))
                     .foregroundStyle(.white.opacity(0.88))
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 24)
+                    .padding(.horizontal, 20)
                     .padding(.top, 4)
                     .padding(.bottom, 16)
             }
@@ -1048,7 +1051,7 @@ private struct HeroCoverView: View {
 
                 // Mini-bar dim layer (fades out when the player expands).
                 Circle()
-                    .glassEffect(.regular)
+                    .glassEffect(.clear)
                     .opacity(showsMiniOverlay ? 1 : 0)
 
                 // Mini-bar play/pause icon (or loading indicator).

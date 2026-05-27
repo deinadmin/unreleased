@@ -283,9 +283,9 @@ struct ScrollingMiniWaveformView: View {
                             with: .color(.white.opacity(opacity))
                         )
                     }
-                    // Yellow marker — full bar height
+                    // Yellow playhead — full waveform height
                     context.fill(
-                        Path(roundedRect: CGRect(x: centerX - 1.5, y: 0, width: 3, height: h),
+                        Path(roundedRect: CGRect(x: centerX - 1.5, y: 0, width: 3, height: size.height),
                              cornerRadius: 1.5),
                         with: .color(Color(hex: "#FFD000"))
                     )

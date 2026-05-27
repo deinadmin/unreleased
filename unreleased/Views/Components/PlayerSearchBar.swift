@@ -83,11 +83,22 @@ struct PlayerSearchBar: View {
         )
         .padding(.horizontal, sideMargin)
         .padding(.bottom, 8)
-        .onAppear {
-            // Next run loop — TextField must be in the hierarchy before focus sticks.
-            DispatchQueue.main.async {
-                isFocused = true
-            }
+        .onAppear { focusField() }
+        .onChange(of: isFocused) { _, focused in
+            searchState.setFieldFocused(focused)
+        }
+        .onChange(of: searchState.focusRequest) { _, _ in
+            focusField()
+        }
+        .onChange(of: searchState.blurRequest) { _, _ in
+            isFocused = false
+        }
+    }
+
+    private func focusField() {
+        // Next run loop — TextField must be in the hierarchy before focus sticks.
+        DispatchQueue.main.async {
+            isFocused = true
         }
     }
 

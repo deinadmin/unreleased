@@ -2,11 +2,14 @@ import SwiftUI
 
 struct ContentView: View {
     @Environment(AuthManager.self) private var auth
+    @Environment(AudioFileImportManager.self) private var importManager
     @State private var store = ProjectStore()
     @State private var player: AudioPlayer
     @State private var navigationPath = NavigationPath()
+    @Namespace private var projectZoomNamespace
     @State private var toastCenter = PlayerToastCenter()
     @State private var searchState = AppSearchState()
+    @State private var showingSaveInSheet = false
 
     /// Matches `safeAreaBar` clearance above the mini player.
     private let miniPlayerReservedHeight: CGFloat = 66
@@ -40,9 +43,18 @@ struct ContentView: View {
 
             // ── Main app content ─────────────────────────────────────────────────
             NavigationStack(path: $navigationPath) {
-                HomeView()
+                HomeView(
+                    navigationPath: $navigationPath,
+                    projectZoomNamespace: projectZoomNamespace
+                )
                     .navigationDestination(for: UUID.self) { projectID in
-                        ProjectDetailView(projectID: projectID)
+                        ProjectDetailView(
+                            projectID: projectID,
+                            projectZoomNamespace: projectZoomNamespace
+                        )
+                        .navigationTransition(
+                            .zoom(sourceID: projectID, in: projectZoomNamespace)
+                        )
                     }
                     .navigationDestination(for: TrackNotesRoute.self) { route in
                         TrackNotesView(trackID: route.trackID, projectID: route.projectID)
@@ -103,6 +115,33 @@ struct ContentView: View {
                 searchState.deactivate()
             }
         }
+        .onChange(of: importManager.pendingImportToken) { _, token in
+            guard token != nil else { return }
+            handlePendingImport()
+        }
+        .onAppear {
+            importManager.loadPendingImportIfNeeded()
+            if importManager.pendingImportToken != nil {
+                handlePendingImport()
+            }
+        }
+        .sheet(isPresented: $showingSaveInSheet, onDismiss: { importManager.clearURL() }) {
+            if let audioURL = importManager.audioURL {
+                SaveInSheet(
+                    audioURL: audioURL,
+                    onBack: {
+                        showingSaveInSheet = false
+                        importManager.clearURL()
+                    },
+                    onSaved: {
+                        showingSaveInSheet = false
+                    }
+                )
+                .environment(store)
+                .environment(toastCenter)
+                .presentationDetents([.medium, .large])
+            }
+        }
         .ignoresSafeArea(edges: player.isShowingNowPlaying ? .bottom : [])
         // Snappier open, fast close — keyed off the destination state.
         .animation(
@@ -115,6 +154,38 @@ struct ContentView: View {
         .animation(.smooth(duration: 0.35), value: player.currentTrack?.id)
         .task(id: auth.signedInUserID) {
             store.configureSync(userID: auth.signedInUserID)
+        }
+    }
+
+    // MARK: - Import handling
+
+    private func handlePendingImport() {
+        guard !importManager.pendingItems.isEmpty else { return }
+        if let projectID = importManager.destinationProjectID {
+            silentlyImportAll(into: projectID)
+        } else {
+            showingSaveInSheet = true
+        }
+    }
+
+    private func silentlyImportAll(into projectID: UUID) {
+        let items = importManager.pendingItems
+        Task {
+            do {
+                for item in items {
+                    var track = try await store.importAudioFile(from: item.url)
+                    if let title = item.title, !title.isEmpty {
+                        track.title = title
+                    }
+                    store.addTrack(track, to: projectID)
+                }
+                let name = store.projects.first(where: { $0.id == projectID })?.name ?? "project"
+                importManager.clearPending()
+                toastCenter.showTrackAdded(to: name)
+            } catch {
+                importManager.clearDestination()
+                showingSaveInSheet = true
+            }
         }
     }
 

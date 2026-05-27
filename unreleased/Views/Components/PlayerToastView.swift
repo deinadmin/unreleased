@@ -32,6 +32,10 @@ final class PlayerToastCenter {
         show(message: "Moved to \(projectName)", systemImage: "arrow.right.square")
     }
 
+    func showTrackAdded(to projectName: String) {
+        show(message: "Added to \(projectName)", systemImage: "plus.circle")
+    }
+
     func show(message: String, systemImage: String) {
         hideTask?.cancel()
         withAnimation(.spring(response: 0.4, dampingFraction: 0.86)) {

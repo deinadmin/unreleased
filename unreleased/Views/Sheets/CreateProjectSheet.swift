@@ -10,8 +10,6 @@ struct CreateProjectSheet: View {
     @State private var previewVinylGradient: GradientTheme? = nil
     @State private var isShowingDocumentPicker = false
     @State private var isImporting = false
-    @FocusState private var nameIsFocused: Bool
-
     var onCreated: ((Project) -> Void)? = nil
 
     var body: some View {
@@ -90,15 +88,9 @@ struct CreateProjectSheet: View {
 
             TextField("untitled project", text: $name)
                 .font(.system(size: 17))
-                .focused($nameIsFocused)
                 .padding(14)
                 .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                 .onSubmit { createProject() }
-        }
-        .onAppear {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
-                nameIsFocused = true
-            }
         }
     }
 

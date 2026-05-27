@@ -9,6 +9,10 @@
 /* Begin PBXBuildFile section */
 		C367E3892FC3C284008D53DC /* ColorThiefSwift in Frameworks */ = {isa = PBXBuildFile; productRef = C367E3882FC3C284008D53DC /* ColorThiefSwift */; };
 		C367E38C2FC3C2CF008D53DC /* DominantColors in Frameworks */ = {isa = PBXBuildFile; productRef = C367E38B2FC3C2CF008D53DC /* DominantColors */; };
+		C3A100042FC4000100EB18FB /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3A100062FC4000100EB18FB /* ShareViewController.swift */; };
+		C3A100052FC4000100EB18FB /* AudioImportBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3A100112FC4000100EB18FB /* AudioImportBridge.swift */; };
+		C3A100132FC4000100EB18FB /* SaveInExtensionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3A100142FC4000100EB18FB /* SaveInExtensionView.swift */; };
+		C3A1000F2FC4000100EB18FB /* SaveInUnreleasedShareExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = C3A100022FC4000100EB18FB /* SaveInUnreleasedShareExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		C3F169C52FBDF5A800EB18FB /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = C3F169C42FBDF5A800EB18FB /* FirebaseAuth */; };
 		C3F169C72FBDF5A800EB18FB /* FirebaseFirestore in Frameworks */ = {isa = PBXBuildFile; productRef = C3F169C62FBDF5A800EB18FB /* FirebaseFirestore */; };
 		C3F169C92FBDF5A800EB18FB /* FirebaseStorage in Frameworks */ = {isa = PBXBuildFile; productRef = C3F169C82FBDF5A800EB18FB /* FirebaseStorage */; };
@@ -16,7 +20,36 @@
 		C3F169CE2FBDF6A100EB18FB /* GoogleSignIn in Frameworks */ = {isa = PBXBuildFile; productRef = C3F169CD2FBDF6A100EB18FB /* GoogleSignIn */; };
 /* End PBXBuildFile section */
 
+/* Begin PBXContainerItemProxy section */
+		C3A100102FC4000100EB18FB /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = C3F168BF2FBBBE7800EB18FB /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = C3A100012FC4000100EB18FB;
+			remoteInfo = SaveInUnreleasedShareExtension;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		C3A1000E2FC4000100EB18FB /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				C3A1000F2FC4000100EB18FB /* SaveInUnreleasedShareExtension.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXFileReference section */
+		C3A100022FC4000100EB18FB /* SaveInUnreleasedShareExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = SaveInUnreleasedShareExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		C3A100062FC4000100EB18FB /* ShareViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareViewController.swift; sourceTree = "<group>"; };
+		C3A100072FC4000100EB18FB /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		C3A100142FC4000100EB18FB /* SaveInExtensionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SaveInExtensionView.swift; sourceTree = "<group>"; };
+		C3A100112FC4000100EB18FB /* AudioImportBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = unreleased/Store/AudioImportBridge.swift; sourceTree = SOURCE_ROOT; };
 		C3F168C72FBBBE7800EB18FB /* unreleased.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = unreleased.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -29,6 +62,13 @@
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		C3A100082FC4000100EB18FB /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		C3F168C42FBBBE7800EB18FB /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -50,14 +90,27 @@
 			isa = PBXGroup;
 			children = (
 				C3F168C92FBBBE7800EB18FB /* unreleased */,
+				C3A100032FC4000100EB18FB /* SaveInUnreleasedShareExtension */,
 				C3F168C82FBBBE7800EB18FB /* Products */,
 			);
+			sourceTree = "<group>";
+		};
+		C3A100032FC4000100EB18FB /* SaveInUnreleasedShareExtension */ = {
+			isa = PBXGroup;
+			children = (
+				C3A100062FC4000100EB18FB /* ShareViewController.swift */,
+				C3A100142FC4000100EB18FB /* SaveInExtensionView.swift */,
+				C3A100072FC4000100EB18FB /* Info.plist */,
+				C3A100112FC4000100EB18FB /* AudioImportBridge.swift */,
+			);
+			path = SaveInUnreleasedShareExtension;
 			sourceTree = "<group>";
 		};
 		C3F168C82FBBBE7800EB18FB /* Products */ = {
 			isa = PBXGroup;
 			children = (
 				C3F168C72FBBBE7800EB18FB /* unreleased.app */,
+				C3A100022FC4000100EB18FB /* SaveInUnreleasedShareExtension.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -65,6 +118,23 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		C3A100012FC4000100EB18FB /* SaveInUnreleasedShareExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = C3A1000B2FC4000100EB18FB /* Build configuration list for PBXNativeTarget "SaveInUnreleasedShareExtension" */;
+			buildPhases = (
+				C3A1000A2FC4000100EB18FB /* Sources */,
+				C3A100082FC4000100EB18FB /* Frameworks */,
+				C3A100092FC4000100EB18FB /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = SaveInUnreleasedShareExtension;
+			productName = SaveInUnreleasedShareExtension;
+			productReference = C3A100022FC4000100EB18FB /* SaveInUnreleasedShareExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 		C3F168C62FBBBE7800EB18FB /* unreleased */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = C3F168D22FBBBE7900EB18FB /* Build configuration list for PBXNativeTarget "unreleased" */;
@@ -72,10 +142,12 @@
 				C3F168C32FBBBE7800EB18FB /* Sources */,
 				C3F168C42FBBBE7800EB18FB /* Frameworks */,
 				C3F168C52FBBBE7800EB18FB /* Resources */,
+				C3A1000E2FC4000100EB18FB /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				C3A100122FC4000100EB18FB /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				C3F168C92FBBBE7800EB18FB /* unreleased */,
@@ -104,6 +176,9 @@
 				LastSwiftUpdateCheck = 2640;
 				LastUpgradeCheck = 2640;
 				TargetAttributes = {
+					C3A100012FC4000100EB18FB = {
+						CreatedOnToolsVersion = 26.4.1;
+					};
 					C3F168C62FBBBE7800EB18FB = {
 						CreatedOnToolsVersion = 26.4.1;
 					};
@@ -130,11 +205,19 @@
 			projectRoot = "";
 			targets = (
 				C3F168C62FBBBE7800EB18FB /* unreleased */,
+				C3A100012FC4000100EB18FB /* SaveInUnreleasedShareExtension */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		C3A100092FC4000100EB18FB /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		C3F168C52FBBBE7800EB18FB /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -145,6 +228,16 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		C3A1000A2FC4000100EB18FB /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				C3A100042FC4000100EB18FB /* ShareViewController.swift in Sources */,
+				C3A100132FC4000100EB18FB /* SaveInExtensionView.swift in Sources */,
+				C3A100052FC4000100EB18FB /* AudioImportBridge.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		C3F168C32FBBBE7800EB18FB /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -154,7 +247,67 @@
 		};
 /* End PBXSourcesBuildPhase section */
 
+/* Begin PBXTargetDependency section */
+		C3A100122FC4000100EB18FB /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = C3A100012FC4000100EB18FB /* SaveInUnreleasedShareExtension */;
+			targetProxy = C3A100102FC4000100EB18FB /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
 /* Begin XCBuildConfiguration section */
+		C3A1000C2FC4000100EB18FB /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = SaveInUnreleasedShareExtension/SaveInUnreleasedShareExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 3DHZRN7AYM;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = SaveInUnreleasedShareExtension/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = de.carlsteen.unreleased.SaveInUnreleasedShareExtension;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		C3A1000D2FC4000100EB18FB /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = SaveInUnreleasedShareExtension/SaveInUnreleasedShareExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 3DHZRN7AYM;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = SaveInUnreleasedShareExtension/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = de.carlsteen.unreleased.SaveInUnreleasedShareExtension;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
 		C3F168D02FBBBE7900EB18FB /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -335,6 +488,15 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		C3A1000B2FC4000100EB18FB /* Build configuration list for PBXNativeTarget "SaveInUnreleasedShareExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				C3A1000C2FC4000100EB18FB /* Debug */,
+				C3A1000D2FC4000100EB18FB /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		C3F168C22FBBBE7800EB18FB /* Build configuration list for PBXProject "unreleased" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (

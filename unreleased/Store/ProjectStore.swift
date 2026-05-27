@@ -670,6 +670,22 @@ final class ProjectStore {
         } catch {
             print("ProjectStore: save failed — \(error)")
         }
+        mirrorProjectsToAppGroup()
+    }
+
+    private func mirrorProjectsToAppGroup() {
+        let mirrors = projects.map { project in
+            AudioImportBridge.ProjectMirror(
+                id: project.id,
+                name: project.name,
+                gradientColors: project.gradient.colors,
+                gradientStartX: project.gradient.startX,
+                gradientStartY: project.gradient.startY,
+                gradientEndX: project.gradient.endX,
+                gradientEndY: project.gradient.endY
+            )
+        }
+        AudioImportBridge.mirrorProjects(mirrors)
     }
 
     private func load() {

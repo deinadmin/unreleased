@@ -1,6 +1,14 @@
 import SwiftUI
 
+private enum CreateProjectZoom {
+    static let sourceID = "createProject"
+}
+
 struct HomeView: View {
+    @Binding var navigationPath: NavigationPath
+    var projectZoomNamespace: Namespace.ID
+    @Namespace private var createProjectZoomNamespace
+
     @Environment(ProjectStore.self) private var store
     @Environment(AudioPlayer.self) private var player
     @Environment(AppSearchState.self) private var searchState
@@ -8,12 +16,10 @@ struct HomeView: View {
     @State private var isShowingCreate = false
     @State private var isShowingDocumentPicker = false
     @State private var isImporting = false
-    @State private var navigateToProjectID: UUID? = nil
 
-    @State private var contextMenuProject: Project? = nil
-    @State private var isShowingContextEdit = false
-    @State private var isShowingContextDocumentPicker = false
-    @State private var showContextDeleteConfirm = false
+    @State private var editingProject: Project?
+    @State private var projectAddingTracks: Project?
+    @State private var projectPendingDelete: Project?
     @State private var isImportingToExisting = false
 
     private let columns = [
@@ -59,8 +65,11 @@ struct HomeView: View {
         .toolbar { toolbarContent }
         .sheet(isPresented: $isShowingCreate) {
             CreateProjectSheet { project in
-                navigateToProjectID = project.id
+                navigationPath.append(project.id)
             }
+            .navigationTransition(
+                .zoom(sourceID: CreateProjectZoom.sourceID, in: createProjectZoomNamespace)
+            )
         }
         .sheet(isPresented: $isShowingDocumentPicker) {
             DocumentPicker(
@@ -71,32 +80,36 @@ struct HomeView: View {
                 onCancel: { isShowingDocumentPicker = false }
             )
         }
-        .sheet(isPresented: $isShowingContextEdit) {
-            if let project = contextMenuProject {
-                EditProjectSheet(project: project)
-            }
-        }
-        .sheet(isPresented: $isShowingContextDocumentPicker) {
-            if let project = contextMenuProject {
-                DocumentPicker(
-                    onPick: { urls in
-                        isShowingContextDocumentPicker = false
-                        importTracksToExisting(urls: urls, into: project)
-                    },
-                    onCancel: { isShowingContextDocumentPicker = false }
+        .sheet(item: $editingProject) { project in
+            EditProjectSheet(project: project, coverImage: store.coverImage(for: project))
+                .navigationTransition(
+                    .zoom(sourceID: project.id, in: projectZoomNamespace)
                 )
-            }
         }
-        .alert("Delete Project?", isPresented: $showContextDeleteConfirm) {
+        .sheet(item: $projectAddingTracks) { project in
+            DocumentPicker(
+                onPick: { urls in
+                    projectAddingTracks = nil
+                    importTracksToExisting(urls: urls, into: project)
+                },
+                onCancel: { projectAddingTracks = nil }
+            )
+        }
+        .alert(
+            "Delete Project?",
+            isPresented: Binding(
+                get: { projectPendingDelete != nil },
+                set: { if !$0 { projectPendingDelete = nil } }
+            ),
+            presenting: projectPendingDelete
+        ) { project in
             Button("Delete", role: .destructive) {
-                if let project = contextMenuProject {
-                    if player.currentProject?.id == project.id { player.stop() }
-                    store.deleteProject(project)
-                    contextMenuProject = nil
-                }
+                if player.currentProject?.id == project.id { player.stop() }
+                store.deleteProject(project)
+                projectPendingDelete = nil
             }
-            Button("Cancel", role: .cancel) {}
-        } message: {
+            Button("Cancel", role: .cancel) { projectPendingDelete = nil }
+        } message: { _ in
             Text("This will permanently delete the project and all of its tracks.")
         }
     }
@@ -156,27 +169,23 @@ struct HomeView: View {
             LazyVGrid(columns: columns, spacing: 16) {
                 ForEach(filteredProjects) { project in
                     NavigationLink(value: project.id) {
-                        ProjectCard(project: project)
+                        ProjectCard(project: project, zoomNamespace: projectZoomNamespace)
                     }
-                    .buttonStyle(.scale)
                     .contextMenu {
                         Button {
-                            contextMenuProject = project
-                            isShowingContextDocumentPicker = true
+                            projectAddingTracks = project
                         } label: {
                             Label("Add tracks", systemImage: "plus")
                         }
 
                         Button {
-                            contextMenuProject = project
-                            isShowingContextEdit = true
+                            editingProject = project
                         } label: {
                             Label("Edit", systemImage: "pencil")
                         }
 
                         Button(role: .destructive) {
-                            contextMenuProject = project
-                            showContextDeleteConfirm = true
+                            projectPendingDelete = project
                         } label: {
                             Label("Delete", systemImage: "trash")
                         }
@@ -206,7 +215,7 @@ struct HomeView: View {
 
                 Button {
                     player.isShowingNowPlaying = false
-                    searchState.activate(scope: .library, placeholder: "Search your library")
+                    searchState.activateOrFocus(scope: .library, placeholder: "Search your library")
                 } label: {
                     Image(systemName: "magnifyingglass")
                         .font(.system(size: 14, weight: .medium))
@@ -231,6 +240,10 @@ struct HomeView: View {
                         .font(.system(size: 14, weight: .semibold))
                         .frame(width: 32, height: 32)
                 }
+                .matchedTransitionSource(
+                    id: CreateProjectZoom.sourceID,
+                    in: createProjectZoomNamespace
+                )
             }
         }
     }
@@ -269,7 +282,7 @@ struct HomeView: View {
             store.addProject(project)
 
             isImporting = false
-            navigateToProjectID = project.id
+            navigationPath.append(project.id)
         }
     }
 }
@@ -280,6 +293,7 @@ private struct ProjectCard: View {
     @Environment(AudioPlayer.self) private var player
     @Environment(ProjectStore.self) private var store
     let project: Project
+    let zoomNamespace: Namespace.ID
 
     @State private var playHapticTick = 0
 
@@ -306,6 +320,7 @@ private struct ProjectCard: View {
                     }
                 }
                 .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .matchedTransitionSource(id: project.id, in: zoomNamespace)
 
                 if !project.tracks.isEmpty {
                     Button(action: playOrPause) {
@@ -318,7 +333,7 @@ private struct ProjectCard: View {
                         .frame(width: 32, height: 32)
                         .contentShape(.circle)
                     }
-                    .glassEffect(.regular.interactive(), in: Circle())
+                    .glassEffect(.clear.interactive(), in: Circle())
                     .padding(10)
                 }
             }

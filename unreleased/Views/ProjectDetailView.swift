@@ -9,6 +9,7 @@ struct ProjectDetailView: View {
     @Environment(\.navigateToTrackNotes) private var navigateToTrackNotes
 
     let projectID: UUID
+    var projectZoomNamespace: Namespace.ID
 
     @State private var isShowingDocumentPicker = false
     @State private var isImporting = false
@@ -51,7 +52,12 @@ struct ProjectDetailView: View {
             }
         }
         .sheet(isPresented: $isShowingEdit) {
-            if let project { EditProjectSheet(project: project) }
+            if let project {
+                EditProjectSheet(project: project, coverImage: store.coverImage(for: project))
+                    .navigationTransition(
+                        .zoom(sourceID: project.id, in: projectZoomNamespace)
+                    )
+            }
         }
         .sheet(isPresented: $isShowingDocumentPicker) {
             if let project {
@@ -128,7 +134,8 @@ struct ProjectDetailView: View {
             coverImage: store.coverImage(for: project),
             vinylGradient: store.vinylGradient(for: project),
             isPlaying: isThisProjectPlaying(project),
-            downloadState: headerDownloadState(for: project)
+            downloadState: headerDownloadState(for: project),
+            zoomNamespace: projectZoomNamespace
         )
     }
 
@@ -236,7 +243,10 @@ struct ProjectDetailView: View {
 
                 Button {
                     player.isShowingNowPlaying = false
-                    searchState.activate(scope: .project(projectID), placeholder: "Search tracks")
+                    searchState.activateOrFocus(
+                        scope: .project(projectID),
+                        placeholder: "Search tracks"
+                    )
                 } label: {
                     Image(systemName: "magnifyingglass")
                         .font(.system(size: 14, weight: .medium))
@@ -320,6 +330,7 @@ private struct ProjectDetailHeaderSection: View, Equatable {
     let vinylGradient: GradientTheme
     let isPlaying: Bool
     let downloadState: ProjectHeaderDownloadState
+    let zoomNamespace: Namespace.ID
 
     static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.project.id == rhs.project.id
@@ -350,6 +361,7 @@ private struct ProjectDetailHeaderSection: View, Equatable {
                     isPlaying: isPlaying
                 )
                 .frame(width: geo.size.width, height: coverSize, alignment: .center)
+                .matchedTransitionSource(id: project.id, in: zoomNamespace)
             }
             .aspectRatio(1.375, contentMode: .fit)
 
