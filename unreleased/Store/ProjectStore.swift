@@ -141,10 +141,25 @@ final class ProjectStore {
                 self?.removeProjectLocally(id: projectID, persistLocally: persistLocally)
             }
         )
+        service.onActivityChanged = { [weak self] in
+            self?.updateSyncStatus()
+        }
 
         syncService = service
         service.start()
-        syncStatus = .synced
+        updateSyncStatus()
+    }
+
+    var pendingCloudUploadCount: Int {
+        syncService?.pendingUploadTrackCount ?? 0
+    }
+
+    private func updateSyncStatus() {
+        guard syncService != nil else {
+            syncStatus = .offline
+            return
+        }
+        syncStatus = syncService!.isActive ? .syncing : .synced
     }
 
     // MARK: - Project CRUD

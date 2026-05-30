@@ -34,6 +34,60 @@ final class ProjectSyncService {
     private var coverDownloadTasks: [UUID: Task<Void, Never>] = [:]
     /// Storage paths that returned 404 — skip retrying until next session.
     private var failedCoverStoragePaths: Set<String> = []
+    private var isPushing = false
+
+    var onActivityChanged: (@MainActor () -> Void)?
+
+    /// True while metadata is pushing, uploads are running, or cloud work is still pending.
+    var isActive: Bool {
+        isPushing
+            || pushTask != nil
+            || !uploadTasks.isEmpty
+            || !coverUploadTasks.isEmpty
+            || hasPendingCloudWork
+    }
+
+    /// Tracks with a local audio file that still need uploading to Storage.
+    var pendingUploadTrackCount: Int {
+        snapshotProvider()
+            .flatMap(\.tracks)
+            .filter { track in
+                guard track.storagePath == nil else { return false }
+                let localURL = audioDirectory.appendingPathComponent(track.fileName)
+                return FileManager.default.fileExists(atPath: localURL.path)
+            }
+            .count
+    }
+
+    private var hasPendingCloudWork: Bool {
+        let projects = snapshotProvider()
+        for project in projects {
+            let lastSynced = lastSyncedUpdated[project.id]
+            if lastSynced == nil || project.updatedDate > lastSynced! {
+                return true
+            }
+
+            for track in project.tracks where track.storagePath == nil {
+                let localURL = audioDirectory.appendingPathComponent(track.fileName)
+                if FileManager.default.fileExists(atPath: localURL.path) {
+                    return true
+                }
+            }
+
+            if let fileName = project.coverImageFileName,
+               project.coverStoragePath == nil {
+                let localURL = coverDirectory.appendingPathComponent(fileName)
+                if FileManager.default.fileExists(atPath: localURL.path) {
+                    return true
+                }
+            }
+        }
+        return false
+    }
+
+    private func notifyActivityChanged() {
+        onActivityChanged?()
+    }
 
     init(
         userID: String,
@@ -79,6 +133,7 @@ final class ProjectSyncService {
         listener = nil
         pushTask?.cancel()
         pushTask = nil
+        isPushing = false
         uploadTasks.values.forEach { $0.cancel() }
         uploadTasks.removeAll()
         coverUploadTasks.values.forEach { $0.cancel() }
@@ -92,24 +147,38 @@ final class ProjectSyncService {
     func schedulePush() {
         guard !applyingRemote else { return }
         pushTask?.cancel()
+        notifyActivityChanged()
         pushTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(450))
             guard !Task.isCancelled, let self else { return }
             await self.pushPendingProjects()
+            self.pushTask = nil
+            self.notifyActivityChanged()
         }
     }
 
     func enqueueAudioUpload(projectID: UUID, track: Track) {
         guard track.storagePath == nil else { return }
         uploadTasks[track.id]?.cancel()
-        uploadTasks[track.id] = Task { [weak self] in
+        notifyActivityChanged()
+        let trackID = track.id
+        uploadTasks[trackID] = Task { [weak self] in
+            defer {
+                self?.uploadTasks.removeValue(forKey: trackID)
+                self?.notifyActivityChanged()
+            }
             await self?.uploadAudio(projectID: projectID, track: track)
         }
     }
 
     func enqueueCoverUpload(projectID: UUID) {
         coverUploadTasks[projectID]?.cancel()
+        notifyActivityChanged()
         coverUploadTasks[projectID] = Task { [weak self] in
+            defer {
+                self?.coverUploadTasks.removeValue(forKey: projectID)
+                self?.notifyActivityChanged()
+            }
             await self?.uploadCover(projectID: projectID)
         }
     }
@@ -180,6 +249,13 @@ final class ProjectSyncService {
     // MARK: - Push
 
     private func pushPendingProjects() async {
+        isPushing = true
+        notifyActivityChanged()
+        defer {
+            isPushing = false
+            notifyActivityChanged()
+        }
+
         let projects = snapshotProvider()
 
         for project in projects {

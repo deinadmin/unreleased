@@ -85,8 +85,9 @@ struct UserPlan {
     }
 
     /// Human-readable expiry string, e.g. "Expires in 291 days." or "Expired 3 days ago."
+    /// Nil for Free plans, which never expire.
     var expiryDescription: String? {
-        guard let expiresAt else { return nil }
+        guard effectiveTier != .free, let expiresAt else { return nil }
         let days = Calendar.current.dateComponents([.day], from: Date(), to: expiresAt).day ?? 0
         switch days {
         case 1...:

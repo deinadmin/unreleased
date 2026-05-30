@@ -171,7 +171,12 @@ struct StorageSyncView: View {
     private var syncStatusDetail: String? {
         switch store.syncStatus {
         case .offline: return auth.isSignedIn ? "Changes will sync when you're back online." : "Sign in to enable cloud sync."
-        case .syncing: return "Uploading your latest changes."
+        case .syncing:
+            let pending = store.pendingCloudUploadCount
+            if pending > 0 {
+                return "Uploading \(pending) \(pending == 1 ? "track" : "tracks") to the cloud."
+            }
+            return "Syncing your latest changes."
         case .synced: return "Your library is synced to the cloud."
         case .error(let msg): return msg
         }
