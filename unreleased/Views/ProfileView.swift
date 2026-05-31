@@ -44,12 +44,13 @@ struct ProfileView: View {
             ProfileAvatarView(photoURL: auth.photoURL, size: 108)
                 .padding(.bottom, 6)
 
-            Text(auth.displayName)
+            Text(primaryLabel)
                 .font(.system(size: 22, weight: .bold))
                 .multilineTextAlignment(.center)
 
-            if let label = auth.accountLabel {
-                Text(label)
+            // Show the email as a secondary line only when a username is the primary.
+            if store.currentUsername != nil, let email = auth.accountLabel {
+                Text(email)
                     .font(.system(size: 15))
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -57,6 +58,14 @@ struct ProfileView: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.horizontal, 20)
+    }
+
+    /// `@username` when set; email as fallback; otherwise the OAuth display name.
+    private var primaryLabel: String {
+        if let username = store.currentUsername {
+            return "@\(username)"
+        }
+        return auth.accountLabel ?? auth.displayName
     }
 
     // MARK: - My Plan
@@ -178,6 +187,7 @@ struct ProfileView: View {
     private func signOut() {
         player.stop()
         store.configureSync(userID: nil)
+        store.clearLocalLibrary()
         auth.signOut()
     }
 

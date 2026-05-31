@@ -2,7 +2,7 @@ import FirebaseFirestore
 import Foundation
 
 enum FirestoreProjectCodec {
-    static func encode(_ project: Project) -> [String: Any] {
+    static func encode(_ project: Project, ownerUsername: String? = nil) -> [String: Any] {
         var payload: [String: Any] = [
             "id": project.id.uuidString,
             "name": project.name,
@@ -11,6 +11,9 @@ enum FirestoreProjectCodec {
             "createdDate": Timestamp(date: project.createdDate),
             "updatedDate": Timestamp(date: project.updatedDate),
         ]
+        if let ownerUsername = ownerUsername ?? project.ownerUsername {
+            payload["ownerUsername"] = ownerUsername
+        }
         if let coverStoragePath = project.coverStoragePath {
             payload["coverStoragePath"] = coverStoragePath
         } else {
@@ -51,7 +54,8 @@ enum FirestoreProjectCodec {
             coverGradientColors: data["coverGradientColors"] as? [String],
             tracks: tracks,
             createdDate: created.dateValue(),
-            updatedDate: updated.dateValue()
+            updatedDate: updated.dateValue(),
+            ownerUsername: data["ownerUsername"] as? String
         )
     }
 

@@ -799,18 +799,18 @@ struct PlayerView: View {
                 .padding(.top, 14)
                 .padding(.horizontal, 20)
 
-            notesSectionHeader(track: track)
+            notesSectionHeader(track: track, project: project)
                 .padding(.top, 10)
                 .padding(.horizontal, 19)
                 .padding(.bottom, 6)
 
-            notesScrollContent(track: track)
+            notesScrollContent(track: track, project: project)
                 .frame(maxHeight: .infinity)
         }
     }
 
     @ViewBuilder
-    private func notesSectionHeader(track: Track) -> some View {
+    private func notesSectionHeader(track: Track, project: Project) -> some View {
         HStack {
             Text("NOTES")
                 .font(.system(size: 11, weight: .bold))
@@ -819,23 +819,25 @@ struct PlayerView: View {
 
             Spacer()
 
-            Button {
-                openTrackNotes()
-            } label: {
-                HStack(spacing: 4) {
-                    Image(systemName: "pencil")
-                        .font(.system(size: 11, weight: .semibold))
-                    Text("Edit")
-                        .font(.system(size: 12, weight: .semibold))
+            if !project.isShared {
+                Button {
+                    openTrackNotes()
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "pencil")
+                            .font(.system(size: 11, weight: .semibold))
+                        Text("Edit")
+                            .font(.system(size: 12, weight: .semibold))
+                    }
+                    .foregroundStyle(.white.opacity(0.6))
                 }
-                .foregroundStyle(.white.opacity(0.6))
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
         }
     }
 
     @ViewBuilder
-    private func notesScrollContent(track: Track) -> some View {
+    private func notesScrollContent(track: Track, project: Project) -> some View {
         if track.notes.isEmpty {
             VStack(spacing: 6) {
                 Image(systemName: "doc.text")
@@ -844,10 +846,12 @@ struct PlayerView: View {
                 Text("No notes yet")
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.6))
-                Text("Tap Edit to start writing.")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.white.opacity(0.4))
-                    .multilineTextAlignment(.center)
+                if !project.isShared {
+                    Text("Tap Edit to start writing.")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.white.opacity(0.4))
+                        .multilineTextAlignment(.center)
+                }
             }
             .padding(.horizontal, 32)
             .frame(maxWidth: .infinity, maxHeight: .infinity)

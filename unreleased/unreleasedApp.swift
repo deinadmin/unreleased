@@ -1,3 +1,4 @@
+import FirebaseAuth
 import FirebaseCore
 import FirebaseFirestore
 import SwiftUI
@@ -7,14 +8,27 @@ struct unreleasedApp: App {
     @Environment(\.scenePhase) private var scenePhase
     @State private var authManager: AuthManager
     @State private var importManager = AudioFileImportManager()
+    @State private var linkRouter = ProjectLinkRouter()
 
     init() {
         if FirebaseApp.app() == nil {
             FirebaseApp.configure()
         }
+        Self.clearKeychainOnFreshInstall()
         Self.configureFirestoreCache()
         AuthManager.configureGoogleSignIn()
         _authManager = State(initialValue: AuthManager())
+    }
+
+    /// UserDefaults is wiped when the app is deleted; Keychain is not.
+    /// If this is a fresh install (no UserDefaults sentinel), sign out of Firebase
+    /// so a stale Keychain token never auto-signs in a deleted account on first launch.
+    private static func clearKeychainOnFreshInstall() {
+        let key = "app.hasLaunchedBefore"
+        if UserDefaults.standard.object(forKey: key) == nil {
+            try? Auth.auth().signOut()
+            UserDefaults.standard.set(true, forKey: key)
+        }
     }
 
     private static func configureFirestoreCache() {
@@ -29,6 +43,7 @@ struct unreleasedApp: App {
                 .environment(authManager)
                 .buttonStyle(.scale)
                 .environment(importManager)
+                .environment(linkRouter)
                 .onOpenURL { url in
                     handleIncomingURL(url)
                 }
@@ -43,6 +58,15 @@ struct unreleasedApp: App {
     }
 
     private func handleIncomingURL(_ url: URL) {
+        // unreleased://project/{ownerUID}/{projectID}
+        if url.scheme == "unreleased", url.host == "project" {
+            let parts = url.pathComponents.filter { $0 != "/" }
+            if parts.count == 2, let projectID = UUID(uuidString: parts[1]) {
+                linkRouter.receive(ownerID: parts[0], projectID: projectID)
+            }
+            return
+        }
+
         if url.scheme == "unreleased", url.host == "import" {
             importManager.loadPendingImportIfNeeded()
             return

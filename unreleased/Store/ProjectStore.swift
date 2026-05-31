@@ -38,6 +38,9 @@ final class ProjectStore {
 
     private var syncService: ProjectSyncService?
     private var planService: UserPlanService?
+    private var profileService: UserProfileService?
+    private var sharedSyncService: SharedProjectSyncService?
+    var currentUserID: String?
     private var downloadTasks: [UUID: Task<Void, Never>] = [:]
     private var suppressSync = false
     /// Stable `UIImage` instances so SwiftUI doesn't crossfade covers on unrelated state updates.
@@ -52,6 +55,22 @@ final class ProjectStore {
     // MARK: - Plan
 
     var currentPlan: UserPlan = .default
+
+    // MARK: - Profile / Username
+
+    /// The signed-in user's username, or nil if not yet set.
+    var currentUsername: String? = nil
+    /// True after the profile service has delivered its first update (even if username is nil).
+    var hasCheckedUsername: Bool = false
+
+    /// Atomically claims a username. Throws if taken.
+    func setUsername(_ username: String) async throws {
+        guard let userID = currentUserID else { return }
+        try await profileService?.setUsername(username, forUserID: userID)
+        currentUsername = username
+        // Trigger a sync push so the new username is included in project documents.
+        syncService?.schedulePush()
+    }
 
     // MARK: - Storage limit
 
@@ -106,9 +125,22 @@ final class ProjectStore {
         planService?.stop()
         planService = nil
 
+        profileService?.stop()
+        profileService = nil
+
         syncService?.stop()
         syncService = nil
+
+        sharedSyncService?.stop()
+        sharedSyncService = nil
+
+        currentUserID = userID
         syncStatus = userID == nil ? .offline : .syncing
+
+        if userID == nil {
+            currentUsername = nil
+            hasCheckedUsername = false
+        }
 
         guard let userID else {
             currentPlan = .default
@@ -119,6 +151,13 @@ final class ProjectStore {
         planService = plan
         plan.start(userID: userID) { [weak self] updated in
             self?.currentPlan = updated
+        }
+
+        let profile = UserProfileService()
+        profileService = profile
+        profile.start(userID: userID) { [weak self] username in
+            self?.currentUsername = username
+            self?.hasCheckedUsername = true
         }
 
         let service = ProjectSyncService(
@@ -144,9 +183,28 @@ final class ProjectStore {
         service.onActivityChanged = { [weak self] in
             self?.updateSyncStatus()
         }
+        service.usernameProvider = { [weak self] in self?.currentUsername }
 
         syncService = service
         service.start()
+
+        let shared = SharedProjectSyncService(
+            projectUpdater: { [weak self] project in
+                self?.applySharedProjectUpdate(project)
+            },
+            projectRemover: { [weak self] projectID in
+                self?.removeSharedProject(projectID)
+            }
+        )
+        sharedSyncService = shared
+
+        // Reconnect listeners for shared projects already saved locally.
+        for project in projects where project.isShared {
+            if let ownerID = project.ownerID {
+                shared.subscribe(ownerID: ownerID, projectID: project.id)
+            }
+        }
+
         updateSyncStatus()
     }
 
@@ -179,6 +237,10 @@ final class ProjectStore {
     }
 
     func deleteProject(_ project: Project) {
+        if project.isShared {
+            removeSharedProject(project.id)
+            return
+        }
         project.tracks.forEach {
             cancelDownload(trackID: $0.id)
             deleteAudioFile(fileName: $0.fileName)
@@ -197,6 +259,63 @@ final class ProjectStore {
                 await service?.deleteTrackFromCloud(track)
             }
         }
+    }
+
+    // MARK: - Shared projects
+
+    /// Fetches a project from another user's Firestore collection and adds it to the local library.
+    func addSharedProjectByLink(ownerID: String, projectID: UUID) async {
+        guard !projects.contains(where: { $0.id == projectID }) else { return }
+        guard let project = await sharedSyncService?.fetchProject(ownerID: ownerID, projectID: projectID) else { return }
+
+        projects.insert(project, at: 0)
+        persistLocalOnly()
+
+        sharedSyncService?.subscribe(ownerID: ownerID, projectID: projectID)
+
+        if project.coverStoragePath != nil {
+            Task { await downloadSharedCoverIfNeeded(for: project) }
+        }
+    }
+
+    /// Removes a shared project from the local library and stops its Firestore listener.
+    func removeSharedProject(_ projectID: UUID) {
+        guard let project = projects.first(where: { $0.id == projectID }), project.isShared else { return }
+        sharedSyncService?.unsubscribe(projectID: projectID)
+        project.tracks.forEach {
+            cancelDownload(trackID: $0.id)
+            deleteDownloadedFile(fileName: $0.fileName)
+        }
+        deleteCoverImage(fileName: project.coverImageFileName)
+        projects.removeAll { $0.id == projectID }
+        persistLocalOnly()
+    }
+
+    private func applySharedProjectUpdate(_ project: Project) {
+        guard let index = projects.firstIndex(where: { $0.id == project.id }) else { return }
+        var updated = project
+        let local = projects[index]
+        // Preserve locally analyzed waveforms.
+        for tIdx in updated.tracks.indices {
+            if let localTrack = local.tracks.first(where: { $0.id == updated.tracks[tIdx].id }),
+               updated.tracks[tIdx].waveformData == nil {
+                updated.tracks[tIdx].waveformData = localTrack.waveformData
+            }
+        }
+        projects[index] = updated
+        persistLocalOnly()
+
+        if updated.coverStoragePath != nil {
+            Task { await downloadSharedCoverIfNeeded(for: updated) }
+        }
+    }
+
+    private func downloadSharedCoverIfNeeded(for project: Project) async {
+        guard let storagePath = project.coverStoragePath else { return }
+        let fileName = project.coverImageFileName ?? "\(project.id.uuidString).jpg"
+        let destination = coverImagesURL.appendingPathComponent(fileName)
+        guard !FileManager.default.fileExists(atPath: destination.path) else { return }
+        try? await AudioFileCache.shared.download(storagePath: storagePath, to: destination)
     }
 
     // MARK: - Track CRUD
@@ -758,6 +877,14 @@ final class ProjectStore {
             )
         }
         AudioImportBridge.mirrorProjects(mirrors)
+    }
+
+    /// Wipes all locally persisted library data. Call on sign-out so the next
+    /// account starts from a clean slate rather than seeing the previous user's projects.
+    func clearLocalLibrary() {
+        projects = []
+        try? FileManager.default.removeItem(at: dataURL)
+        AudioImportBridge.mirrorProjects([])
     }
 
     private func load() {

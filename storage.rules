@@ -3,11 +3,20 @@ rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
     match /users/{userId}/audio/{fileName} {
-      allow read, write: if request.auth != null && request.auth.uid == userId;
+      // Any authenticated user can read (stream/download) audio so shared
+      // project recipients can play and cache tracks from the owner's path.
+      allow read: if request.auth != null;
+
+      // Only the owner can upload or delete their own audio files.
+      allow write: if request.auth != null && request.auth.uid == userId;
     }
 
     match /users/{userId}/covers/{fileName} {
-      allow read, write: if request.auth != null && request.auth.uid == userId;
+      // Any authenticated user can download cover images for shared projects.
+      allow read: if request.auth != null;
+
+      // Only the owner can upload or delete their own cover images.
+      allow write: if request.auth != null && request.auth.uid == userId;
     }
   }
 }

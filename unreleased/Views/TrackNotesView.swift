@@ -19,12 +19,20 @@ struct TrackNotesView: View {
         store.projects.first { $0.id == projectID }
     }
 
+    private var isReadOnly: Bool { project?.isShared ?? false }
+
     var body: some View {
         Group {
             if let track, let project {
-                notesEditor
-                    .navigationTitle(track.title)
-                    .navigationSubtitle(project.name)
+                Group {
+                    if isReadOnly {
+                        notesViewer(notes: track.notes)
+                    } else {
+                        notesEditor
+                    }
+                }
+                .navigationTitle(track.title)
+                .navigationSubtitle(project.name)
             } else {
                 ProgressView()
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -34,19 +42,55 @@ struct TrackNotesView: View {
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
             draftNotes = track?.notes ?? ""
+            guard !isReadOnly else { return }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
                 isEditorFocused = true
             }
         }
         .onChange(of: draftNotes) { _, newValue in
+            guard !isReadOnly else { return }
             scheduleSave(newValue)
         }
         .onDisappear {
+            guard !isReadOnly else { return }
             saveTask?.cancel()
             store.updateTrackNotes(draftNotes, trackID: trackID, projectID: projectID)
         }
         .tint(project.map { store.accentColor(for: $0) } ?? .accentColor)
     }
+
+    // MARK: - Read-only viewer (shared tracks)
+
+    @ViewBuilder
+    private func notesViewer(notes: String) -> some View {
+        if notes.isEmpty {
+            VStack(spacing: 6) {
+                Image(systemName: "doc.text")
+                    .font(.system(size: 28, weight: .light))
+                    .foregroundStyle(.secondary)
+                Text("No notes")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            ScrollView {
+                Text(notes)
+                    .font(.system(size: 17))
+                    .foregroundStyle(.primary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .textSelection(.enabled)
+                    .contentMargins(.horizontal, 20, for: .scrollContent)
+                    .contentMargins(.vertical, 12, for: .scrollContent)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 12)
+            }
+            .scrollClipDisabled()
+            .scrollEdgeEffectStyle(.soft, for: .vertical)
+        }
+    }
+
+    // MARK: - Editable (own tracks)
 
     private var notesEditor: some View {
         TextEditor(text: $draftNotes)

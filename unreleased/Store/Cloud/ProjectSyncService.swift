@@ -24,6 +24,8 @@ final class ProjectSyncService {
     private let trackUpdater: TrackUpdater
     private let projectPatcher: ProjectPatcher
     private let projectRemover: ProjectRemover
+    /// Provides the current user's username for embedding in project pushes.
+    var usernameProvider: (() -> String?)? = nil
 
     private var listener: ListenerRegistration?
     private var pushTask: Task<Void, Never>?
@@ -50,6 +52,7 @@ final class ProjectSyncService {
     /// Tracks with a local audio file that still need uploading to Storage.
     var pendingUploadTrackCount: Int {
         snapshotProvider()
+            .filter { !$0.isShared }
             .flatMap(\.tracks)
             .filter { track in
                 guard track.storagePath == nil else { return false }
@@ -60,7 +63,7 @@ final class ProjectSyncService {
     }
 
     private var hasPendingCloudWork: Bool {
-        let projects = snapshotProvider()
+        let projects = snapshotProvider().filter { !$0.isShared }
         for project in projects {
             let lastSynced = lastSyncedUpdated[project.id]
             if lastSynced == nil || project.updatedDate > lastSynced! {
@@ -256,7 +259,7 @@ final class ProjectSyncService {
             notifyActivityChanged()
         }
 
-        let projects = snapshotProvider()
+        let projects = snapshotProvider().filter { !$0.isShared }
 
         for project in projects {
             let lastSynced = lastSyncedUpdated[project.id]
@@ -266,7 +269,8 @@ final class ProjectSyncService {
 
             do {
                 let doc = CloudPaths.projectDocument(userID: userID, projectID: project.id)
-                try await doc.setData(FirestoreProjectCodec.encode(project), merge: true)
+                let username = usernameProvider?()
+                try await doc.setData(FirestoreProjectCodec.encode(project, ownerUsername: username), merge: true)
                 lastSyncedUpdated[project.id] = project.updatedDate
 
                 for track in project.tracks where track.storagePath == nil {

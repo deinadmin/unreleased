@@ -149,54 +149,61 @@ struct TrackInfoSheet: View {
 
     @ViewBuilder
     private var trackSharingRow: some View {
-        Button {
-            // Track sharing settings — future
-        } label: {
-            HStack {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Track sharing")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(.primary)
+        if !project.isShared {
+            Button {
+                // Track sharing settings — future
+            } label: {
+                HStack {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Track sharing")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(.primary)
 
-                    HStack(spacing: 4) {
-                        Image(systemName: "lock.fill")
-                            .font(.system(size: 11))
-                        Text("Private")
-                            .font(.system(size: 14))
+                        HStack(spacing: 4) {
+                            Image(systemName: "lock.fill")
+                                .font(.system(size: 11))
+                            Text("Private")
+                                .font(.system(size: 14))
+                        }
+                        .foregroundStyle(.secondary)
                     }
-                    .foregroundStyle(.secondary)
+
+                    Spacer()
+
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.tertiary)
                 }
-
-                Spacer()
-
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.tertiary)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 14)
+                .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 14)
-            .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .buttonStyle(.plain)
         }
-        .buttonStyle(.plain)
     }
 
     // MARK: - Action groups
 
     private var primaryActions: [TrackInfoAction] {
-        var actions: [TrackInfoAction] = [
-            TrackInfoAction(title: "Rename", systemImage: "pencil") {
+        var actions: [TrackInfoAction] = []
+
+        if !project.isShared {
+            actions.append(TrackInfoAction(title: "Rename", systemImage: "pencil") {
                 renameText = liveTrack.title
                 showRenameAlert = true
-            },
-            TrackInfoAction(title: "Replace audio", systemImage: "waveform.badge.plus"),
-            TrackInfoAction(title: "Edit notes", systemImage: "doc.text") {
-                dismiss()
-                DispatchQueue.main.async {
-                    onOpenNotes()
-                }
-            },
-            TrackInfoAction(title: "Share snippet", systemImage: "play.square"),
-        ]
+            })
+            actions.append(TrackInfoAction(title: "Replace audio", systemImage: "waveform.badge.plus"))
+        }
+
+        actions.append(TrackInfoAction(
+            title: project.isShared ? "View notes" : "Edit notes",
+            systemImage: "doc.text"
+        ) {
+            dismiss()
+            DispatchQueue.main.async { onOpenNotes() }
+        })
+
+        actions.append(TrackInfoAction(title: "Share snippet", systemImage: "play.square"))
 
         if store.isTrackDownloaded(liveTrack) {
             actions.append(TrackInfoAction(title: "Remove download", systemImage: "arrow.down.circle.fill") {
@@ -213,25 +220,29 @@ struct TrackInfoSheet: View {
         actions.append(TrackInfoAction(title: "Add to queue", systemImage: "text.line.first.and.arrowtriangle.forward") {
             player.addToQueue(liveTrack, in: project)
             dismiss()
-            DispatchQueue.main.async {
-                toastCenter.showTrackQueued()
-            }
+            DispatchQueue.main.async { toastCenter.showTrackQueued() }
         })
+
         return actions
     }
 
     private var secondaryActions: [TrackInfoAction] {
-        [
+        var actions: [TrackInfoAction] = [
             TrackInfoAction(title: "Export audio", systemImage: "square.and.arrow.down") {
                 exportAudio()
             },
-            TrackInfoAction(title: "Move", systemImage: "arrow.right.square") {
-                withAnimation(Self.sheetFade) { isShowingMove = true }
-            },
-            TrackInfoAction(title: "Delete", systemImage: "trash", isDestructive: true) {
-                showDeleteConfirm = true
-            },
         ]
+
+        if !project.isShared {
+            actions.append(TrackInfoAction(title: "Move", systemImage: "arrow.right.square") {
+                withAnimation(Self.sheetFade) { isShowingMove = true }
+            })
+            actions.append(TrackInfoAction(title: "Delete", systemImage: "trash", isDestructive: true) {
+                showDeleteConfirm = true
+            })
+        }
+
+        return actions
     }
 
     @ViewBuilder

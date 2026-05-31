@@ -3,6 +3,7 @@ import SwiftUI
 struct ContentView: View {
     @Environment(AuthManager.self) private var auth
     @Environment(AudioFileImportManager.self) private var importManager
+    @Environment(ProjectLinkRouter.self) private var linkRouter
     @State private var store = ProjectStore()
     @State private var player: AudioPlayer
     @State private var navigationPath = NavigationPath()
@@ -10,6 +11,11 @@ struct ContentView: View {
     @State private var toastCenter = PlayerToastCenter()
     @State private var searchState = AppSearchState()
     @State private var showingSaveInSheet = false
+    @State private var pendingInvite: PendingInvite? = nil
+
+    private var needsUsername: Bool {
+        auth.isSignedIn && store.currentUsername == nil
+    }
 
     /// Matches `safeAreaBar` clearance above the mini player.
     private let miniPlayerReservedHeight: CGFloat = 66
@@ -158,6 +164,33 @@ struct ContentView: View {
         .task(id: auth.signedInUserID) {
             store.configureSync(userID: auth.signedInUserID)
         }
+        .task(id: linkRouter.pendingProjectID) {
+            guard let projectID = linkRouter.pendingProjectID,
+                  let ownerID = linkRouter.pendingOwnerID
+            else { return }
+            await handleIncomingProjectLink(ownerID: ownerID, projectID: projectID)
+        }
+        // Username picker — blocks the app until the user picks a username.
+        .sheet(isPresented: Binding(get: { needsUsername }, set: { _ in })) {
+            UsernamePickerSheet()
+                .environment(store)
+                .interactiveDismissDisabled(true)
+        }
+        // Invite sheet — shown when a project deep link arrives from another user.
+        .sheet(item: $pendingInvite) { invite in
+            ProjectInviteSheet(
+                ownerUID: invite.ownerUID,
+                projectID: invite.projectID,
+                onAccepted: {
+                    await handleInviteAccepted(ownerUID: invite.ownerUID, projectID: invite.projectID)
+                },
+                onDeclined: {
+                    pendingInvite = nil
+                    linkRouter.clear()
+                }
+            )
+            .environment(store)
+        }
     }
 
     // MARK: - Import handling
@@ -192,6 +225,46 @@ struct ContentView: View {
         }
     }
 
+    // MARK: - Deep link navigation
+
+    private func handleIncomingProjectLink(ownerID: String, projectID: UUID) async {
+        if ownerID == auth.signedInUserID {
+            // Own project — navigate directly.
+            guard store.projects.contains(where: { $0.id == projectID }) else {
+                linkRouter.clear()
+                return
+            }
+            navigateToProject(projectID)
+            linkRouter.clear()
+            return
+        }
+
+        // Already accepted previously — just navigate.
+        if store.projects.contains(where: { $0.id == projectID }) {
+            navigateToProject(projectID)
+            linkRouter.clear()
+            return
+        }
+
+        // New invite — show the invite sheet (requires a username first).
+        pendingInvite = PendingInvite(ownerUID: ownerID, projectID: projectID)
+    }
+
+    private func handleInviteAccepted(ownerUID: String, projectID: UUID) async {
+        await store.addSharedProjectByLink(ownerID: ownerUID, projectID: projectID)
+        pendingInvite = nil
+        linkRouter.clear()
+        if store.projects.contains(where: { $0.id == projectID }) {
+            navigateToProject(projectID)
+        }
+    }
+
+    private func navigateToProject(_ projectID: UUID) {
+        if searchState.isActive { searchState.deactivate() }
+        navigationPath = NavigationPath()
+        navigationPath.append(projectID)
+    }
+
     @ViewBuilder
     private var bottomChrome: some View {
         Group {
@@ -222,6 +295,14 @@ struct ContentView: View {
         .animation(.spring(response: 0.38, dampingFraction: 0.86), value: searchState.isActive)
         .animation(.spring(response: 0.44, dampingFraction: 0.84), value: player.currentTrack != nil)
     }
+}
+
+// MARK: - Supporting types
+
+private struct PendingInvite: Identifiable {
+    let id = UUID()
+    let ownerUID: String
+    let projectID: UUID
 }
 
 #Preview {

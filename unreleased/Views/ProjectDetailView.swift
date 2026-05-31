@@ -6,6 +6,7 @@ struct ProjectDetailView: View {
     @Environment(ProjectStore.self) private var store
     @Environment(AudioPlayer.self) private var player
     @Environment(AppSearchState.self) private var searchState
+    @Environment(AuthManager.self) private var auth
     @Environment(\.navigateToTrackNotes) private var navigateToTrackNotes
 
     let projectID: UUID
@@ -14,11 +15,13 @@ struct ProjectDetailView: View {
     @State private var isShowingDocumentPicker = false
     @State private var isImporting = false
     @State private var isShowingEdit = false
+    @State private var isShowingShare = false
     @State private var importError: String? = nil
     @State private var showStorageLimitAlert = false
     @State private var trackForInfo: Track? = nil
     @State private var showNavTitle = false
     @State private var showDeleteConfirm = false
+    @State private var ownerLabel: String = ""
 
     private var project: Project? {
         store.projects.first { $0.id == projectID }
@@ -60,6 +63,11 @@ struct ProjectDetailView: View {
                     )
             }
         }
+        .sheet(isPresented: $isShowingShare) {
+            if let project {
+                ProjectShareSheet(project: project)
+            }
+        }
         .sheet(isPresented: $isShowingDocumentPicker) {
             if let project {
                 DocumentPicker(
@@ -89,7 +97,11 @@ struct ProjectDetailView: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("This will permanently delete the project and all of its tracks.")
+            if let project, project.isShared {
+                Text("This will remove the project from your library. The owner's project will not be affected.")
+            } else {
+                Text("This will permanently delete the project and all of its tracks.")
+            }
         }
         .alert("Storage Full", isPresented: $showStorageLimitAlert) {
             Button("OK", role: .cancel) {}
@@ -100,6 +112,28 @@ struct ProjectDetailView: View {
             Button("OK", role: .cancel) {}
         } message: {
             Text(importError ?? "")
+        }
+        .task(id: projectID) {
+            await resolveOwnerLabel()
+        }
+        .onChange(of: store.currentUsername) { _, _ in
+            if project?.isShared == false {
+                Task { await resolveOwnerLabel() }
+            }
+        }
+    }
+
+    private func resolveOwnerLabel() async {
+        if let ownerID = project?.ownerID {
+            // Shared project — use cached username or fetch it.
+            if let cached = project?.ownerUsername, !cached.isEmpty {
+                ownerLabel = cached
+            } else {
+                ownerLabel = await UserProfileService.fetchUsername(forUID: ownerID) ?? "Unknown"
+            }
+        } else {
+            // Own project — use current username; empty string shows "…" via the header.
+            ownerLabel = store.currentUsername ?? ""
         }
     }
 
@@ -146,15 +180,18 @@ struct ProjectDetailView: View {
             vinylGradient: store.vinylGradient(for: project),
             isPlaying: isThisProjectPlaying(project),
             downloadState: headerDownloadState(for: project),
-            zoomNamespace: projectZoomNamespace
+            zoomNamespace: projectZoomNamespace,
+            ownerLabel: ownerLabel
         )
     }
 
     @ViewBuilder
     private func trackListSection(project: Project) -> some View {
         VStack(spacing: 0) {
-            addTracksButton(project: project)
-                .padding(.horizontal, 20)
+            if !project.isShared {
+                addTracksButton(project: project)
+                    .padding(.horizontal, 20)
+            }
 
             let tracks = filteredTracks(for: project)
             if searchState.isActive,
@@ -249,9 +286,9 @@ struct ProjectDetailView: View {
         ToolbarItem(placement: .topBarTrailing) {
             HStack(spacing: 8) {
                 Button {
-                    shareProject()
+                    isShowingShare = true
                 } label: {
-                    Image(systemName: "link")
+                    Image(systemName: "square.and.arrow.up")
                         .font(.system(size: 14, weight: .medium))
                         .frame(width: 32, height: 32)
                 }
@@ -269,25 +306,30 @@ struct ProjectDetailView: View {
                 }
 
                 Menu {
-                    Button {
-                        if store.hasStorageCapacity {
-                            isShowingDocumentPicker = true
-                        } else {
-                            showStorageLimitAlert = true
+                    if !(project.isShared) {
+                        Button {
+                            if store.hasStorageCapacity {
+                                isShowingDocumentPicker = true
+                            } else {
+                                showStorageLimitAlert = true
+                            }
+                        } label: {
+                            Label("Add tracks", systemImage: "plus")
                         }
-                    } label: {
-                        Label("Add tracks", systemImage: "plus")
-                    }
-                    .disabled(isImporting)
-                    Button {
-                        isShowingEdit = true
-                    } label: {
-                        Label("Edit", systemImage: "pencil")
+                        .disabled(isImporting)
+                        Button {
+                            isShowingEdit = true
+                        } label: {
+                            Label("Edit", systemImage: "pencil")
+                        }
                     }
                     Button(role: .destructive) {
                         showDeleteConfirm = true
                     } label: {
-                        Label("Delete", systemImage: "trash")
+                        Label(
+                            project.isShared ? "Remove from Library" : "Delete",
+                            systemImage: project.isShared ? "minus.circle" : "trash"
+                        )
                     }
                 } label: {
                     Image(systemName: "ellipsis")
@@ -325,22 +367,16 @@ struct ProjectDetailView: View {
         }
     }
 
-    private func shareProject() {
-        guard let project else { return }
-        let text = "\(project.name) — \(project.trackCountText)"
-        let av = UIActivityViewController(activityItems: [text], applicationActivities: nil)
-        if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-           let window = scene.windows.first {
-            window.rootViewController?.present(av, animated: true)
-        }
-    }
-
     private func confirmDeleteProject() {
         guard let project else { return }
         if player.currentProject?.id == project.id {
             player.stop()
         }
-        store.deleteProject(project)
+        if project.isShared {
+            store.removeSharedProject(project.id)
+        } else {
+            store.deleteProject(project)
+        }
         dismiss()
     }
 }
@@ -360,6 +396,7 @@ private struct ProjectDetailHeaderSection: View, Equatable {
     let isPlaying: Bool
     let downloadState: ProjectHeaderDownloadState
     let zoomNamespace: Namespace.ID
+    let ownerLabel: String
 
     static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.project.id == rhs.project.id
@@ -371,6 +408,7 @@ private struct ProjectDetailHeaderSection: View, Equatable {
             && lhs.vinylGradient == rhs.vinylGradient
             && lhs.coverImage === rhs.coverImage
             && lhs.downloadState == rhs.downloadState
+            && lhs.ownerLabel == rhs.ownerLabel
     }
 
     var body: some View {
@@ -401,7 +439,7 @@ private struct ProjectDetailHeaderSection: View, Equatable {
                         .foregroundStyle(.primary)
 
                     HStack(spacing: 4) {
-                        Text("carlowav • \(project.trackCountText) • \(project.formattedDuration)")
+                        Text("\(ownerLabel.isEmpty ? "…" : "@\(ownerLabel)") • \(project.trackCountText) • \(project.formattedDuration)")
                             .font(.system(size: 14))
                             .foregroundStyle(.secondary)
                     }

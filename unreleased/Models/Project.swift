@@ -146,6 +146,12 @@ struct Project: Identifiable, Codable, Sendable {
     var tracks: [Track]
     var createdDate: Date
     var updatedDate: Date
+    /// Non-nil when this project is shared from another user. Nil for own projects.
+    var ownerID: String?
+    /// Denormalized display username of the owner. Set for shared projects when decoded from Firestore.
+    var ownerUsername: String?
+
+    var isShared: Bool { ownerID != nil }
 
     init(
         id: UUID = UUID(),
@@ -157,7 +163,9 @@ struct Project: Identifiable, Codable, Sendable {
         coverGradientColors: [String]? = nil,
         tracks: [Track] = [],
         createdDate: Date = Date(),
-        updatedDate: Date = Date()
+        updatedDate: Date = Date(),
+        ownerID: String? = nil,
+        ownerUsername: String? = nil
     ) {
         self.id = id
         self.name = name
@@ -169,6 +177,8 @@ struct Project: Identifiable, Codable, Sendable {
         self.tracks = tracks
         self.createdDate = createdDate
         self.updatedDate = updatedDate
+        self.ownerID = ownerID
+        self.ownerUsername = ownerUsername
     }
 
     var totalDuration: TimeInterval {

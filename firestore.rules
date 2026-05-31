@@ -3,13 +3,61 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    // ── Username uniqueness index ────────────────────────────────────────────
+    // Any authenticated user can read (availability check).
+    // Only the holder can create the entry; no updates or client-side deletes.
+    match /usernames/{username} {
+      allow read: if request.auth != null;
+      allow create: if request.auth != null
+        && request.resource.data.uid == request.auth.uid;
+      allow update, delete: if false;
+    }
+
+    // ── User profiles (app-written: username) ────────────────────────────────
+    // Any authenticated user can read (for displaying owner names).
+    // Only the owner can write their own profile.
+    match /userProfiles/{userId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null && request.auth.uid == userId;
+    }
+
+    // ── Per-user data ────────────────────────────────────────────────────────
     match /users/{userId} {
-      // Users can read their own plan document; only admins write it via the console.
+      // Plan document: owner read-only, admin writes via console.
       allow read: if request.auth != null && request.auth.uid == userId;
       allow write: if false;
 
+      // ── Invite previews ────────────────────────────────────────────────────
+      // Small preview docs (name, gradient, ownerUsername) that any
+      // authenticated user can read so the invite sheet can display project
+      // info before the recipient has accepted.
+      match /projectPreviews/{projectId} {
+        allow read: if request.auth != null;
+        allow write: if request.auth != null && request.auth.uid == userId;
+      }
+
+      // ── Projects ───────────────────────────────────────────────────────────
       match /projects/{projectId} {
+        // Owner has full access.
         allow read, write: if request.auth != null && request.auth.uid == userId;
+
+        // Accepted invitees can read (but not write) the full project.
+        allow read: if request.auth != null
+          && exists(/databases/$(database)/documents/users/$(userId)/projects/$(projectId)/invitees/$(request.auth.uid));
+
+        // ── Invitees subcollection ─────────────────────────────────────────
+        match /invitees/{inviteeId} {
+          // Owner can read and manage all invitees.
+          allow read, write: if request.auth != null && request.auth.uid == userId;
+
+          // Users can add themselves (accept invite).
+          allow create: if request.auth != null
+            && request.auth.uid == inviteeId
+            && request.resource.data.uid == request.auth.uid;
+
+          // Users can remove themselves (leave project).
+          allow delete: if request.auth != null && request.auth.uid == inviteeId;
+        }
       }
     }
 
