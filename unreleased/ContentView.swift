@@ -14,7 +14,7 @@ struct ContentView: View {
     @State private var pendingInvite: PendingInvite? = nil
 
     private var needsUsername: Bool {
-        auth.isSignedIn && store.currentUsername == nil
+        auth.isSignedIn && store.hasCheckedUsername && store.currentUsername == nil
     }
 
     /// Matches `safeAreaBar` clearance above the mini player.
