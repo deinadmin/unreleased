@@ -1,3 +1,4 @@
+import Combine
 import SwiftUI
 
 struct ContentView: View {
@@ -67,6 +68,9 @@ struct ContentView: View {
                     }
                     .navigationDestination(for: ProfileRoute.self) { _ in
                         ProfileView()
+                    }
+                    .navigationDestination(for: NotificationsRoute.self) { _ in
+                        NotificationsView()
                     }
                     .navigationDestination(for: StorageSyncRoute.self) { _ in
                         StorageSyncView()
@@ -163,6 +167,16 @@ struct ContentView: View {
         .animation(.smooth(duration: 0.35), value: player.currentTrack?.id)
         .task(id: auth.signedInUserID) {
             store.configureSync(userID: auth.signedInUserID)
+            if auth.signedInUserID != nil {
+                PushNotificationManager.shared.registerForPushNotifications()
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .projectInviteTapped)) { note in
+            guard let ownerID = note.userInfo?[PushUserInfoKey.ownerID] as? String,
+                  let idString = note.userInfo?[PushUserInfoKey.projectID] as? String,
+                  let projectID = UUID(uuidString: idString)
+            else { return }
+            linkRouter.receive(ownerID: ownerID, projectID: projectID)
         }
         .task(id: linkRouter.pendingProjectID) {
             guard let projectID = linkRouter.pendingProjectID,

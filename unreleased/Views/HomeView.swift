@@ -225,13 +225,20 @@ struct HomeView: View {
     private var toolbarContent: some ToolbarContent {
         ToolbarItem(placement: .topBarTrailing) {
             HStack(spacing: 8) {
-                Button {
-                    // Notifications
-                } label: {
+                NavigationLink(value: NotificationsRoute()) {
                     Image(systemName: "bell")
                         .font(.system(size: 14, weight: .medium))
                         .frame(width: 32, height: 32)
+                        .overlay(alignment: .topTrailing) {
+                            if store.unreadNotificationCount > 0 {
+                                Circle()
+                                    .fill(.red)
+                                    .frame(width: 8, height: 8)
+                                    .offset(x: -4, y: 4)
+                            }
+                        }
                 }
+                .buttonStyle(.plain)
 
                 Button {
                     player.isShowingNowPlaying = false

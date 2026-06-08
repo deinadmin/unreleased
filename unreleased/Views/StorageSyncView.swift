@@ -222,18 +222,8 @@ private struct StorageProgressBar: View {
 // MARK: - Animated sync icon
 
 private struct SyncingIcon: View {
-    @State private var rotating = false
-
     var body: some View {
-        Image(systemName: "arrow.triangle.2.circlepath.icloud")
-            .font(.system(size: 18, weight: .medium))
-            .foregroundStyle(.primary)
-            .rotationEffect(.degrees(rotating ? 360 : 0))
-            .animation(
-                .linear(duration: 1.6).repeatForever(autoreverses: false),
-                value: rotating
-            )
-            .onAppear { rotating = true }
+        TwoToneCircleSpinner(diameter: 18, lineWidth: 2)
     }
 }
 

@@ -19,10 +19,29 @@ enum CloudPaths {
     }
 
     /// Username uniqueness index: `usernames/{username}` → `{uid}`.
+    static func usernamesCollection() -> CollectionReference {
+        Firestore.firestore().collection("usernames")
+    }
+
     static func usernameDocument(username: String) -> DocumentReference {
-        Firestore.firestore()
-            .collection("usernames")
-            .document(username.lowercased())
+        usernamesCollection().document(username.lowercased())
+    }
+
+    /// Private per-user data the user can read/write but others cannot
+    /// (e.g. the FCM push token). `users/{userID}/private/{docID}`.
+    static func userPrivateDocument(userID: String, docID: String) -> DocumentReference {
+        userDocument(userID: userID).collection("private").document(docID)
+    }
+
+    // MARK: - Notifications
+
+    /// In-app notifications addressed to a user: `users/{userID}/notifications`.
+    static func notificationsCollection(userID: String) -> CollectionReference {
+        userDocument(userID: userID).collection("notifications")
+    }
+
+    static func notificationDocument(userID: String, notificationID: String) -> DocumentReference {
+        notificationsCollection(userID: userID).document(notificationID)
     }
 
     // MARK: - Projects
@@ -56,6 +75,18 @@ enum CloudPaths {
 
     static func inviteeDocument(ownerID: String, projectID: UUID, inviteeID: String) -> DocumentReference {
         inviteesCollection(ownerID: ownerID, projectID: projectID).document(inviteeID)
+    }
+
+    /// Subcollection of users explicitly invited by username. Lets them join even
+    /// when the general share link is disabled.
+    /// `users/{ownerID}/projects/{projectID}/pendingInvites`
+    static func pendingInvitesCollection(ownerID: String, projectID: UUID) -> CollectionReference {
+        projectDocument(userID: ownerID, projectID: projectID)
+            .collection("pendingInvites")
+    }
+
+    static func pendingInviteDocument(ownerID: String, projectID: UUID, inviteeID: String) -> DocumentReference {
+        pendingInvitesCollection(ownerID: ownerID, projectID: projectID).document(inviteeID)
     }
 
     // MARK: - Storage

@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		C31DD60F2FD4D8FE00F7C3A6 /* FirebaseMessaging in Frameworks */ = {isa = PBXBuildFile; productRef = C31DD60E2FD4D8FE00F7C3A6 /* FirebaseMessaging */; };
 		C367E3892FC3C284008D53DC /* ColorThiefSwift in Frameworks */ = {isa = PBXBuildFile; productRef = C367E3882FC3C284008D53DC /* ColorThiefSwift */; };
 		C367E38C2FC3C2CF008D53DC /* DominantColors in Frameworks */ = {isa = PBXBuildFile; productRef = C367E38B2FC3C2CF008D53DC /* DominantColors */; };
 		C3A100042FC4000100EB18FB /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3A100062FC4000100EB18FB /* ShareViewController.swift */; };
@@ -73,6 +74,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				C31DD60F2FD4D8FE00F7C3A6 /* FirebaseMessaging in Frameworks */,
 				C3F169C52FBDF5A800EB18FB /* FirebaseAuth in Frameworks */,
 				C367E38C2FC3C2CF008D53DC /* DominantColors in Frameworks */,
 				C367E3892FC3C284008D53DC /* ColorThiefSwift in Frameworks */,
@@ -86,6 +88,13 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		C31DD60D2FD4D8FE00F7C3A6 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
 		C3A100032FC4000100EB18FB /* SaveInUnreleasedShareExtension */ = {
 			isa = PBXGroup;
 			children = (
@@ -102,6 +111,7 @@
 			children = (
 				C3F168C92FBBBE7800EB18FB /* unreleased */,
 				C3A100032FC4000100EB18FB /* SaveInUnreleasedShareExtension */,
+				C31DD60D2FD4D8FE00F7C3A6 /* Frameworks */,
 				C3F168C82FBBBE7800EB18FB /* Products */,
 			);
 			sourceTree = "<group>";
@@ -161,6 +171,7 @@
 				C3F169CD2FBDF6A100EB18FB /* GoogleSignIn */,
 				C367E3882FC3C284008D53DC /* ColorThiefSwift */,
 				C367E38B2FC3C2CF008D53DC /* DominantColors */,
+				C31DD60E2FD4D8FE00F7C3A6 /* FirebaseMessaging */,
 			);
 			productName = unreleased;
 			productReference = C3F168C72FBBBE7800EB18FB /* unreleased.app */;
@@ -553,6 +564,11 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		C31DD60E2FD4D8FE00F7C3A6 /* FirebaseMessaging */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = C3F169C32FBDF5A800EB18FB /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseMessaging;
+		};
 		C367E3882FC3C284008D53DC /* ColorThiefSwift */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = C367E3872FC3C284008D53DC /* XCRemoteSwiftPackageReference "ColorThiefSwift" */;

@@ -9,9 +9,23 @@ struct ProjectShareSheet: View {
     @State private var showQRCode = false
     @State private var qrImage: UIImage?
     @State private var didCopy = false
-    @State private var selectedDetent: PresentationDetent = .medium
+    @State private var selectedDetent: PresentationDetent = .large
     @State private var invitees: [InviteeInfo] = []
     @State private var loadedInvitees = false
+
+    // Link enable/disable
+    @State private var linkEnabled = true
+    @State private var loadedLinkState = false
+    @State private var isUpdatingLink = false
+
+    // Invite by username
+    @State private var searchText = ""
+    @State private var searchResults: [UserSearchResult] = []
+    @State private var isSearching = false
+    @State private var searchTask: Task<Void, Never>?
+    @State private var invitedUIDs: Set<String> = []
+    @State private var invitingUIDs: Set<String> = []
+    @FocusState private var searchFocused: Bool
 
     private var deepLinkOwnerID: String? {
         project.ownerID ?? auth.signedInUserID
@@ -25,48 +39,40 @@ struct ProjectShareSheet: View {
     private var isOwner: Bool { !project.isShared }
 
     var body: some View {
-        VStack(spacing: 0) {
-            header
-            linkField
-                .padding(.horizontal, 20)
-                .padding(.bottom, 20)
-            actionButtons
-                .padding(.horizontal, 20)
+        ScrollView {
+            VStack(spacing: 0) {
+                header
 
-            if showQRCode {
-                qrSection
-                    .transition(.opacity.combined(with: .move(edge: .bottom)))
+                if isOwner {
+                    inviteSection
+                        .padding(.horizontal, 20)
+                        .padding(.bottom, 28)
+                }
+
+                linkSection
+                    .padding(.horizontal, 20)
+
+                if showQRCode {
+                    qrSection
+                        .transition(.opacity.combined(with: .move(edge: .bottom)))
+                }
+
+                if isOwner && loadedInvitees {
+                    inviteesSection
+                        .padding(.top, 28)
+                        .transition(.opacity.combined(with: .move(edge: .bottom)))
+                }
             }
-
-            if isOwner && loadedInvitees {
-                inviteesSection
-                    .padding(.top, 24)
-                    .transition(.opacity.combined(with: .move(edge: .bottom)))
-            }
-
-            Spacer(minLength: 0)
+            .padding(.bottom, 32)
         }
+        .scrollDismissesKeyboard(.interactively)
         .animation(.spring(response: 0.42, dampingFraction: 0.84), value: showQRCode)
         .animation(.spring(response: 0.42, dampingFraction: 0.84), value: loadedInvitees)
+        .animation(.spring(response: 0.4, dampingFraction: 0.86), value: searchResults)
+        .animation(.easeInOut(duration: 0.2), value: linkEnabled)
         .presentationDetents([.medium, .large], selection: $selectedDetent)
         .presentationDragIndicator(.visible)
-        .task {
-            qrImage = generateQRCode(deepLink)
-            guard isOwner,
-                  let ownerID = auth.signedInUserID,
-                  let username = store.currentUsername
-            else { return }
-            // Write preview so recipients can see invite info before accepting.
-            async let _ = ProjectInviteService.writePreview(
-                project: project,
-                ownerUID: ownerID,
-                ownerUsername: username
-            )
-            // Fetch current invitees.
-            let list = await ProjectInviteService.fetchInvitees(ownerUID: ownerID, projectID: project.id)
-            withAnimation { invitees = list; loadedInvitees = true }
-            if !list.isEmpty { selectedDetent = .large }
-        }
+        .task { await load() }
     }
 
     // MARK: - Header
@@ -81,23 +87,144 @@ struct ProjectShareSheet: View {
                 .lineLimit(1)
         }
         .padding(.top, 24)
-        .padding(.bottom, 20)
+        .padding(.bottom, 24)
     }
 
-    // MARK: - Link field
+    // MARK: - Invite by username
+
+    private var inviteSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            sectionTitle("Invite people")
+
+            searchField
+
+            if !searchResults.isEmpty {
+                VStack(spacing: 0) {
+                    ForEach(searchResults) { user in
+                        searchResultRow(user)
+                        if user.id != searchResults.last?.id {
+                            Divider().padding(.leading, 16 + 32 + 12)
+                        }
+                    }
+                }
+                .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            } else if isSearching {
+                HStack(spacing: 8) {
+                    ProgressView().scaleEffect(0.8)
+                    Text("Searching…")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.vertical, 4)
+            } else if !trimmedQuery.isEmpty {
+                Text("No users found for “\(trimmedQuery)”")
+                    .font(.footnote)
+                    .foregroundStyle(.tertiary)
+                    .padding(.vertical, 4)
+            }
+        }
+    }
+
+    private var searchField: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 15))
+                .foregroundStyle(.secondary)
+                .padding(.leading, 14)
+
+            TextField("Search by username", text: $searchText)
+                .font(.system(size: 15))
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .focused($searchFocused)
+                .submitLabel(.search)
+                .onChange(of: searchText) { _, new in scheduleSearch(new) }
+
+            if !searchText.isEmpty {
+                Button {
+                    searchText = ""
+                    searchResults = []
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 15))
+                        .foregroundStyle(.tertiary)
+                }
+                .buttonStyle(.plain)
+                .padding(.trailing, 12)
+            }
+        }
+        .frame(height: 48)
+        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+
+    private func searchResultRow(_ user: UserSearchResult) -> some View {
+        HStack(spacing: 12) {
+            avatarCircle(initial: user.username.first.map(String.init) ?? "?", size: 32)
+
+            Text("@\(user.username)")
+                .font(.system(size: 15, weight: .medium))
+                .lineLimit(1)
+
+            Spacer()
+
+            inviteButton(for: user)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+    }
+
+    @ViewBuilder
+    private func inviteButton(for user: UserSearchResult) -> some View {
+        if invitedUIDs.contains(user.id) {
+            Label("Invited", systemImage: "checkmark")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.green)
+        } else if invitingUIDs.contains(user.id) {
+            ProgressView().scaleEffect(0.8)
+        } else {
+            Button {
+                Task { await invite(user) }
+            } label: {
+                Text("Invite")
+                    .font(.system(size: 13, weight: .semibold))
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 7)
+                    .glassEffect(.regular.interactive(), in: .capsule)
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    // MARK: - Link section
+
+    private var linkSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            sectionTitle("Share link")
+
+            linkField
+
+            if isOwner {
+                linkToggleRow
+            }
+
+            actionButtons
+                .padding(.top, 2)
+        }
+    }
 
     private var linkField: some View {
         HStack(spacing: 0) {
             Text(deepLink.isEmpty ? "Sign in to share" : deepLink)
                 .font(.system(size: 13, design: .monospaced))
-                .foregroundStyle(deepLink.isEmpty ? .tertiary : .secondary)
+                .foregroundStyle(deepLink.isEmpty || !linkEnabled ? .tertiary : .secondary)
                 .lineLimit(1)
                 .truncationMode(.middle)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.leading, 16)
 
             Button {
-                guard !deepLink.isEmpty else { return }
+                guard !deepLink.isEmpty, linkEnabled else { return }
                 UIPasteboard.general.string = deepLink
                 withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) { didCopy = true }
                 Task {
@@ -112,10 +239,35 @@ struct ProjectShareSheet: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .disabled(deepLink.isEmpty)
+            .disabled(deepLink.isEmpty || !linkEnabled)
         }
         .frame(height: 52)
         .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .opacity(linkEnabled ? 1 : 0.55)
+    }
+
+    private var linkToggleRow: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Toggle(isOn: Binding(
+                get: { linkEnabled },
+                set: { setLinkEnabled($0) }
+            )) {
+                Text("Anyone with the link can join")
+                    .font(.system(size: 15))
+            }
+            .disabled(!loadedLinkState || isUpdatingLink)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+
+            if !linkEnabled {
+                Text("Link disabled. People already in this project keep their access.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 4)
+                    .transition(.opacity)
+            }
+        }
     }
 
     // MARK: - Action buttons
@@ -137,11 +289,12 @@ struct ProjectShareSheet: View {
                     .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
                     .foregroundStyle(.primary)
             }
+            .disabled(deepLink.isEmpty || !linkEnabled)
 
             Button {
                 withAnimation(.spring(response: 0.42, dampingFraction: 0.84)) {
                     showQRCode.toggle()
-                    selectedDetent = showQRCode ? .large : .medium
+                    selectedDetent = .large
                 }
             } label: {
                 Label(showQRCode ? "Hide QR Code" : "QR Code", systemImage: "qrcode")
@@ -154,7 +307,9 @@ struct ProjectShareSheet: View {
                     )
                     .foregroundStyle(showQRCode ? Color(UIColor.systemBackground) : .primary)
             }
+            .disabled(deepLink.isEmpty || !linkEnabled)
         }
+        .opacity(linkEnabled ? 1 : 0.55)
     }
 
     // MARK: - QR code
@@ -176,7 +331,7 @@ struct ProjectShareSheet: View {
         }
     }
 
-    // MARK: - Invitees section
+    // MARK: - Invitees (Listeners) section
 
     @ViewBuilder
     private var inviteesSection: some View {
@@ -197,7 +352,7 @@ struct ProjectShareSheet: View {
             .padding(.bottom, 8)
 
             if invitees.isEmpty {
-                Text("Share the link above so others can accept your project invite.")
+                Text("Invite people above or share the link so others can join.")
                     .font(.footnote)
                     .foregroundStyle(.tertiary)
                     .padding(.horizontal, 20)
@@ -218,14 +373,7 @@ struct ProjectShareSheet: View {
 
     private func inviteeRow(_ invitee: InviteeInfo) -> some View {
         HStack(spacing: 12) {
-            ZStack {
-                Circle()
-                    .fill(Color(.tertiarySystemBackground))
-                    .frame(width: 28, height: 28)
-                Text(String(invitee.username.prefix(1)).uppercased())
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.secondary)
-            }
+            avatarCircle(initial: String(invitee.username.prefix(1)), size: 28)
 
             VStack(alignment: .leading, spacing: 1) {
                 Text("@\(invitee.username)")
@@ -250,6 +398,109 @@ struct ProjectShareSheet: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
+    }
+
+    // MARK: - Shared helpers
+
+    private func sectionTitle(_ text: String) -> some View {
+        Text(text)
+            .font(.footnote.weight(.semibold))
+            .foregroundStyle(.secondary)
+            .textCase(.uppercase)
+            .padding(.leading, 4)
+    }
+
+    private func avatarCircle(initial: String, size: CGFloat) -> some View {
+        ZStack {
+            Circle()
+                .fill(Color(.tertiarySystemBackground))
+                .frame(width: size, height: size)
+            Text(initial.uppercased())
+                .font(.system(size: size * 0.42, weight: .semibold))
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private var trimmedQuery: String {
+        searchText.trimmingCharacters(in: .whitespaces)
+    }
+
+    // MARK: - Actions
+
+    private func load() async {
+        qrImage = generateQRCode(deepLink)
+        guard isOwner,
+              let ownerID = auth.signedInUserID,
+              let username = store.currentUsername
+        else { return }
+
+        // Write preview so recipients can see invite info before accepting.
+        await ProjectInviteService.writePreview(
+            project: project,
+            ownerUID: ownerID,
+            ownerUsername: username
+        )
+
+        // Load current link state + invitees in parallel.
+        async let previewTask = ProjectInviteService.fetchPreview(ownerUID: ownerID, projectID: project.id)
+        async let inviteesTask = ProjectInviteService.fetchInvitees(ownerUID: ownerID, projectID: project.id)
+
+        let preview = await previewTask
+        let list = await inviteesTask
+
+        withAnimation {
+            linkEnabled = preview?.linkEnabled ?? true
+            loadedLinkState = true
+            invitees = list
+            loadedInvitees = true
+        }
+    }
+
+    private func setLinkEnabled(_ enabled: Bool) {
+        guard let ownerID = auth.signedInUserID else { return }
+        let previous = linkEnabled
+        withAnimation { linkEnabled = enabled }
+        isUpdatingLink = true
+        Task {
+            do {
+                try await ProjectInviteService.setLinkEnabled(enabled, ownerUID: ownerID, projectID: project.id)
+            } catch {
+                withAnimation { linkEnabled = previous }   // revert on failure
+            }
+            isUpdatingLink = false
+        }
+    }
+
+    private func scheduleSearch(_ raw: String) {
+        searchTask?.cancel()
+        let query = raw.trimmingCharacters(in: .whitespaces)
+        guard !query.isEmpty else {
+            isSearching = false
+            searchResults = []
+            return
+        }
+        isSearching = true
+        searchTask = Task {
+            try? await Task.sleep(for: .milliseconds(300))
+            guard !Task.isCancelled else { return }
+            let results = await store.searchUsersToInvite(query)
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                withAnimation { searchResults = results }
+                isSearching = false
+            }
+        }
+    }
+
+    private func invite(_ user: UserSearchResult) async {
+        invitingUIDs.insert(user.id)
+        do {
+            try await store.inviteUser(user, to: project)
+            withAnimation { _ = invitedUIDs.insert(user.id) }
+        } catch {
+            print("ProjectShareSheet: invite failed — \(error)")
+        }
+        invitingUIDs.remove(user.id)
     }
 
     private func removeInvitee(_ invitee: InviteeInfo) async {

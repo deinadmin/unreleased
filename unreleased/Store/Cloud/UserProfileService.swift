@@ -86,4 +86,34 @@ final class UserProfileService {
         let snapshot = try await ref.getDocument(source: .server)
         return !snapshot.exists
     }
+
+    /// Prefix-searches the username index for invite suggestions.
+    /// Returns at most `limit` matches, excluding `excludingUID` (typically the caller).
+    static func searchUsers(
+        prefix rawPrefix: String,
+        excludingUID: String?,
+        limit: Int = 10
+    ) async -> [UserSearchResult] {
+        let prefix = rawPrefix
+            .lowercased()
+            .trimmingCharacters(in: .whitespaces)
+        guard !prefix.isEmpty else { return [] }
+
+        // Firestore prefix query on the document ID (the lowercased username).
+        let end = prefix + "\u{f8ff}"
+        let query = CloudPaths.usernamesCollection()
+            .order(by: FieldPath.documentID())
+            .start(at: [prefix])
+            .end(at: [end])
+            .limit(to: limit + 1)   // fetch one extra in case we filter ourselves out
+
+        guard let snapshot = try? await query.getDocuments() else { return [] }
+        return snapshot.documents.compactMap { doc -> UserSearchResult? in
+            guard let uid = doc.data()["uid"] as? String else { return nil }
+            if let excludingUID, uid == excludingUID { return nil }
+            return UserSearchResult(id: uid, username: doc.documentID)
+        }
+        .prefix(limit)
+        .map { $0 }
+    }
 }

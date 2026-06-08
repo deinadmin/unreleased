@@ -1,0 +1,14 @@
+{
+  "name": "unreleased-functions",
+  "description": "Cloud Functions for the unreleased app (push notifications).",
+  "type": "module",
+  "engines": {
+    "node": "22"
+  },
+  "main": "index.js",
+  "dependencies": {
+    "firebase-admin": "^12.1.0",
+    "firebase-functions": "^5.0.0"
+  },
+  "private": true
+}

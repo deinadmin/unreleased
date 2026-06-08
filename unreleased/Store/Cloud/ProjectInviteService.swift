@@ -12,6 +12,9 @@ enum ProjectInviteService {
 
     /// Writes (or refreshes) the invite preview so recipients can see project info
     /// before accepting. Called when the owner opens the share sheet.
+    ///
+    /// Uses a merge write and only seeds `linkEnabled` when the doc doesn't have it
+    /// yet, so a previously-disabled link stays disabled when the sheet is reopened.
     static func writePreview(
         project: Project,
         ownerUID: String,
@@ -26,7 +29,18 @@ enum ProjectInviteService {
             "updatedAt": Timestamp(date: Date()),
         ]
         if let hex = project.accentColorHex { data["accentColorHex"] = hex }
-        try? await ref.setData(data)
+
+        let existing = try? await ref.getDocument()
+        if existing?.data()?["linkEnabled"] == nil {
+            data["linkEnabled"] = true
+        }
+        try? await ref.setData(data, merge: true)
+    }
+
+    /// Enables or disables the general share link. Existing listeners keep their access.
+    static func setLinkEnabled(_ enabled: Bool, ownerUID: String, projectID: UUID) async throws {
+        let ref = CloudPaths.projectPreviewDocument(ownerID: ownerUID, projectID: projectID)
+        try await ref.setData(["linkEnabled": enabled], merge: true)
     }
 
     /// Fetches the publicly-readable invite preview (no invitee status required).
@@ -72,6 +86,54 @@ enum ProjectInviteService {
         try await ref.delete()
     }
 
+    // MARK: - Username invites
+
+    /// Invites a user directly by their UID: records a pending invite (so they can join
+    /// even when the general link is disabled) and writes an in-app notification to them.
+    static func inviteUser(
+        recipientUID: String,
+        recipientUsername: String,
+        project: Project,
+        ownerUID: String,
+        ownerUsername: String
+    ) async throws {
+        // Make sure the preview exists so the recipient's invite sheet can load.
+        await writePreview(project: project, ownerUID: ownerUID, ownerUsername: ownerUsername)
+
+        let pendingRef = CloudPaths.pendingInviteDocument(
+            ownerID: ownerUID, projectID: project.id, inviteeID: recipientUID
+        )
+        try await pendingRef.setData([
+            "uid": recipientUID,
+            "username": recipientUsername,
+            "invitedAt": Timestamp(date: Date()),
+        ])
+
+        // Deliver an in-app notification the recipient can read.
+        let noteRef = CloudPaths.notificationsCollection(userID: recipientUID).document()
+        try await noteRef.setData([
+            "type": AppNotification.Kind.projectInvite.rawValue,
+            "fromUID": ownerUID,
+            "fromUsername": ownerUsername,
+            "projectID": project.id.uuidString,
+            "projectName": project.name,
+            "createdAt": Timestamp(date: Date()),
+            "read": false,
+        ])
+    }
+
+    /// True when an explicit username invite is still pending for this user.
+    static func hasPendingInvite(ownerUID: String, projectID: UUID, inviteeUID: String) async -> Bool {
+        let ref = CloudPaths.pendingInviteDocument(ownerID: ownerUID, projectID: projectID, inviteeID: inviteeUID)
+        return (try? await ref.getDocument().exists) ?? false
+    }
+
+    /// Removes a pending invite (after acceptance, or when leaving a project).
+    static func clearPendingInvite(ownerUID: String, projectID: UUID, inviteeUID: String) async {
+        let ref = CloudPaths.pendingInviteDocument(ownerID: ownerUID, projectID: projectID, inviteeID: inviteeUID)
+        try? await ref.delete()
+    }
+
     // MARK: - Private helpers
 
     private static func decodePreview(
@@ -91,7 +153,9 @@ enum ProjectInviteService {
             ownerUsername: ownerUsername,
             projectName: name,
             gradient: gradient,
-            accentColorHex: data["accentColorHex"] as? String
+            accentColorHex: data["accentColorHex"] as? String,
+            // Older preview docs predate this flag; treat them as enabled.
+            linkEnabled: data["linkEnabled"] as? Bool ?? true
         )
     }
 
@@ -122,6 +186,15 @@ private extension DocumentReference {
     func setData(_ documentData: [String: Any]) async throws {
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             setData(documentData) { error in
+                if let error { continuation.resume(throwing: error) }
+                else { continuation.resume() }
+            }
+        }
+    }
+
+    func setData(_ documentData: [String: Any], merge: Bool) async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            setData(documentData, merge: merge) { error in
                 if let error { continuation.resume(throwing: error) }
                 else { continuation.resume() }
             }

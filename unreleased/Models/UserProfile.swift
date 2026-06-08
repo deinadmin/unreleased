@@ -11,6 +11,9 @@ struct ProjectPreview {
     let projectName: String
     let gradient: GradientTheme
     let accentColorHex: String?
+    /// When false the general share link no longer accepts new joins.
+    /// Existing listeners keep their access. Defaults to true for older docs.
+    let linkEnabled: Bool
 }
 
 // MARK: - Invitee info
@@ -21,4 +24,36 @@ struct InviteeInfo: Identifiable {
     let id: String   // invitee UID
     let username: String
     let acceptedAt: Date
+}
+
+// MARK: - User search
+
+/// A user surfaced by username search when inviting people directly.
+struct UserSearchResult: Identifiable, Hashable {
+    let id: String      // user UID
+    let username: String
+}
+
+// MARK: - Notifications
+
+/// An in-app notification stored at `users/{recipientUID}/notifications/{id}`.
+struct AppNotification: Identifiable, Equatable {
+    enum Kind: String {
+        case projectInvite
+        case unknown
+
+        nonisolated init(raw: String) {
+            self = Kind(rawValue: raw) ?? .unknown
+        }
+    }
+
+    let id: String
+    let kind: Kind
+    /// UID of the user who triggered the notification (the project owner for invites).
+    let fromUID: String
+    let fromUsername: String
+    let projectID: UUID
+    let projectName: String
+    let createdAt: Date
+    var read: Bool
 }

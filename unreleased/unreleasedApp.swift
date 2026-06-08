@@ -6,6 +6,7 @@ import SwiftUI
 @main
 struct unreleasedApp: App {
     @Environment(\.scenePhase) private var scenePhase
+    @UIApplicationDelegateAdaptor(PushAppDelegate.self) private var pushDelegate
     @State private var authManager: AuthManager
     @State private var importManager = AudioFileImportManager()
     @State private var linkRouter = ProjectLinkRouter()

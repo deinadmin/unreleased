@@ -11,6 +11,8 @@ struct ProjectInviteSheet: View {
     @State private var preview: ProjectPreview? = nil
     @State private var loadState: LoadState = .loading
     @State private var isAccepting = false
+    /// False when the general link is disabled and the user wasn't directly invited.
+    @State private var canJoin = true
 
     private enum LoadState { case loading, loaded, failed }
 
@@ -74,10 +76,30 @@ struct ProjectInviteSheet: View {
                 .padding(.horizontal, 20)
                 .padding(.bottom, 28)
 
-            actionButtons
-                .padding(.horizontal, 20)
+            if canJoin {
+                actionButtons
+                    .padding(.horizontal, 20)
+            } else {
+                linkDisabledView
+                    .padding(.horizontal, 20)
+            }
 
             Spacer(minLength: 0)
+        }
+    }
+
+    private var linkDisabledView: some View {
+        VStack(spacing: 12) {
+            Text("This invite link is no longer active.")
+                .font(.system(size: 14))
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+            Button("Dismiss", action: onDeclined)
+                .font(.system(size: 16, weight: .semibold))
+                .frame(maxWidth: .infinity)
+                .frame(height: 56)
+                .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .foregroundStyle(.primary)
         }
     }
 
@@ -153,12 +175,24 @@ struct ProjectInviteSheet: View {
 
     private func loadPreview() async {
         let result = await ProjectInviteService.fetchPreview(ownerUID: ownerUID, projectID: projectID)
-        if let result {
-            preview = result
-            withAnimation { loadState = .loaded }
-        } else {
+        guard let result else {
             withAnimation { loadState = .failed }
+            return
         }
+        preview = result
+
+        // Directly-invited users can always join, even if the general link is off.
+        if result.linkEnabled {
+            canJoin = true
+        } else if let myUID = store.currentUserID {
+            canJoin = await ProjectInviteService.hasPendingInvite(
+                ownerUID: ownerUID, projectID: projectID, inviteeUID: myUID
+            )
+        } else {
+            canJoin = false
+        }
+
+        withAnimation { loadState = .loaded }
     }
 
     private func accept() async {

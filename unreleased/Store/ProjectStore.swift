@@ -40,6 +40,7 @@ final class ProjectStore {
     private var planService: UserPlanService?
     private var profileService: UserProfileService?
     private var sharedSyncService: SharedProjectSyncService?
+    private var notificationsService: NotificationsService?
     var currentUserID: String?
     private var downloadTasks: [UUID: Task<Void, Never>] = [:]
     private var suppressSync = false
@@ -70,6 +71,57 @@ final class ProjectStore {
         currentUsername = username
         // Trigger a sync push so the new username is included in project documents.
         syncService?.schedulePush()
+    }
+
+    // MARK: - Notifications
+
+    /// In-app notifications addressed to the signed-in user, newest first.
+    var notifications: [AppNotification] = []
+
+    var unreadNotificationCount: Int {
+        notifications.lazy.filter { !$0.read }.count
+    }
+
+    func markNotificationRead(_ notification: AppNotification) {
+        guard let userID = currentUserID, !notification.read else { return }
+        if let index = notifications.firstIndex(where: { $0.id == notification.id }) {
+            notifications[index].read = true
+        }
+        Task { await NotificationsService.markRead(userID: userID, notificationID: notification.id) }
+    }
+
+    func markAllNotificationsRead() {
+        guard let userID = currentUserID else { return }
+        let unreadIDs = notifications.filter { !$0.read }.map(\.id)
+        guard !unreadIDs.isEmpty else { return }
+        for index in notifications.indices { notifications[index].read = true }
+        Task { await NotificationsService.markAllRead(userID: userID, ids: unreadIDs) }
+    }
+
+    func deleteNotification(_ notification: AppNotification) {
+        guard let userID = currentUserID else { return }
+        notifications.removeAll { $0.id == notification.id }
+        Task { await NotificationsService.delete(userID: userID, notificationID: notification.id) }
+    }
+
+    // MARK: - Inviting
+
+    /// Searches for users to invite by username, excluding the signed-in user.
+    func searchUsersToInvite(_ query: String) async -> [UserSearchResult] {
+        await UserProfileService.searchUsers(prefix: query, excludingUID: currentUserID)
+    }
+
+    /// Owner invites a user (by UID) to a project they own. Records a pending invite
+    /// and delivers an in-app notification (and push, via the Cloud Function trigger).
+    func inviteUser(_ user: UserSearchResult, to project: Project) async throws {
+        guard let ownerUID = currentUserID, let ownerUsername = currentUsername else { return }
+        try await ProjectInviteService.inviteUser(
+            recipientUID: user.id,
+            recipientUsername: user.username,
+            project: project,
+            ownerUID: ownerUID,
+            ownerUsername: ownerUsername
+        )
     }
 
     // MARK: - Storage limit
@@ -134,12 +186,16 @@ final class ProjectStore {
         sharedSyncService?.stop()
         sharedSyncService = nil
 
+        notificationsService?.stop()
+        notificationsService = nil
+
         currentUserID = userID
         syncStatus = userID == nil ? .offline : .syncing
 
         if userID == nil {
             currentUsername = nil
             hasCheckedUsername = false
+            notifications = []
         }
 
         guard let userID else {
@@ -158,6 +214,12 @@ final class ProjectStore {
         profile.start(userID: userID) { [weak self] username in
             self?.currentUsername = username
             self?.hasCheckedUsername = true
+        }
+
+        let notifications = NotificationsService()
+        notificationsService = notifications
+        notifications.start(userID: userID) { [weak self] items in
+            self?.notifications = items
         }
 
         let service = ProjectSyncService(
@@ -273,15 +335,37 @@ final class ProjectStore {
 
         sharedSyncService?.subscribe(ownerID: ownerID, projectID: projectID)
 
+        // Clear any pending username-invite now that it's been accepted.
+        if let myUID = currentUserID {
+            await ProjectInviteService.clearPendingInvite(
+                ownerUID: ownerID, projectID: projectID, inviteeUID: myUID
+            )
+        }
+
         if project.coverStoragePath != nil {
             Task { await downloadSharedCoverIfNeeded(for: project) }
         }
     }
 
     /// Removes a shared project from the local library and stops its Firestore listener.
+    /// Also removes the user from the owner's invitee list so they no longer appear as a
+    /// listener and lose read access to the project.
     func removeSharedProject(_ projectID: UUID) {
         guard let project = projects.first(where: { $0.id == projectID }), project.isShared else { return }
         sharedSyncService?.unsubscribe(projectID: projectID)
+
+        // Revoke our own access on the owner's side (delete invitee + any pending invite).
+        if let ownerID = project.ownerID, let myUID = currentUserID {
+            Task {
+                try? await ProjectInviteService.removeInvitee(
+                    ownerUID: ownerID, projectID: projectID, inviteeUID: myUID
+                )
+                await ProjectInviteService.clearPendingInvite(
+                    ownerUID: ownerID, projectID: projectID, inviteeUID: myUID
+                )
+            }
+        }
+
         project.tracks.forEach {
             cancelDownload(trackID: $0.id)
             deleteDownloadedFile(fileName: $0.fileName)

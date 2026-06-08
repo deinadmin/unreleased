@@ -27,8 +27,24 @@ service cloud.firestore {
       allow read: if request.auth != null && request.auth.uid == userId;
       allow write: if false;
 
+      // ── Private per-user data (FCM push token, etc.) ───────────────────────
+      // Readable/writable only by the owner. Cloud Functions (admin) bypass rules.
+      match /private/{docId} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
+
+      // ── Notifications ──────────────────────────────────────────────────────
+      // The recipient reads/updates (mark read)/deletes their own notifications.
+      // Any authenticated user may create a notification addressed to this user,
+      // as long as they stamp themselves as the sender.
+      match /notifications/{notificationId} {
+        allow read, update, delete: if request.auth != null && request.auth.uid == userId;
+        allow create: if request.auth != null
+          && request.resource.data.fromUID == request.auth.uid;
+      }
+
       // ── Invite previews ────────────────────────────────────────────────────
-      // Small preview docs (name, gradient, ownerUsername) that any
+      // Small preview docs (name, gradient, ownerUsername, linkEnabled) that any
       // authenticated user can read so the invite sheet can display project
       // info before the recipient has accepted.
       match /projectPreviews/{projectId} {
@@ -50,13 +66,34 @@ service cloud.firestore {
           // Owner can read and manage all invitees.
           allow read, write: if request.auth != null && request.auth.uid == userId;
 
-          // Users can add themselves (accept invite).
+          // Users can add themselves (accept invite) only when either the
+          // general link is enabled, or they were explicitly invited by username
+          // (a pendingInvites doc exists for them). Existing invitees are
+          // unaffected when the link is later disabled.
           allow create: if request.auth != null
             && request.auth.uid == inviteeId
-            && request.resource.data.uid == request.auth.uid;
+            && request.resource.data.uid == request.auth.uid
+            && (
+              (
+                exists(/databases/$(database)/documents/users/$(userId)/projectPreviews/$(projectId))
+                && get(/databases/$(database)/documents/users/$(userId)/projectPreviews/$(projectId)).data.linkEnabled == true
+              )
+              || exists(/databases/$(database)/documents/users/$(userId)/projects/$(projectId)/pendingInvites/$(request.auth.uid))
+            );
 
           // Users can remove themselves (leave project).
           allow delete: if request.auth != null && request.auth.uid == inviteeId;
+        }
+
+        // ── Pending invites subcollection ──────────────────────────────────
+        // Owner invites people by username; the invited user can read and clear
+        // their own pending invite once accepted.
+        match /pendingInvites/{inviteeId} {
+          allow read: if request.auth != null
+            && (request.auth.uid == userId || request.auth.uid == inviteeId);
+          allow create, update: if request.auth != null && request.auth.uid == userId;
+          allow delete: if request.auth != null
+            && (request.auth.uid == userId || request.auth.uid == inviteeId);
         }
       }
     }
