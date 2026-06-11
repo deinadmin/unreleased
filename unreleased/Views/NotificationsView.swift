@@ -4,6 +4,7 @@ struct NotificationsView: View {
     @Environment(ProjectStore.self) private var store
     @Environment(ProjectLinkRouter.self) private var linkRouter
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     var body: some View {
         Group {
@@ -88,7 +89,10 @@ struct NotificationsView: View {
             // Already joined: navigateToProject() resets the entire nav stack, so NotificationsView
             // disappears naturally — calling dismiss() here would race and pop the newly pushed project.
             // New invite: dismiss so the invite sheet can present cleanly over the root.
-            if !store.projects.contains(where: { $0.id == notification.projectID }) {
+            // Regular width (iPad): we're presented as a sheet, which the nav-stack reset
+            // doesn't close — always dismiss explicitly.
+            if horizontalSizeClass == .regular
+                || !store.projects.contains(where: { $0.id == notification.projectID }) {
                 dismiss()
             }
         case .unknown:

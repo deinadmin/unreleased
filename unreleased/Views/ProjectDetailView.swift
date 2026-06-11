@@ -8,6 +8,7 @@ struct ProjectDetailView: View {
     @Environment(AppSearchState.self) private var searchState
     @Environment(AuthManager.self) private var auth
     @Environment(\.navigateToTrackNotes) private var navigateToTrackNotes
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     let projectID: UUID
     var projectZoomNamespace: Namespace.ID
@@ -198,15 +199,26 @@ struct ProjectDetailView: View {
             downloadState: headerDownloadState(for: project),
             zoomNamespace: projectZoomNamespace,
             ownerLabel: ownerLabel,
-            onCoverLongPress: project.isShared ? nil : { isShowingEdit = true }
+            isImporting: isImporting,
+            onCoverLongPress: project.isShared ? nil : { isShowingEdit = true },
+            onAddTracks: project.isShared ? nil : { requestAddTracks() }
         )
+    }
+
+    private func requestAddTracks() {
+        if store.hasStorageCapacity {
+            isShowingDocumentPicker = true
+        } else {
+            showStorageLimitAlert = true
+        }
     }
 
     @ViewBuilder
     private func trackListSection(project: Project) -> some View {
         VStack(spacing: 0) {
-            if !project.isShared {
-                addTracksButton(project: project)
+            // Regular width (iPad): the add-tracks button lives in the header's info column.
+            if !project.isShared, horizontalSizeClass != .regular {
+                AddTracksButton(isImporting: isImporting, action: requestAddTracks)
                     .padding(.horizontal, 20)
             }
 
@@ -238,34 +250,6 @@ struct ProjectDetailView: View {
                 .padding(.top, 12)
             }
         }
-    }
-
-    @ViewBuilder
-    private func addTracksButton(project: Project) -> some View {
-        Button {
-            if store.hasStorageCapacity {
-                isShowingDocumentPicker = true
-            } else {
-                showStorageLimitAlert = true
-            }
-        } label: {
-            HStack(spacing: 8) {
-                if isImporting {
-                    ProgressView()
-                        .scaleEffect(0.8)
-                } else {
-                    Image(systemName: "plus")
-                        .font(.system(size: 14, weight: .semibold))
-                }
-                Text(isImporting ? "Importing…" : "Add tracks")
-                    .font(.system(size: 15, weight: .medium))
-            }
-            .frame(maxWidth: .infinity)
-            .frame(height: 48)
-            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .foregroundStyle(.primary)
-        }
-        .disabled(isImporting)
     }
 
     // MARK: - Toolbar
@@ -409,6 +393,8 @@ private struct ProjectHeaderDownloadState: Equatable {
 }
 
 private struct ProjectDetailHeaderSection: View, Equatable {
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+
     let project: Project
     let coverImage: UIImage?
     let vinylGradient: GradientTheme
@@ -416,9 +402,14 @@ private struct ProjectDetailHeaderSection: View, Equatable {
     let downloadState: ProjectHeaderDownloadState
     let zoomNamespace: Namespace.ID
     let ownerLabel: String
+    var isImporting: Bool = false
     var onCoverLongPress: (() -> Void)? = nil
+    var onAddTracks: (() -> Void)? = nil
 
     @State private var longPressHapticTick = 0
+
+    /// Fixed cover size for the regular-width (iPad) side-by-side layout.
+    private static let regularCoverSize: CGFloat = 260
 
     static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.project.id == rhs.project.id
@@ -431,56 +422,138 @@ private struct ProjectDetailHeaderSection: View, Equatable {
             && lhs.coverImage === rhs.coverImage
             && lhs.downloadState == rhs.downloadState
             && lhs.ownerLabel == rhs.ownerLabel
+            && lhs.isImporting == rhs.isImporting
     }
 
     var body: some View {
+        Group {
+            if horizontalSizeClass == .regular {
+                regularBody
+            } else {
+                compactBody
+            }
+        }
+        .sensoryFeedback(.increase, trigger: longPressHapticTick)
+    }
+
+    // MARK: Compact (iPhone) — cover on top, info below
+
+    private var compactBody: some View {
         VStack(spacing: 0) {
             // Total visual width when playing = size × 1.375, so:
             //   size = availableWidth / 1.375
             // This keeps the cover + vinyl within the padded container in both states.
             GeometryReader { geo in
                 let coverSize = geo.size.width / 1.375
-                ProjectCoverView(
-                    gradient: project.gradient,
-                    coverImage: coverImage,
-                    vinylGradient: vinylGradient,
-                    size: coverSize,
-                    cornerRadius: 20,
-                    showVinyl: true,
-                    isPlaying: isPlaying
-                )
-                .frame(width: geo.size.width, height: coverSize, alignment: .center)
-                .matchedTransitionSource(id: project.id, in: zoomNamespace)
-                .onLongPressGesture(minimumDuration: 0.5) {
-                    longPressHapticTick &+= 1
-                    onCoverLongPress?()
-                }
+                cover(size: coverSize)
+                    .frame(width: geo.size.width, height: coverSize, alignment: .center)
             }
             .aspectRatio(1.375, contentMode: .fit)
 
             HStack(alignment: .center) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(project.name)
-                        .font(.system(size: 26, weight: .bold))
-                        .foregroundStyle(.primary)
-
-                    HStack(spacing: 4) {
-                        Text("\(ownerLabel.isEmpty ? "…" : "@\(ownerLabel)") • \(project.trackCountText) • \(project.formattedDuration)")
-                            .font(.system(size: 14))
-                            .foregroundStyle(.secondary)
-                    }
-                }
+                titleAndStats
 
                 Spacer()
 
-                HStack(spacing: 8) {
-                    ProjectDownloadButton(project: project, downloadState: downloadState)
-                    PlayButton(project: project)
-                }
+                playbackButtons
             }
             .padding(.top, 16)
         }
-        .sensoryFeedback(.increase, trigger: longPressHapticTick)
+    }
+
+    // MARK: Regular (iPad) — cover on the left, info column on the right
+
+    private var regularBody: some View {
+        HStack(alignment: .center, spacing: 28) {
+            // Reserve the cover's full visual extent (size × 1.375) so the
+            // vinyl slide-out never overlaps the info column.
+            cover(size: Self.regularCoverSize)
+                .frame(
+                    width: Self.regularCoverSize * 1.375,
+                    height: Self.regularCoverSize,
+                    alignment: .center
+                )
+
+            VStack(alignment: .leading, spacing: 20) {
+                titleAndStats
+
+                playbackButtons
+
+                if let onAddTracks {
+                    AddTracksButton(isImporting: isImporting, action: onAddTracks)
+                        .frame(maxWidth: 280)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    // MARK: Shared pieces
+
+    private func cover(size: CGFloat) -> some View {
+        ProjectCoverView(
+            gradient: project.gradient,
+            coverImage: coverImage,
+            vinylGradient: vinylGradient,
+            size: size,
+            cornerRadius: 20,
+            showVinyl: true,
+            isPlaying: isPlaying
+        )
+        .matchedTransitionSource(id: project.id, in: zoomNamespace)
+        .onLongPressGesture(minimumDuration: 0.5) {
+            longPressHapticTick &+= 1
+            onCoverLongPress?()
+        }
+    }
+
+    private var titleAndStats: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(project.name)
+                .font(.system(size: 26, weight: .bold))
+                .foregroundStyle(.primary)
+
+            HStack(spacing: 4) {
+                Text("\(ownerLabel.isEmpty ? "…" : "@\(ownerLabel)") • \(project.trackCountText) • \(project.formattedDuration)")
+                    .font(.system(size: 14))
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var playbackButtons: some View {
+        HStack(spacing: 8) {
+            ProjectDownloadButton(project: project, downloadState: downloadState)
+            PlayButton(project: project)
+        }
+    }
+}
+
+// MARK: - Add tracks button
+
+struct AddTracksButton: View {
+    var isImporting: Bool
+    var action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                if isImporting {
+                    ProgressView()
+                        .scaleEffect(0.8)
+                } else {
+                    Image(systemName: "plus")
+                        .font(.system(size: 14, weight: .semibold))
+                }
+                Text(isImporting ? "Importing…" : "Add tracks")
+                    .font(.system(size: 15, weight: .medium))
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: 48)
+            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .foregroundStyle(.primary)
+        }
+        .disabled(isImporting)
     }
 }
 

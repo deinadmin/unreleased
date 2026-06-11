@@ -4,6 +4,11 @@ private enum CreateProjectZoom {
     static let sourceID = "createProject"
 }
 
+private enum ChromeZoom {
+    static let notifications = "notifications"
+    static let profile = "profile"
+}
+
 struct HomeView: View {
     @Binding var navigationPath: NavigationPath
     var projectZoomNamespace: Namespace.ID
@@ -12,8 +17,12 @@ struct HomeView: View {
     @Environment(ProjectStore.self) private var store
     @Environment(AudioPlayer.self) private var player
     @Environment(AppSearchState.self) private var searchState
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Namespace private var chromeZoomNamespace
 
     @State private var isShowingCreate = false
+    @State private var isShowingNotifications = false
+    @State private var isShowingProfile = false
     @State private var isShowingDocumentPicker = false
     @State private var isImporting = false
 
@@ -25,10 +34,21 @@ struct HomeView: View {
     @State private var showStorageLimitAlert = false
     @State private var importError: String? = nil
 
-    private let columns = [
-        GridItem(.flexible(), spacing: 16),
-        GridItem(.flexible(), spacing: 16),
-    ]
+    private var isRegularWidth: Bool {
+        horizontalSizeClass == .regular
+    }
+
+    /// Two flexible columns on iPhone; smaller adaptive cards on iPad.
+    private var columns: [GridItem] {
+        if isRegularWidth {
+            [GridItem(.adaptive(minimum: 150, maximum: 200), spacing: 16)]
+        } else {
+            [
+                GridItem(.flexible(), spacing: 16),
+                GridItem(.flexible(), spacing: 16),
+            ]
+        }
+    }
 
     private var showsBottomChrome: Bool {
         searchState.isActive || (player.currentTrack != nil && !player.isShowingNowPlaying)
@@ -88,6 +108,32 @@ struct HomeView: View {
                 .navigationTransition(
                     .zoom(sourceID: project.id, in: projectZoomNamespace)
                 )
+        }
+        // iPad: notifications & profile open as zoom-transition sheets.
+        .sheet(isPresented: $isShowingNotifications) {
+            NavigationStack {
+                NotificationsView()
+            }
+            .navigationTransition(
+                .zoom(sourceID: ChromeZoom.notifications, in: chromeZoomNamespace)
+            )
+        }
+        .sheet(isPresented: $isShowingProfile) {
+            NavigationStack {
+                ProfileView()
+                    .navigationDestination(for: StorageSyncRoute.self) { _ in
+                        StorageSyncView()
+                    }
+                    .navigationDestination(for: NotificationSettingsRoute.self) { _ in
+                        NotificationSettingsView()
+                    }
+                    .navigationDestination(for: AboutRoute.self) { _ in
+                        AboutView()
+                    }
+            }
+            .navigationTransition(
+                .zoom(sourceID: ChromeZoom.profile, in: chromeZoomNamespace)
+            )
         }
         .sheet(item: $projectAddingTracks) { project in
             DocumentPicker(
@@ -251,20 +297,20 @@ struct HomeView: View {
     private var toolbarContent: some ToolbarContent {
         ToolbarItem(placement: .topBarTrailing) {
             HStack(spacing: 8) {
-                NavigationLink(value: NotificationsRoute()) {
-                    Image(systemName: "bell")
-                        .font(.system(size: 14, weight: .medium))
-                        .frame(width: 32, height: 32)
-                        .overlay(alignment: .topTrailing) {
-                            if store.unreadNotificationCount > 0 {
-                                Circle()
-                                    .fill(.red)
-                                    .frame(width: 8, height: 8)
-                                    .offset(x: -4, y: 4)
-                            }
-                        }
+                if isRegularWidth {
+                    Button {
+                        isShowingNotifications = true
+                    } label: {
+                        notificationsIcon
+                    }
+                    .buttonStyle(.plain)
+                    .matchedTransitionSource(id: ChromeZoom.notifications, in: chromeZoomNamespace)
+                } else {
+                    NavigationLink(value: NotificationsRoute()) {
+                        notificationsIcon
+                    }
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
 
                 Button {
                     player.isShowingNowPlaying = false
@@ -275,12 +321,20 @@ struct HomeView: View {
                         .frame(width: 32, height: 32)
                 }
 
-                NavigationLink(value: ProfileRoute()) {
-                    Image(systemName: "person")
-                        .font(.system(size: 14, weight: .medium))
-                        .frame(width: 32, height: 32)
+                if isRegularWidth {
+                    Button {
+                        isShowingProfile = true
+                    } label: {
+                        profileIcon
+                    }
+                    .buttonStyle(.plain)
+                    .matchedTransitionSource(id: ChromeZoom.profile, in: chromeZoomNamespace)
+                } else {
+                    NavigationLink(value: ProfileRoute()) {
+                        profileIcon
+                    }
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
             }
         }
 
@@ -299,6 +353,26 @@ struct HomeView: View {
                 )
             }
         }
+    }
+
+    private var notificationsIcon: some View {
+        Image(systemName: "bell")
+            .font(.system(size: 14, weight: .medium))
+            .frame(width: 32, height: 32)
+            .overlay(alignment: .topTrailing) {
+                if store.unreadNotificationCount > 0 {
+                    Circle()
+                        .fill(.red)
+                        .frame(width: 8, height: 8)
+                        .offset(x: -4, y: 4)
+                }
+            }
+    }
+
+    private var profileIcon: some View {
+        Image(systemName: "person")
+            .font(.system(size: 14, weight: .medium))
+            .frame(width: 32, height: 32)
     }
 
     // MARK: - Import helpers

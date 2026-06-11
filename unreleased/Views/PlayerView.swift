@@ -6,6 +6,7 @@ struct PlayerView: View {
     @Environment(AudioPlayer.self) private var player
     @Environment(ProjectStore.self) private var store
     @Environment(\.navigateToTrackNotes) private var navigateToTrackNotes
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     @State private var offset: CGFloat = 0
     @State private var lastDragTranslation: CGFloat = 0
@@ -46,6 +47,11 @@ struct PlayerView: View {
     private let sideMargin: CGFloat = 12
 
     private var isExpanded: Bool { player.isShowingNowPlaying }
+
+    /// On iPad the mini player caps its width and stays centered at the bottom.
+    private var cardMaxWidth: CGFloat {
+        horizontalSizeClass == .regular && !isExpanded ? 480 : .infinity
+    }
 
     private var bottomInset: CGFloat {
         UIApplication.shared.connectedScenes
@@ -117,7 +123,7 @@ struct PlayerView: View {
                     .opacity(heroSettled ? 1 : 0)
                     .animation(.none, value: heroSettled)
             }
-            .frame(maxWidth: .infinity)
+            .frame(maxWidth: cardMaxWidth)
             // Always apply drag offset — gating on isExpanded caused instant snap on dismiss/snap-back.
             .offset(y: offset)
             .transaction { transaction in

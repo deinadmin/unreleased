@@ -5,6 +5,7 @@ struct ContentView: View {
     @Environment(AuthManager.self) private var auth
     @Environment(AudioFileImportManager.self) private var importManager
     @Environment(ProjectLinkRouter.self) private var linkRouter
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var store = ProjectStore()
     @State private var player: AudioPlayer
     @State private var navigationPath = NavigationPath()
@@ -23,12 +24,22 @@ struct ContentView: View {
     private let toastSpacingAbovePlayer: CGFloat = 10
     private let toastBottomInsetWithoutPlayer: CGFloat = 12
 
+    private var isRegularWidth: Bool {
+        horizontalSizeClass == .regular
+    }
+
     private var showsMiniPlayer: Bool {
         player.currentTrack != nil && !player.isShowingNowPlaying
     }
 
+    /// On iPad the search bar floats Spotlight-style near the top, so only the
+    /// compact-width bottom search bar counts as bottom chrome.
+    private var showsBottomSearchBar: Bool {
+        searchState.isActive && !isRegularWidth
+    }
+
     private var showsBottomChrome: Bool {
-        searchState.isActive || showsMiniPlayer
+        showsBottomSearchBar || showsMiniPlayer
     }
 
     private var toastBottomInset: CGFloat {
@@ -84,7 +95,7 @@ struct ContentView: View {
             }
             // Reserve room + native progressive blur under scroll content (iOS 26+)
             .safeAreaBar(edge: .bottom, spacing: 0) {
-                if searchState.isActive || (player.currentTrack != nil && !player.isShowingNowPlaying) {
+                if showsBottomChrome {
                     Color.clear.frame(height: 66)
                 }
             }
@@ -116,7 +127,13 @@ struct ContentView: View {
 
             // ── Mini player or search bar ────────────────────────────────────────
             bottomChrome
+
+            // ── Spotlight-style search (iPad) ────────────────────────────────────
+            if isRegularWidth, searchState.isActive {
+                spotlightSearchOverlay
+            }
         }
+        .animation(.spring(response: 0.38, dampingFraction: 0.86), value: searchState.isActive)
         .animation(.spring(response: 0.4, dampingFraction: 0.86), value: toastCenter.toast)
         .animation(.spring(response: 0.4, dampingFraction: 0.86), value: toastBottomInset)
         .environment(store)
@@ -309,10 +326,28 @@ struct ContentView: View {
         }
     }
 
+    /// Spotlight-style floating search bar: centered horizontally, sitting in
+    /// the middle of the upper third of the screen (iPad / regular width).
+    private var spotlightSearchOverlay: some View {
+        GeometryReader { geo in
+            PlayerSearchBar()
+                .frame(maxWidth: 560)
+                .position(x: geo.size.width / 2, y: geo.size.height / 6)
+        }
+        .ignoresSafeArea(.keyboard)
+        .zIndex(4)
+        .transition(
+            .asymmetric(
+                insertion: .opacity.combined(with: .scale(scale: 0.96)),
+                removal: .opacity.combined(with: .scale(scale: 0.98))
+            )
+        )
+    }
+
     @ViewBuilder
     private var bottomChrome: some View {
         Group {
-            if searchState.isActive {
+            if showsBottomSearchBar {
                 PlayerSearchBar()
                     .frame(maxWidth: .infinity, alignment: .bottom)
                     .zIndex(3)
