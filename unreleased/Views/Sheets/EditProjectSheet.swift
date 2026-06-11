@@ -10,9 +10,13 @@ struct EditProjectSheet: View {
     @State private var gradient: GradientTheme
     @State private var coverImage: UIImage?
     @State private var previewVinylGradient: GradientTheme? = nil
+    /// The cover image as loaded when the sheet was opened, used to detect whether
+    /// the user actually changed it (vs just viewing it) before re-saving to disk.
+    private let originalCoverImage: UIImage?
 
     init(project: Project, coverImage: UIImage? = nil) {
         self.project = project
+        self.originalCoverImage = coverImage
         _name = State(initialValue: project.name)
         _gradient = State(initialValue: project.gradient)
         _coverImage = State(initialValue: coverImage)
@@ -127,21 +131,29 @@ struct EditProjectSheet: View {
         updated.accentColorHex = store.resolvedAccentHex(gradient: gradient, coverImage: coverImage)
         updated.coverGradientColors = store.resolvedCoverGradientColors(coverImage: coverImage)
 
-        if let coverImage {
-            if updated.coverImageFileName != nil {
+        // Only touch cover files when the user actually changed them.
+        // coverImage starts as the loaded original; if they're the same object the
+        // cover is unchanged and we must not delete/re-upload (which would briefly
+        // clear coverStoragePath on Firestore and make other devices lose the image).
+        let coverChanged = coverImage !== originalCoverImage
+
+        if coverChanged {
+            if let coverImage {
+                if updated.coverImageFileName != nil {
+                    store.deleteCoverImage(fileName: updated.coverImageFileName)
+                }
+                if let previousCloudPath = updated.coverStoragePath {
+                    store.deleteCoverFromCloud(storagePath: previousCloudPath)
+                    updated.coverStoragePath = nil
+                }
+                updated.coverImageFileName = store.saveCoverImage(coverImage, projectID: project.id)
+            } else if updated.coverImageFileName != nil {
                 store.deleteCoverImage(fileName: updated.coverImageFileName)
-            }
-            if let previousCloudPath = updated.coverStoragePath {
-                store.deleteCoverFromCloud(storagePath: previousCloudPath)
-                updated.coverStoragePath = nil
-            }
-            updated.coverImageFileName = store.saveCoverImage(coverImage, projectID: project.id)
-        } else if updated.coverImageFileName != nil {
-            store.deleteCoverImage(fileName: updated.coverImageFileName)
-            updated.coverImageFileName = nil
-            if let previousCloudPath = updated.coverStoragePath {
-                store.deleteCoverFromCloud(storagePath: previousCloudPath)
-                updated.coverStoragePath = nil
+                updated.coverImageFileName = nil
+                if let previousCloudPath = updated.coverStoragePath {
+                    store.deleteCoverFromCloud(storagePath: previousCloudPath)
+                    updated.coverStoragePath = nil
+                }
             }
         }
 

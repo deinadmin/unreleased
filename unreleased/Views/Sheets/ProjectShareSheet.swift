@@ -9,7 +9,8 @@ struct ProjectShareSheet: View {
     @State private var showQRCode = false
     @State private var qrImage: UIImage?
     @State private var didCopy = false
-    @State private var selectedDetent: PresentationDetent = .large
+    @State private var copyHapticTick = 0
+    @State private var selectedDetent: PresentationDetent = .medium
     @State private var invitees: [InviteeInfo] = []
     @State private var loadedInvitees = false
 
@@ -39,55 +40,49 @@ struct ProjectShareSheet: View {
     private var isOwner: Bool { !project.isShared }
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: 0) {
-                header
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 0) {
+                    if isOwner {
+                        inviteSection
+                            .padding(.horizontal, 20)
+                            .padding(.bottom, 28)
+                    }
 
-                if isOwner {
-                    inviteSection
+                    linkSection
                         .padding(.horizontal, 20)
-                        .padding(.bottom, 28)
-                }
 
-                linkSection
-                    .padding(.horizontal, 20)
-
-                if showQRCode {
-                    qrSection
-                        .transition(.opacity.combined(with: .move(edge: .bottom)))
+                    if isOwner && loadedInvitees {
+                        inviteesSection
+                            .padding(.top, 28)
+                            .transition(.opacity.combined(with: .move(edge: .bottom)))
+                    }
                 }
-
-                if isOwner && loadedInvitees {
-                    inviteesSection
-                        .padding(.top, 28)
-                        .transition(.opacity.combined(with: .move(edge: .bottom)))
-                }
+                .padding(.top, 12)
+                .padding(.bottom, 32)
             }
-            .padding(.bottom, 32)
+            .scrollDismissesKeyboard(.interactively)
+            .navigationTitle("Share Project")
+            .navigationSubtitle(project.name)
+            .navigationBarTitleDisplayMode(.inline)
         }
-        .scrollDismissesKeyboard(.interactively)
-        .animation(.spring(response: 0.42, dampingFraction: 0.84), value: showQRCode)
+        .blur(radius: showQRCode ? 20 : 0)
+        .overlay {
+            qrOverlay
+                .opacity(showQRCode ? 1 : 0)
+                .allowsHitTesting(showQRCode)
+        }
+        .sensoryFeedback(.increase, trigger: copyHapticTick)
+        .sensoryFeedback(.increase, trigger: showQRCode)
+        .animation(.easeOut(duration: 0.28), value: showQRCode)
         .animation(.spring(response: 0.42, dampingFraction: 0.84), value: loadedInvitees)
         .animation(.spring(response: 0.4, dampingFraction: 0.86), value: searchResults)
         .animation(.easeInOut(duration: 0.2), value: linkEnabled)
         .presentationDetents([.medium, .large], selection: $selectedDetent)
         .presentationDragIndicator(.visible)
+        .presentationContentInteraction(.resizes)
+        .presentationBackground(Color(.systemBackground))
         .task { await load() }
-    }
-
-    // MARK: - Header
-
-    private var header: some View {
-        VStack(spacing: 4) {
-            Text("Share Project")
-                .font(.headline)
-            Text(project.name)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-        }
-        .padding(.top, 24)
-        .padding(.bottom, 24)
     }
 
     // MARK: - Invite by username
@@ -202,48 +197,54 @@ struct ProjectShareSheet: View {
         VStack(alignment: .leading, spacing: 10) {
             sectionTitle("Share link")
 
-            linkField
-
             if isOwner {
                 linkToggleRow
             }
 
-            actionButtons
-                .padding(.top, 2)
+            linkField
+
+            if linkEnabled {
+                actionButtons
+                    .padding(.top, 2)
+            }
         }
     }
 
     private var linkField: some View {
-        HStack(spacing: 0) {
-            Text(deepLink.isEmpty ? "Sign in to share" : deepLink)
-                .font(.system(size: 13, design: .monospaced))
-                .foregroundStyle(deepLink.isEmpty || !linkEnabled ? .tertiary : .secondary)
-                .lineLimit(1)
-                .truncationMode(.middle)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.leading, 16)
+        Button {
+            guard !deepLink.isEmpty, linkEnabled else { return }
+            copyLink()
+        } label: {
+            HStack(spacing: 0) {
+                Text(deepLink.isEmpty ? "Sign in to share" : deepLink)
+                    .font(.system(size: 13, design: .monospaced))
+                    .foregroundStyle(deepLink.isEmpty || !linkEnabled ? .tertiary : .secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.leading, 16)
 
-            Button {
-                guard !deepLink.isEmpty, linkEnabled else { return }
-                UIPasteboard.general.string = deepLink
-                withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) { didCopy = true }
-                Task {
-                    try? await Task.sleep(for: .seconds(2))
-                    withAnimation { didCopy = false }
-                }
-            } label: {
                 Image(systemName: didCopy ? "checkmark" : "doc.on.doc")
                     .font(.system(size: 14, weight: .medium))
                     .foregroundStyle(didCopy ? .green : .secondary)
                     .frame(width: 52, height: 52)
-                    .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
-            .disabled(deepLink.isEmpty || !linkEnabled)
         }
+        .buttonStyle(.plain)
         .frame(height: 52)
         .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         .opacity(linkEnabled ? 1 : 0.55)
+        .disabled(deepLink.isEmpty || !linkEnabled)
+    }
+
+    private func copyLink() {
+        UIPasteboard.general.string = deepLink
+        copyHapticTick &+= 1
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) { didCopy = true }
+        Task {
+            try? await Task.sleep(for: .seconds(2))
+            withAnimation { didCopy = false }
+        }
     }
 
     private var linkToggleRow: some View {
@@ -252,7 +253,7 @@ struct ProjectShareSheet: View {
                 get: { linkEnabled },
                 set: { setLinkEnabled($0) }
             )) {
-                Text("Anyone with the link can join")
+                Text("Enable share link")
                     .font(.system(size: 15))
             }
             .disabled(!loadedLinkState || isUpdatingLink)
@@ -276,11 +277,7 @@ struct ProjectShareSheet: View {
         HStack(spacing: 12) {
             Button {
                 guard !deepLink.isEmpty else { return }
-                let av = UIActivityViewController(activityItems: [deepLink], applicationActivities: nil)
-                if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-                   let window = scene.windows.first {
-                    window.rootViewController?.present(av, animated: true)
-                }
+                presentShareSheet()
             } label: {
                 Label("Share", systemImage: "square.and.arrow.up")
                     .font(.system(size: 16, weight: .semibold))
@@ -292,43 +289,76 @@ struct ProjectShareSheet: View {
             .disabled(deepLink.isEmpty || !linkEnabled)
 
             Button {
-                withAnimation(.spring(response: 0.42, dampingFraction: 0.84)) {
-                    showQRCode.toggle()
-                    selectedDetent = .large
-                }
+                showQRCode = true
             } label: {
-                Label(showQRCode ? "Hide QR Code" : "QR Code", systemImage: "qrcode")
+                Label("QR Code", systemImage: "qrcode")
                     .font(.system(size: 16, weight: .semibold))
                     .frame(maxWidth: .infinity)
                     .frame(height: 56)
-                    .background(
-                        showQRCode ? Color.primary : Color(.secondarySystemBackground),
-                        in: RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    )
-                    .foregroundStyle(showQRCode ? Color(UIColor.systemBackground) : .primary)
+                    .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .foregroundStyle(.primary)
             }
             .disabled(deepLink.isEmpty || !linkEnabled)
         }
         .opacity(linkEnabled ? 1 : 0.55)
     }
 
+    private func presentShareSheet() {
+        guard let scene = UIApplication.shared.connectedScenes
+            .compactMap({ $0 as? UIWindowScene })
+            .first(where: { $0.activationState == .foregroundActive })
+            ?? UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).first,
+            let window = scene.windows.first(where: { $0.isKeyWindow }) ?? scene.windows.first,
+            var top = window.rootViewController
+        else { return }
+
+        // Walk to the top-most presented controller (this sheet is already presented).
+        while let presented = top.presentedViewController {
+            top = presented
+        }
+
+        let av = UIActivityViewController(activityItems: [deepLink], applicationActivities: nil)
+
+        // iPad requires a source for the popover.
+        if let pop = av.popoverPresentationController {
+            pop.sourceView = top.view
+            pop.sourceRect = CGRect(x: top.view.bounds.midX, y: top.view.bounds.midY, width: 0, height: 0)
+            pop.permittedArrowDirections = []
+        }
+
+        top.present(av, animated: true)
+    }
+
     // MARK: - QR code
 
-    @ViewBuilder
-    private var qrSection: some View {
-        if let qrImage {
-            Image(uiImage: qrImage)
-                .interpolation(.none)
-                .resizable()
-                .scaledToFit()
-                .frame(width: 200, height: 200)
-                .padding(20)
-                .background(.white, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-                .shadow(color: .black.opacity(0.08), radius: 12, y: 4)
-                .padding(.top, 24)
-        } else {
-            ProgressView().padding(.top, 24)
+    private var qrOverlay: some View {
+        ZStack {
+            Color(.systemBackground).opacity(0.55)
+
+            VStack(spacing: 20) {
+                if let qrImage {
+                    Image(uiImage: qrImage)
+                        .interpolation(.none)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 240, height: 240)
+                        .padding(24)
+                        .background(.white, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
+                        .shadow(color: .black.opacity(0.18), radius: 24, y: 10)
+                } else {
+                    ProgressView()
+                }
+
+                Text("Tap to dismiss")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+            .offset(y: showQRCode ? 0 : 80)
+            .animation(.spring(response: 0.45, dampingFraction: 0.78), value: showQRCode)
         }
+        .ignoresSafeArea()
+        .contentShape(Rectangle())
+        .onTapGesture { showQRCode = false }
     }
 
     // MARK: - Invitees (Listeners) section

@@ -33,14 +33,22 @@ final class SharedProjectSyncService {
             guard let self else { return }
             Task { @MainActor in
                 if let error {
-                    print("SharedProjectSyncService: listener error for \(projectID) — \(error)")
+                    let nsError = error as NSError
+                    if nsError.domain == FirestoreErrorDomain,
+                       nsError.code == FirestoreErrorCode.permissionDenied.rawValue {
+                        // Owner revoked access (deleted the invitee document).
+                        // Treat it the same as the project being deleted.
+                        self.projectRemover(projectID)
+                    } else {
+                        print("SharedProjectSyncService: listener error for \(projectID) — \(error)")
+                    }
                     return
                 }
                 if let snapshot, snapshot.exists, var project = FirestoreProjectCodec.decode(snapshot) {
                     project.ownerID = ownerID
                     self.projectUpdater(project)
                 } else if error == nil {
-                    // Document removed — owner deleted the project
+                    // Document removed — owner deleted the project.
                     self.projectRemover(projectID)
                 }
             }

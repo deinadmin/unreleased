@@ -8,13 +8,33 @@ struct ProjectInviteSheet: View {
 
     @Environment(ProjectStore.self) private var store
 
-    @State private var preview: ProjectPreview? = nil
-    @State private var loadState: LoadState = .loading
+    @State private var preview: ProjectPreview?
+    @State private var loadState: LoadState
     @State private var isAccepting = false
     /// False when the general link is disabled and the user wasn't directly invited.
     @State private var canJoin = true
 
     private enum LoadState { case loading, loaded, failed }
+
+    @State private var sheetHeight: CGFloat = 200
+    @ScaledMetric private var buttonHeight: CGFloat = 56
+
+    init(
+        ownerUID: String,
+        projectID: UUID,
+        preview: ProjectPreview? = nil,
+        onAccepted: @escaping () async -> Void,
+        onDeclined: @escaping () -> Void
+    ) {
+        self.ownerUID = ownerUID
+        self.projectID = projectID
+        self.onAccepted = onAccepted
+        self.onDeclined = onDeclined
+        // When a preview is preloaded, open straight into the resolved layout so
+        // the sheet renders fully before it animates in (no late fade / resize).
+        _preview = State(initialValue: preview)
+        _loadState = State(initialValue: preview == nil ? .loading : .loaded)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -29,7 +49,17 @@ struct ProjectInviteSheet: View {
                 }
             }
         }
-        .presentationDetents([.medium])
+        .background {
+            GeometryReader { proxy in
+                Color.clear
+                    .onAppear { sheetHeight = proxy.size.height }
+                    .onChange(of: proxy.size.height) { _, newValue in
+                        sheetHeight = newValue
+                    }
+            }
+        }
+        .presentationDetents([.height(sheetHeight)])
+        .presentationBackground(Color(.systemBackground))
         .interactiveDismissDisabled(true)
         .presentationDragIndicator(.hidden)
         .task { await loadPreview() }
@@ -44,7 +74,8 @@ struct ProjectInviteSheet: View {
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 60)
     }
 
     private var failedView: some View {
@@ -62,8 +93,9 @@ struct ProjectInviteSheet: View {
             Button("Dismiss", action: onDeclined)
                 .buttonStyle(.bordered)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding()
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 40)
+        .padding(.horizontal)
     }
 
     private func loadedView(preview: ProjectPreview) -> some View {
@@ -83,8 +115,6 @@ struct ProjectInviteSheet: View {
                 linkDisabledView
                     .padding(.horizontal, 20)
             }
-
-            Spacer(minLength: 0)
         }
     }
 
@@ -94,12 +124,15 @@ struct ProjectInviteSheet: View {
                 .font(.system(size: 14))
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
-            Button("Dismiss", action: onDeclined)
-                .font(.system(size: 16, weight: .semibold))
-                .frame(maxWidth: .infinity)
-                .frame(height: 56)
-                .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                .foregroundStyle(.primary)
+            Button(action: onDeclined) {
+                Text("Dismiss")
+                    .font(.body.weight(.semibold))
+                    .frame(maxWidth: .infinity)
+                    .frame(height: buttonHeight)
+                    .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .foregroundStyle(.primary)
+            }
+            .buttonStyle(PressableButtonStyle())
         }
     }
 
@@ -135,6 +168,7 @@ struct ProjectInviteSheet: View {
                 Text("Accept to add this project to your library and follow all future changes.")
                     .font(.system(size: 13))
                     .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
         .padding(16)
@@ -143,12 +177,15 @@ struct ProjectInviteSheet: View {
 
     private var actionButtons: some View {
         HStack(spacing: 12) {
-            Button("Decline", action: onDeclined)
-                .font(.system(size: 16, weight: .semibold))
-                .frame(maxWidth: .infinity)
-                .frame(height: 56)
-                .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                .foregroundStyle(.primary)
+            Button(action: onDeclined) {
+                Text("Cancel")
+                    .font(.body.weight(.semibold))
+                    .frame(maxWidth: .infinity)
+                    .frame(height: buttonHeight)
+                    .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .foregroundStyle(.primary)
+            }
+            .buttonStyle(PressableButtonStyle())
 
             Button {
                 Task { await accept() }
@@ -159,14 +196,15 @@ struct ProjectInviteSheet: View {
                             .tint(Color(UIColor.systemBackground))
                     } else {
                         Text("Accept")
-                            .font(.system(size: 16, weight: .semibold))
+                            .font(.body.weight(.semibold))
                     }
                 }
                 .frame(maxWidth: .infinity)
-                .frame(height: 56)
+                .frame(height: buttonHeight)
                 .background(Color.primary, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
                 .foregroundStyle(Color(UIColor.systemBackground))
             }
+            .buttonStyle(PressableButtonStyle())
             .disabled(isAccepting)
         }
     }
@@ -174,12 +212,19 @@ struct ProjectInviteSheet: View {
     // MARK: - Actions
 
     private func loadPreview() async {
-        let result = await ProjectInviteService.fetchPreview(ownerUID: ownerUID, projectID: projectID)
-        guard let result else {
-            withAnimation { loadState = .failed }
-            return
+        // Fetch only when no preview was preloaded by the presenter.
+        let result: ProjectPreview?
+        if let preview {
+            result = preview
+        } else {
+            result = await ProjectInviteService.fetchPreview(ownerUID: ownerUID, projectID: projectID)
+            guard let result else {
+                loadState = .failed
+                return
+            }
+            preview = result
         }
-        preview = result
+        guard let result else { return }
 
         // Directly-invited users can always join, even if the general link is off.
         if result.linkEnabled {
@@ -192,7 +237,7 @@ struct ProjectInviteSheet: View {
             canJoin = false
         }
 
-        withAnimation { loadState = .loaded }
+        loadState = .loaded
     }
 
     private func accept() async {
@@ -212,5 +257,16 @@ struct ProjectInviteSheet: View {
         }
         await onAccepted()
         isAccepting = false
+    }
+}
+
+/// Full-bleed button style that scales down on press and preserves the label's
+/// own foreground color (no system accent tint).
+private struct PressableButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .scaleEffect(configuration.isPressed ? 0.96 : 1)
+            .animation(.spring(response: 0.3, dampingFraction: 0.65), value: configuration.isPressed)
     }
 }

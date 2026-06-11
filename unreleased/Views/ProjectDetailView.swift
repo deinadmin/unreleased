@@ -91,14 +91,18 @@ struct ProjectDetailView: View {
                 )
             }
         }
-        .alert("Delete Project?", isPresented: $showDeleteConfirm) {
-            Button("Delete", role: .destructive) {
+        .alert(
+            project?.isShared == true ? "Leave Project?" : "Delete Project?",
+            isPresented: $showDeleteConfirm,
+            presenting: project
+        ) { project in
+            Button(project.isShared ? "Leave" : "Delete", role: .destructive) {
                 confirmDeleteProject()
             }
             Button("Cancel", role: .cancel) {}
-        } message: {
-            if let project, project.isShared {
-                Text("This will remove the project from your library. The owner's project will not be affected.")
+        } message: { project in
+            if project.isShared {
+                Text("This will remove the project from your library.")
             } else {
                 Text("This will permanently delete the project and all of its tracks.")
             }
@@ -115,11 +119,23 @@ struct ProjectDetailView: View {
         }
         .task(id: projectID) {
             await resolveOwnerLabel()
+            await resolveLinkEnabled()
         }
         .onChange(of: store.currentUsername) { _, _ in
             if project?.isShared == false {
                 Task { await resolveOwnerLabel() }
             }
+        }
+    }
+
+    /// Refreshes linkEnabled from the owner's preview doc and persists it on the Project.
+    /// Called async after first render — the initial value already comes from the persisted model,
+    /// so the toolbar renders at the correct size from frame one.
+    private func resolveLinkEnabled() async {
+        guard let project, project.isShared, let ownerID = project.ownerID else { return }
+        let preview = await ProjectInviteService.fetchPreview(ownerUID: ownerID, projectID: project.id)
+        if let enabled = preview?.linkEnabled {
+            store.setLinkEnabled(enabled, forSharedProjectID: projectID)
         }
     }
 
@@ -181,7 +197,8 @@ struct ProjectDetailView: View {
             isPlaying: isThisProjectPlaying(project),
             downloadState: headerDownloadState(for: project),
             zoomNamespace: projectZoomNamespace,
-            ownerLabel: ownerLabel
+            ownerLabel: ownerLabel,
+            onCoverLongPress: project.isShared ? nil : { isShowingEdit = true }
         )
     }
 
@@ -285,12 +302,14 @@ struct ProjectDetailView: View {
 
         ToolbarItem(placement: .topBarTrailing) {
             HStack(spacing: 8) {
-                Button {
-                    isShowingShare = true
-                } label: {
-                    Image(systemName: "square.and.arrow.up")
-                        .font(.system(size: 14, weight: .medium))
-                        .frame(width: 32, height: 32)
+                if !project.isShared || project.linkEnabled != false {
+                    Button {
+                        isShowingShare = true
+                    } label: {
+                        Image(systemName: "square.and.arrow.up")
+                            .font(.system(size: 14, weight: .medium))
+                            .frame(width: 32, height: 32)
+                    }
                 }
 
                 Button {
@@ -327,8 +346,8 @@ struct ProjectDetailView: View {
                         showDeleteConfirm = true
                     } label: {
                         Label(
-                            project.isShared ? "Remove from Library" : "Delete",
-                            systemImage: project.isShared ? "minus.circle" : "trash"
+                            project.isShared ? "Leave Project" : "Delete",
+                            systemImage: project.isShared ? "person.fill.xmark" : "trash"
                         )
                     }
                 } label: {
@@ -397,6 +416,9 @@ private struct ProjectDetailHeaderSection: View, Equatable {
     let downloadState: ProjectHeaderDownloadState
     let zoomNamespace: Namespace.ID
     let ownerLabel: String
+    var onCoverLongPress: (() -> Void)? = nil
+
+    @State private var longPressHapticTick = 0
 
     static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.project.id == rhs.project.id
@@ -429,6 +451,10 @@ private struct ProjectDetailHeaderSection: View, Equatable {
                 )
                 .frame(width: geo.size.width, height: coverSize, alignment: .center)
                 .matchedTransitionSource(id: project.id, in: zoomNamespace)
+                .onLongPressGesture(minimumDuration: 0.5) {
+                    longPressHapticTick &+= 1
+                    onCoverLongPress?()
+                }
             }
             .aspectRatio(1.375, contentMode: .fit)
 
@@ -454,6 +480,7 @@ private struct ProjectDetailHeaderSection: View, Equatable {
             }
             .padding(.top, 16)
         }
+        .sensoryFeedback(.increase, trigger: longPressHapticTick)
     }
 }
 

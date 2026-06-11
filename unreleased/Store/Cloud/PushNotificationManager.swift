@@ -28,6 +28,16 @@ enum PushUserInfoKey {
 final class PushNotificationManager: NSObject {
     static let shared = PushNotificationManager()
 
+    /// A project invite tapped while the app wasn't ready to route it yet
+    /// (e.g. cold launch, or before sign-in). `ContentView` drains this when it appears.
+    private var pendingProjectLink: (ownerID: String, projectID: String)?
+
+    /// Returns and clears any invite link captured from a notification tap.
+    func consumePendingProjectLink() -> (ownerID: String, projectID: String)? {
+        defer { pendingProjectLink = nil }
+        return pendingProjectLink
+    }
+
     /// Requests notification permission and registers for remote notifications.
     /// Safe to call multiple times (e.g. after sign-in).
     func registerForPushNotifications() {
@@ -76,6 +86,9 @@ extension PushNotificationManager: UNUserNotificationCenterDelegate {
         let userInfo = response.notification.request.content.userInfo
         if let ownerID = userInfo[PushUserInfoKey.ownerID] as? String,
            let projectID = userInfo[PushUserInfoKey.projectID] as? String {
+            // Store for cold-launch / pre-sign-in drain.
+            pendingProjectLink = (ownerID, projectID)
+            // And notify any live observer (warm launch) so it routes immediately.
             NotificationCenter.default.post(
                 name: .projectInviteTapped,
                 object: nil,

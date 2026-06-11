@@ -84,10 +84,13 @@ struct NotificationsView: View {
         store.markNotificationRead(notification)
         switch notification.kind {
         case .projectInvite:
-            // Reuse the deep-link flow: ContentView presents the invite sheet
-            // (or navigates straight to the project if already accepted).
             linkRouter.receive(ownerID: notification.fromUID, projectID: notification.projectID)
-            dismiss()
+            // Already joined: navigateToProject() resets the entire nav stack, so NotificationsView
+            // disappears naturally — calling dismiss() here would race and pop the newly pushed project.
+            // New invite: dismiss so the invite sheet can present cleanly over the root.
+            if !store.projects.contains(where: { $0.id == notification.projectID }) {
+                dismiss()
+            }
         case .unknown:
             break
         }

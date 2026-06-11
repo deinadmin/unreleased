@@ -75,6 +75,12 @@ struct ContentView: View {
                     .navigationDestination(for: StorageSyncRoute.self) { _ in
                         StorageSyncView()
                     }
+                    .navigationDestination(for: NotificationSettingsRoute.self) { _ in
+                        NotificationSettingsView()
+                    }
+                    .navigationDestination(for: AboutRoute.self) { _ in
+                        AboutView()
+                    }
             }
             // Reserve room + native progressive blur under scroll content (iOS 26+)
             .safeAreaBar(edge: .bottom, spacing: 0) {
@@ -169,14 +175,19 @@ struct ContentView: View {
             store.configureSync(userID: auth.signedInUserID)
             if auth.signedInUserID != nil {
                 PushNotificationManager.shared.registerForPushNotifications()
+                // Drain an invite tapped before we were ready (cold launch / pre-sign-in).
+                if let pending = PushNotificationManager.shared.consumePendingProjectLink() {
+                    routeProjectLink(ownerID: pending.ownerID, projectID: pending.projectID)
+                }
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .projectInviteTapped)) { note in
             guard let ownerID = note.userInfo?[PushUserInfoKey.ownerID] as? String,
-                  let idString = note.userInfo?[PushUserInfoKey.projectID] as? String,
-                  let projectID = UUID(uuidString: idString)
+                  let projectID = note.userInfo?[PushUserInfoKey.projectID] as? String
             else { return }
-            linkRouter.receive(ownerID: ownerID, projectID: projectID)
+            // Live tap handled now; clear the stored copy so it isn't re-routed later.
+            _ = PushNotificationManager.shared.consumePendingProjectLink()
+            routeProjectLink(ownerID: ownerID, projectID: projectID)
         }
         .task(id: linkRouter.pendingProjectID) {
             guard let projectID = linkRouter.pendingProjectID,
@@ -195,6 +206,7 @@ struct ContentView: View {
             ProjectInviteSheet(
                 ownerUID: invite.ownerUID,
                 projectID: invite.projectID,
+                preview: invite.preview,
                 onAccepted: {
                     await handleInviteAccepted(ownerUID: invite.ownerUID, projectID: invite.projectID)
                 },
@@ -241,6 +253,12 @@ struct ContentView: View {
 
     // MARK: - Deep link navigation
 
+    /// Forwards a notification-tapped invite into the existing deep-link flow.
+    private func routeProjectLink(ownerID: String, projectID: String) {
+        guard let uuid = UUID(uuidString: projectID) else { return }
+        linkRouter.receive(ownerID: ownerID, projectID: uuid)
+    }
+
     private func handleIncomingProjectLink(ownerID: String, projectID: UUID) async {
         if ownerID == auth.signedInUserID {
             // Own project — navigate directly.
@@ -260,8 +278,9 @@ struct ContentView: View {
             return
         }
 
-        // New invite — show the invite sheet (requires a username first).
-        pendingInvite = PendingInvite(ownerUID: ownerID, projectID: projectID)
+        // New invite — preload the preview so the sheet renders fully before opening.
+        let preview = await ProjectInviteService.fetchPreview(ownerUID: ownerID, projectID: projectID)
+        pendingInvite = PendingInvite(ownerUID: ownerID, projectID: projectID, preview: preview)
     }
 
     private func handleInviteAccepted(ownerUID: String, projectID: UUID) async {
@@ -275,8 +294,19 @@ struct ContentView: View {
 
     private func navigateToProject(_ projectID: UUID) {
         if searchState.isActive { searchState.deactivate() }
+        guard navigationPath.count > 0 else {
+            // Already at root (e.g. after accepting an invite sheet): push directly so
+            // the ProjectCard's matchedTransitionSource drives the zoom.
+            navigationPath.append(projectID)
+            return
+        }
+        // Pop back to HomeView first so the card is visible and its matchedTransitionSource
+        // can anchor the zoom, then push after the pop animation has settled.
         navigationPath = NavigationPath()
-        navigationPath.append(projectID)
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(400))
+            navigationPath.append(projectID)
+        }
     }
 
     @ViewBuilder
@@ -317,6 +347,7 @@ private struct PendingInvite: Identifiable {
     let id = UUID()
     let ownerUID: String
     let projectID: UUID
+    var preview: ProjectPreview? = nil
 }
 
 #Preview {

@@ -20,6 +20,7 @@ struct HomeView: View {
     @State private var editingProject: Project?
     @State private var projectAddingTracks: Project?
     @State private var projectPendingDelete: Project?
+    @State private var projectPendingLeave: Project?
     @State private var isImportingToExisting = false
     @State private var showStorageLimitAlert = false
     @State private var importError: String? = nil
@@ -114,6 +115,23 @@ struct HomeView: View {
         } message: { _ in
             Text("This will permanently delete the project and all of its tracks.")
         }
+        .alert(
+            "Leave Project?",
+            isPresented: Binding(
+                get: { projectPendingLeave != nil },
+                set: { if !$0 { projectPendingLeave = nil } }
+            ),
+            presenting: projectPendingLeave
+        ) { project in
+            Button("Leave", role: .destructive) {
+                if player.currentProject?.id == project.id { player.stop() }
+                store.deleteProject(project)
+                projectPendingLeave = nil
+            }
+            Button("Cancel", role: .cancel) { projectPendingLeave = nil }
+        } message: { project in
+            Text("You will lose access to \(project.name) and it will be removed from your library.")
+        }
         .alert("Storage Full", isPresented: $showStorageLimitAlert) {
             Button("OK", role: .cancel) {}
         } message: {
@@ -188,26 +206,34 @@ struct HomeView: View {
                         ProjectCard(project: project, zoomNamespace: projectZoomNamespace)
                     }
                     .contextMenu {
-                        Button {
-                            if store.hasStorageCapacity {
-                                projectAddingTracks = project
-                            } else {
-                                showStorageLimitAlert = true
+                        if project.isShared {
+                            Button(role: .destructive) {
+                                projectPendingLeave = project
+                            } label: {
+                                Label("Leave Project", systemImage: "person.fill.xmark")
                             }
-                        } label: {
-                            Label("Add tracks", systemImage: "plus")
-                        }
+                        } else {
+                            Button {
+                                if store.hasStorageCapacity {
+                                    projectAddingTracks = project
+                                } else {
+                                    showStorageLimitAlert = true
+                                }
+                            } label: {
+                                Label("Add tracks", systemImage: "plus")
+                            }
 
-                        Button {
-                            editingProject = project
-                        } label: {
-                            Label("Edit", systemImage: "pencil")
-                        }
+                            Button {
+                                editingProject = project
+                            } label: {
+                                Label("Edit", systemImage: "pencil")
+                            }
 
-                        Button(role: .destructive) {
-                            projectPendingDelete = project
-                        } label: {
-                            Label("Delete", systemImage: "trash")
+                            Button(role: .destructive) {
+                                projectPendingDelete = project
+                            } label: {
+                                Label("Delete", systemImage: "trash")
+                            }
                         }
                     }
                 }

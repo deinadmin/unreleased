@@ -328,7 +328,12 @@ final class ProjectStore {
     /// Fetches a project from another user's Firestore collection and adds it to the local library.
     func addSharedProjectByLink(ownerID: String, projectID: UUID) async {
         guard !projects.contains(where: { $0.id == projectID }) else { return }
-        guard let project = await sharedSyncService?.fetchProject(ownerID: ownerID, projectID: projectID) else { return }
+        guard var project = await sharedSyncService?.fetchProject(ownerID: ownerID, projectID: projectID) else { return }
+
+        // Fetch linkEnabled in parallel with other setup work so the toolbar renders
+        // at the right size the very first time the user opens this project.
+        let preview = await ProjectInviteService.fetchPreview(ownerUID: ownerID, projectID: project.id)
+        project.linkEnabled = preview?.linkEnabled
 
         projects.insert(project, at: 0)
         persistLocalOnly()
@@ -386,12 +391,22 @@ final class ProjectStore {
                 updated.tracks[tIdx].waveformData = localTrack.waveformData
             }
         }
+        // linkEnabled lives in the preview doc, not the project doc — keep the cached value.
+        updated.linkEnabled = local.linkEnabled
         projects[index] = updated
         persistLocalOnly()
 
         if updated.coverStoragePath != nil {
             Task { await downloadSharedCoverIfNeeded(for: updated) }
         }
+    }
+
+    /// Persists a refreshed `linkEnabled` value for a shared project. No-op for own projects.
+    func setLinkEnabled(_ enabled: Bool, forSharedProjectID projectID: UUID) {
+        guard let index = projects.firstIndex(where: { $0.id == projectID && $0.isShared }) else { return }
+        guard projects[index].linkEnabled != enabled else { return }
+        projects[index].linkEnabled = enabled
+        persistLocalOnly()
     }
 
     private func downloadSharedCoverIfNeeded(for project: Project) async {

@@ -1,3 +1,4 @@
+import MessageUI
 import SwiftUI
 
 struct ProfileView: View {
@@ -6,6 +7,10 @@ struct ProfileView: View {
     @Environment(AudioPlayer.self) private var player
 
     @State private var showSignOutConfirm = false
+    @State private var showHelpMail = false
+
+    private let supportEmail = "me@designedbycarl.de"
+    private let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
 
     var body: some View {
         ScrollView {
@@ -147,19 +152,7 @@ struct ProfileView: View {
 
             VStack(spacing: 0) {
                 ForEach(Array(placeholderSettings.enumerated()), id: \.element.id) { index, row in
-                    if row.id == "storage" {
-                        NavigationLink(value: StorageSyncRoute()) {
-                            ProfileSettingsRowLabel(row: row)
-                        }
-                        .buttonStyle(.plain)
-                    } else {
-                        Button {} label: {
-                            ProfileSettingsRowLabel(row: row)
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(true)
-                        .opacity(0.72)
-                    }
+                    settingsRow(for: row)
 
                     if index < placeholderSettings.count - 1 {
                         Divider()
@@ -168,6 +161,59 @@ struct ProfileView: View {
                 }
             }
             .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        }
+        .sheet(isPresented: $showHelpMail) {
+            if MFMailComposeViewController.canSendMail() {
+                MailComposeView(
+                    toRecipients: [supportEmail],
+                    subject: "Feedback iOS App unreleased v\(appVersion)",
+                    onDismiss: { showHelpMail = false }
+                )
+                .ignoresSafeArea()
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func settingsRow(for row: ProfileSettingsRowLabel.Model) -> some View {
+        switch row.id {
+        case "notifications":
+            NavigationLink(value: NotificationSettingsRoute()) {
+                ProfileSettingsRowLabel(row: row)
+            }
+            .buttonStyle(.plain)
+
+        case "storage":
+            NavigationLink(value: StorageSyncRoute()) {
+                ProfileSettingsRowLabel(row: row)
+            }
+            .buttonStyle(.plain)
+
+        case "help":
+            Button {
+                if MFMailComposeViewController.canSendMail() {
+                    showHelpMail = true
+                } else if let url = URL(string: "mailto:\(supportEmail)?subject=Feedback%20iOS%20App%20unreleased%20v\(appVersion)") {
+                    UIApplication.shared.open(url)
+                }
+            } label: {
+                ProfileSettingsRowLabel(row: row)
+            }
+            .buttonStyle(.plain)
+
+        case "about":
+            NavigationLink(value: AboutRoute()) {
+                ProfileSettingsRowLabel(row: row)
+            }
+            .buttonStyle(.plain)
+
+        default:
+            Button {} label: {
+                ProfileSettingsRowLabel(row: row)
+            }
+            .buttonStyle(.plain)
+            .disabled(true)
+            .opacity(0.72)
         }
     }
 

@@ -150,6 +150,8 @@ struct Project: Identifiable, Codable, Sendable {
     var ownerID: String?
     /// Denormalized display username of the owner. Set for shared projects when decoded from Firestore.
     var ownerUsername: String?
+    /// Whether the owner has link-sharing enabled. Nil until first fetched; only meaningful for shared projects.
+    var linkEnabled: Bool?
 
     var isShared: Bool { ownerID != nil }
 
@@ -165,7 +167,8 @@ struct Project: Identifiable, Codable, Sendable {
         createdDate: Date = Date(),
         updatedDate: Date = Date(),
         ownerID: String? = nil,
-        ownerUsername: String? = nil
+        ownerUsername: String? = nil,
+        linkEnabled: Bool? = nil
     ) {
         self.id = id
         self.name = name
@@ -179,6 +182,7 @@ struct Project: Identifiable, Codable, Sendable {
         self.updatedDate = updatedDate
         self.ownerID = ownerID
         self.ownerUsername = ownerUsername
+        self.linkEnabled = linkEnabled
     }
 
     var totalDuration: TimeInterval {
