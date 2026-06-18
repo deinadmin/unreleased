@@ -113,9 +113,11 @@ final class ProjectStore {
 
     /// Owner invites a user (by UID) to a project they own. Records a pending invite
     /// and delivers an in-app notification (and push, via the Cloud Function trigger).
-    func inviteUser(_ user: UserSearchResult, to project: Project) async throws {
-        guard let ownerUID = currentUserID, let ownerUsername = currentUsername else { return }
-        try await ProjectInviteService.inviteUser(
+    /// Returns the notification document ID so the caller can cancel it later if needed.
+    @discardableResult
+    func inviteUser(_ user: UserSearchResult, to project: Project) async throws -> String {
+        guard let ownerUID = currentUserID, let ownerUsername = currentUsername else { return "" }
+        return try await ProjectInviteService.inviteUser(
             recipientUID: user.id,
             recipientUsername: user.username,
             project: project,

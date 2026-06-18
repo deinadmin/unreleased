@@ -90,27 +90,23 @@ enum ProjectInviteService {
 
     /// Invites a user directly by their UID: records a pending invite (so they can join
     /// even when the general link is disabled) and writes an in-app notification to them.
+    ///
+    /// Returns the ID of the notification document so the caller can delete it if the
+    /// invite is later cancelled.
+    @discardableResult
     static func inviteUser(
         recipientUID: String,
         recipientUsername: String,
         project: Project,
         ownerUID: String,
         ownerUsername: String
-    ) async throws {
+    ) async throws -> String {
         // Make sure the preview exists so the recipient's invite sheet can load.
         await writePreview(project: project, ownerUID: ownerUID, ownerUsername: ownerUsername)
 
-        let pendingRef = CloudPaths.pendingInviteDocument(
-            ownerID: ownerUID, projectID: project.id, inviteeID: recipientUID
-        )
-        try await pendingRef.setData([
-            "uid": recipientUID,
-            "username": recipientUsername,
-            "invitedAt": Timestamp(date: Date()),
-        ])
-
-        // Deliver an in-app notification the recipient can read.
+        // Create the notification first so we know its ID.
         let noteRef = CloudPaths.notificationsCollection(userID: recipientUID).document()
+        let notificationID = noteRef.documentID
         try await noteRef.setData([
             "type": AppNotification.Kind.projectInvite.rawValue,
             "fromUID": ownerUID,
@@ -120,6 +116,20 @@ enum ProjectInviteService {
             "createdAt": Timestamp(date: Date()),
             "read": false,
         ])
+
+        // Record the pending invite, storing the notification ID so it can be
+        // removed if the owner cancels the invite before the recipient accepts.
+        let pendingRef = CloudPaths.pendingInviteDocument(
+            ownerID: ownerUID, projectID: project.id, inviteeID: recipientUID
+        )
+        try await pendingRef.setData([
+            "uid": recipientUID,
+            "username": recipientUsername,
+            "invitedAt": Timestamp(date: Date()),
+            "notificationID": notificationID,
+        ])
+
+        return notificationID
     }
 
     /// True when an explicit username invite is still pending for this user.
@@ -132,6 +142,41 @@ enum ProjectInviteService {
     static func clearPendingInvite(ownerUID: String, projectID: UUID, inviteeUID: String) async {
         let ref = CloudPaths.pendingInviteDocument(ownerID: ownerUID, projectID: projectID, inviteeID: inviteeUID)
         try? await ref.delete()
+    }
+
+    /// Returns all users who have a pending (not-yet-accepted) username invite (owner-only read).
+    static func fetchPendingInvites(ownerUID: String, projectID: UUID) async -> [PendingInviteInfo] {
+        let ref = CloudPaths.pendingInvitesCollection(ownerID: ownerUID, projectID: projectID)
+        guard let snapshot = try? await ref.getDocuments() else { return [] }
+        return snapshot.documents.compactMap { doc in
+            let data = doc.data()
+            guard let username = data["username"] as? String,
+                  let ts = data["invitedAt"] as? Timestamp
+            else { return nil }
+            return PendingInviteInfo(
+                id: doc.documentID,
+                username: username,
+                invitedAt: ts.dateValue(),
+                notificationID: data["notificationID"] as? String
+            )
+        }
+    }
+
+    /// Cancels a pending username invite: deletes the recipient's in-app notification
+    /// (best-effort) and removes the pending invite document.
+    static func cancelInvite(
+        ownerUID: String,
+        projectID: UUID,
+        inviteeUID: String,
+        notificationID: String?
+    ) async {
+        if let notificationID {
+            let noteRef = CloudPaths.notificationDocument(
+                userID: inviteeUID, notificationID: notificationID
+            )
+            try? await noteRef.delete()
+        }
+        await clearPendingInvite(ownerUID: ownerUID, projectID: projectID, inviteeUID: inviteeUID)
     }
 
     // MARK: - Private helpers

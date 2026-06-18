@@ -12,6 +12,7 @@ struct ProjectShareSheet: View {
     @State private var copyHapticTick = 0
     @State private var selectedDetent: PresentationDetent = .medium
     @State private var invitees: [InviteeInfo] = []
+    @State private var pendingInvites: [PendingInviteInfo] = []
     @State private var loadedInvitees = false
 
     // Link enable/disable
@@ -77,6 +78,7 @@ struct ProjectShareSheet: View {
         .animation(.easeOut(duration: 0.28), value: showQRCode)
         .animation(.spring(response: 0.42, dampingFraction: 0.84), value: loadedInvitees)
         .animation(.spring(response: 0.4, dampingFraction: 0.86), value: searchResults)
+        .animation(.spring(response: 0.4, dampingFraction: 0.86), value: pendingInvites)
         .animation(.easeInOut(duration: 0.2), value: linkEnabled)
         .presentationDetents([.medium, .large], selection: $selectedDetent)
         .presentationDragIndicator(.visible)
@@ -363,17 +365,19 @@ struct ProjectShareSheet: View {
 
     // MARK: - Invitees (Listeners) section
 
+    private var totalListenerCount: Int { invitees.count + pendingInvites.count }
+
     @ViewBuilder
     private var inviteesSection: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
-                Text(invitees.isEmpty ? "No listeners yet" : "Listeners")
+                Text(totalListenerCount == 0 ? "No listeners yet" : "Listeners")
                     .font(.footnote.weight(.semibold))
                     .foregroundStyle(.secondary)
                     .textCase(.uppercase)
                 Spacer()
-                if !invitees.isEmpty {
-                    Text("\(invitees.count)")
+                if totalListenerCount > 0 {
+                    Text("\(totalListenerCount)")
                         .font(.footnote.weight(.semibold))
                         .foregroundStyle(.secondary)
                 }
@@ -381,13 +385,21 @@ struct ProjectShareSheet: View {
             .padding(.horizontal, 20)
             .padding(.bottom, 8)
 
-            if invitees.isEmpty {
+            if totalListenerCount == 0 {
                 Text("Invite people above or share the link so others can join.")
                     .font(.footnote)
                     .foregroundStyle(.tertiary)
                     .padding(.horizontal, 20)
             } else {
                 VStack(spacing: 0) {
+                    // Pending invites first
+                    ForEach(pendingInvites) { pending in
+                        pendingInviteRow(pending)
+                        if pending.id != pendingInvites.last?.id || !invitees.isEmpty {
+                            Divider().padding(.leading, 20 + 28 + 12)
+                        }
+                    }
+                    // Accepted listeners
                     ForEach(invitees) { invitee in
                         inviteeRow(invitee)
                         if invitee.id != invitees.last?.id {
@@ -399,6 +411,35 @@ struct ProjectShareSheet: View {
                 .padding(.horizontal, 20)
             }
         }
+    }
+
+    private func pendingInviteRow(_ pending: PendingInviteInfo) -> some View {
+        HStack(spacing: 12) {
+            avatarCircle(initial: String(pending.username.prefix(1)), size: 28)
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text("@\(pending.username)")
+                    .font(.system(size: 15, weight: .medium))
+                Text("Invite pending")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer()
+
+            Button {
+                Task { await cancelInvite(pending) }
+            } label: {
+                Image(systemName: "xmark.circle")
+                    .font(.system(size: 16))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 36, height: 36)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
     }
 
     private func inviteeRow(_ invitee: InviteeInfo) -> some View {
@@ -471,17 +512,20 @@ struct ProjectShareSheet: View {
             ownerUsername: username
         )
 
-        // Load current link state + invitees in parallel.
+        // Load current link state, accepted invitees, and pending invites in parallel.
         async let previewTask = ProjectInviteService.fetchPreview(ownerUID: ownerID, projectID: project.id)
         async let inviteesTask = ProjectInviteService.fetchInvitees(ownerUID: ownerID, projectID: project.id)
+        async let pendingTask = ProjectInviteService.fetchPendingInvites(ownerUID: ownerID, projectID: project.id)
 
         let preview = await previewTask
         let list = await inviteesTask
+        let pending = await pendingTask
 
         withAnimation {
             linkEnabled = preview?.linkEnabled ?? true
             loadedLinkState = true
             invitees = list
+            pendingInvites = pending
             loadedInvitees = true
         }
     }
@@ -525,12 +569,35 @@ struct ProjectShareSheet: View {
     private func invite(_ user: UserSearchResult) async {
         invitingUIDs.insert(user.id)
         do {
-            try await store.inviteUser(user, to: project)
-            withAnimation { _ = invitedUIDs.insert(user.id) }
+            let notificationID = try await store.inviteUser(user, to: project)
+            let newPending = PendingInviteInfo(
+                id: user.id,
+                username: user.username,
+                invitedAt: Date(),
+                notificationID: notificationID.isEmpty ? nil : notificationID
+            )
+            withAnimation {
+                _ = invitedUIDs.insert(user.id)
+                pendingInvites.append(newPending)
+            }
         } catch {
             print("ProjectShareSheet: invite failed — \(error)")
         }
         invitingUIDs.remove(user.id)
+    }
+
+    private func cancelInvite(_ pending: PendingInviteInfo) async {
+        guard let ownerID = auth.signedInUserID else { return }
+        await ProjectInviteService.cancelInvite(
+            ownerUID: ownerID,
+            projectID: project.id,
+            inviteeUID: pending.id,
+            notificationID: pending.notificationID
+        )
+        withAnimation {
+            pendingInvites.removeAll { $0.id == pending.id }
+            invitedUIDs.remove(pending.id)
+        }
     }
 
     private func removeInvitee(_ invitee: InviteeInfo) async {

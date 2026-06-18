@@ -26,6 +26,19 @@ struct InviteeInfo: Identifiable {
     let acceptedAt: Date
 }
 
+// MARK: - Pending invite info
+
+/// A user who was explicitly invited by username but hasn't accepted yet.
+/// Stored at `users/{ownerID}/projects/{projectID}/pendingInvites/{inviteeUID}`.
+struct PendingInviteInfo: Identifiable, Equatable {
+    let id: String              // invitee UID
+    let username: String
+    let invitedAt: Date
+    /// ID of the in-app notification written to the recipient, used to delete
+    /// it when the invite is cancelled.
+    let notificationID: String?
+}
+
 // MARK: - User search
 
 /// A user surfaced by username search when inviting people directly.
