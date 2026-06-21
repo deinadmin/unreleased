@@ -133,8 +133,13 @@ final class ProjectStore {
         currentPlan.storageLimitBytes
     }
 
+    /// Only the user's own projects count against their storage limit. Shared
+    /// projects they merely follow/stream live in the owner's storage, not theirs.
     var totalUsedStorageBytes: Int64 {
-        projects.flatMap(\.tracks).reduce(0) { $0 + $1.fileSize }
+        projects
+            .filter { !$0.isShared }
+            .flatMap(\.tracks)
+            .reduce(0) { $0 + $1.fileSize }
     }
 
     var freeStorageBytes: Int64 {

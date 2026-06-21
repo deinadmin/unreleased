@@ -19,6 +19,11 @@ final class AudioPlayer {
     var isLoadingAudio: Bool = false
     /// Download progress 0…1 while `isLoadingAudio`; indeterminate UI when 0.
     var loadingProgress: Double = 0
+    /// Drives an alert when a track is tapped on a device where it hasn't
+    /// finished uploading to the cloud yet (no local copy + no storagePath).
+    var showUploadPendingAlert: Bool = false
+    /// Title of the track that triggered `showUploadPendingAlert`.
+    var uploadPendingTrackTitle: String = ""
     /// User-queued tracks (played next, in order) before the rest of the current project.
     /// Universal — items may come from any project and persist across project changes.
     private(set) var queue: [QueuedItem] = []
@@ -69,6 +74,20 @@ final class AudioPlayer {
             togglePlayPause()
             return
         }
+
+        // No local copy and no cloud object yet → the track is still uploading
+        // from the device it was added on. There's nothing to stream, so surface
+        // an alert instead of flashing a mini player that immediately vanishes.
+        // The origin device always has the local file, so it never hits this.
+        let hasLocal = store.hasCachedAudio(for: track) || store.hasDownloadedFile(for: track)
+        let storagePath = store.projects.first(where: { $0.id == project.id })?
+            .tracks.first(where: { $0.id == track.id })?.storagePath ?? track.storagePath
+        if !hasLocal, storagePath == nil {
+            uploadPendingTrackTitle = track.title
+            showUploadPendingAlert = true
+            return
+        }
+
         if !fromQueue {
             contextProjectID = project.id
             contextTrackID = track.id

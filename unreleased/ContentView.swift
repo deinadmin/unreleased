@@ -178,6 +178,17 @@ struct ContentView: View {
                 .presentationDetents([.medium, .large])
             }
         }
+        .alert(
+            "Still uploading",
+            isPresented: Binding(
+                get: { player.showUploadPendingAlert },
+                set: { player.showUploadPendingAlert = $0 }
+            )
+        ) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("“\(player.uploadPendingTrackTitle)” hasn’t finished uploading yet. It’ll be playable on this device once the upload completes.")
+        }
         .ignoresSafeArea(edges: player.isShowingNowPlaying ? .bottom : [])
         // Snappier open, fast close — keyed off the destination state.
         .animation(
