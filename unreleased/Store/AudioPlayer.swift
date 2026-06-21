@@ -156,7 +156,6 @@ final class AudioPlayer {
         player?.play()
         isPlaying = true
         updateNowPlayingInfo()
-        store.analyzeWaveformIfNeeded(for: track, in: project.id)
     }
 
     func togglePlayPause() {

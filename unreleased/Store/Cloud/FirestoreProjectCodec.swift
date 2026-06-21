@@ -79,7 +79,13 @@ enum FirestoreProjectCodec {
         if !track.notes.isEmpty {
             payload["notes"] = track.notes
         }
-        // Waveform is derived from audio — analyzed locally after cache/download, not stored in Firestore.
+        // Waveform is analyzed once at import time and stored inline as a
+        // compressed base64 string so every device can render it without
+        // re-analyzing the audio stream.
+        if let waveform = track.waveformData, !waveform.isEmpty,
+           let encoded = WaveformCodec.encode(waveform) {
+            payload["waveform"] = encoded
+        }
         return payload
     }
 
@@ -96,6 +102,7 @@ enum FirestoreProjectCodec {
         let storagePath = data["storagePath"] as? String
         let isDownloaded = data["isDownloaded"] as? Bool ?? false
         let notes = data["notes"] as? String ?? ""
+        let waveform = (data["waveform"] as? String).flatMap(WaveformCodec.decode)
 
         return Track(
             id: id,
@@ -104,7 +111,7 @@ enum FirestoreProjectCodec {
             fileSize: fileSize,
             duration: duration,
             addedDate: added.dateValue(),
-            waveformData: nil,
+            waveformData: waveform,
             storagePath: storagePath,
             isDownloaded: isDownloaded,
             notes: notes

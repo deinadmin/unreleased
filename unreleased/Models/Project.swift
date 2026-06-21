@@ -70,7 +70,8 @@ struct Track: Identifiable, Codable, Sendable {
     var fileSize: Int64
     var duration: TimeInterval
     var addedDate: Date
-    /// Normalized amplitude values (0…1) for each waveform bar. Local-only cache (nil until analyzed from audio).
+    /// Normalized amplitude values (0…1) for each waveform bar. Analyzed once at
+    /// import and synced to Firestore (compressed) so every device can render it.
     var waveformData: [Float]?
     /// Cloud Storage object path (e.g. `users/{uid}/audio/{trackId}.m4a`). Nil until uploaded.
     var storagePath: String?

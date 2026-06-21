@@ -639,9 +639,6 @@ final class ProjectStore {
             do {
                 try await performDownload(track)
                 setTrackDownloaded(track.id, projectID: projectID, downloaded: true)
-                if let updated = trackInProject(track.id, projectID: projectID) {
-                    analyzeWaveformIfNeeded(for: updated, in: projectID)
-                }
             } catch {
                 if !Task.isCancelled {
                     print("ProjectStore: download failed — \(error)")
@@ -691,23 +688,6 @@ final class ProjectStore {
         projects[pIdx].updatedDate = Date()
         save()
         audioPlayer?.syncCurrentItemFromStore()
-    }
-
-    /// Analyzes waveform from a local audio file. Call after playback has cached the track. Never synced to Firestore.
-    func analyzeWaveformIfNeeded(for track: Track, in projectID: UUID) {
-        guard track.waveformData == nil,
-              hasCachedAudio(for: track) || hasDownloadedFile(for: track)
-        else { return }
-        let url = localAudioURL(for: track)
-        Task {
-            let waveform = await WaveformAnalyzer.analyze(url: url, targetBars: 200)
-            guard !waveform.isEmpty,
-                  let pIdx = projects.firstIndex(where: { $0.id == projectID }),
-                  let tIdx = projects[pIdx].tracks.firstIndex(where: { $0.id == track.id })
-            else { return }
-            projects[pIdx].tracks[tIdx].waveformData = waveform
-            save()
-        }
     }
 
     func audioFileURL(for track: Track) -> URL {
@@ -768,10 +748,10 @@ final class ProjectStore {
 
     private func applyRemoteProjects(_ projects: [Project], persistLocally: Bool) {
         suppressSync = true
-        // waveformData is a local-only cache never written to Firestore.
-        // Re-apply it from the current store so a remote snapshot doesn't
-        // silently wipe the analyzed waveforms and cause the UI to fall
-        // back to seeded random bars mid-playback.
+        // Waveforms are stored inline on the Firestore document, so a remote
+        // snapshot normally already carries them. This re-applies the local
+        // waveform only as a fallback (e.g. a not-yet-pushed local import or a
+        // legacy track) so the UI never flips to placeholder bars.
         var merged = projects
         for pIdx in merged.indices {
             guard let local = self.projects.first(where: { $0.id == merged[pIdx].id }) else { continue }
@@ -825,7 +805,7 @@ final class ProjectStore {
         else { return }
 
         suppressSync = true
-        // Preserve local waveformData — Firestore never stores it.
+        // Fall back to the local waveform if a remote update arrives without one.
         var updatedTrack = track
         if updatedTrack.waveformData == nil {
             updatedTrack.waveformData = projects[pIdx].tracks[tIdx].waveformData
@@ -873,11 +853,6 @@ final class ProjectStore {
         projects[pIdx].tracks[tIdx].isDownloaded = downloaded
         projects[pIdx].updatedDate = Date()
         save()
-    }
-
-    private func trackInProject(_ trackID: UUID, projectID: UUID) -> Track? {
-        projects.first(where: { $0.id == projectID })?
-            .tracks.first(where: { $0.id == trackID })
     }
 
     private func performDownload(_ track: Track) async throws {

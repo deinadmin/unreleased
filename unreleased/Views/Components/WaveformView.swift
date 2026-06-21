@@ -62,7 +62,7 @@ struct WaveformView: View {
         if let data = waveformData, !data.isEmpty {
             return resample(data, to: count)
         }
-        return seededBars(count: count, seed: trackID.hashValue)
+        return seededBars(count: count, seed: stableSeed(from: trackID))
     }
 }
 
@@ -141,7 +141,7 @@ struct ScrollingMiniWaveformView: View {
 
     private var effectiveBars: [Float] {
         guard let data = waveformData, !data.isEmpty else {
-            return seededBars(count: 200, seed: trackID.hashValue)
+            return seededBars(count: 200, seed: stableSeed(from: trackID))
         }
         return data
     }
@@ -417,16 +417,34 @@ private func resample(_ source: [Float], to targetCount: Int) -> [Float] {
     }
 }
 
-/// Deterministic bar heights seeded from a hash — used only when no real waveform exists yet.
-private func seededBars(count: Int, seed: Int) -> [Float] {
+/// A stable, launch-independent seed derived from a track's UUID.
+///
+/// `UUID.hashValue` (and `Hashable` in general) uses a per-process randomized
+/// seed, so it changes on every app launch. Using it to seed the placeholder
+/// waveform made the fake bars look different after every relaunch. Hashing the
+/// raw UUID bytes with FNV-1a instead yields the same seed forever.
+private func stableSeed(from uuid: UUID) -> UInt64 {
+    let bytes = uuid.uuid
+    var hash: UInt64 = 0xcbf2_9ce4_8422_2325 // FNV-1a offset basis
+    let prime: UInt64 = 0x0000_0100_0000_01b3
+    for byte in [bytes.0, bytes.1, bytes.2, bytes.3, bytes.4, bytes.5, bytes.6, bytes.7,
+                 bytes.8, bytes.9, bytes.10, bytes.11, bytes.12, bytes.13, bytes.14, bytes.15] {
+        hash = (hash ^ UInt64(byte)) &* prime
+    }
+    return hash
+}
+
+/// Deterministic bar heights seeded from a stable value — used only when no real waveform exists yet.
+private func seededBars(count: Int, seed: UInt64) -> [Float] {
     var rng = SeededRNG(seed: seed)
     return (0..<count).map { _ in Float(0.1 + rng.next() * 0.9) }
 }
 
 private struct SeededRNG {
     var state: UInt64
-    init(seed: Int) {
-        state = UInt64(bitPattern: Int64(seed))
+    init(seed: UInt64) {
+        // Avoid a zero state, which would make the generator emit a constant.
+        state = seed == 0 ? 0x9e37_79b9_7f4a_7c15 : seed
         _ = next()
     }
     mutating func next() -> Double {
