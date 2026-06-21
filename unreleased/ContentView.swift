@@ -189,6 +189,17 @@ struct ContentView: View {
         } message: {
             Text("“\(player.uploadPendingTrackTitle)” hasn’t finished uploading yet. It’ll be playable on this device once the upload completes.")
         }
+        .sheet(
+            item: Binding(
+                get: { store.storageUpsell },
+                set: { store.storageUpsell = $0 }
+            )
+        ) { context in
+            StorageUpsellSheet(context: context) {
+                navigationPath.append(StorageSyncRoute())
+            }
+            .environment(store)
+        }
         .ignoresSafeArea(edges: player.isShowingNowPlaying ? .bottom : [])
         // Snappier open, fast close — keyed off the destination state.
         .animation(

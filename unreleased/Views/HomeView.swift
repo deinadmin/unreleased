@@ -17,6 +17,7 @@ struct HomeView: View {
     @Environment(ProjectStore.self) private var store
     @Environment(AudioPlayer.self) private var player
     @Environment(AppSearchState.self) private var searchState
+    @Environment(AuthManager.self) private var auth
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Namespace private var chromeZoomNamespace
 
@@ -31,7 +32,6 @@ struct HomeView: View {
     @State private var projectPendingDelete: Project?
     @State private var projectPendingLeave: Project?
     @State private var isImportingToExisting = false
-    @State private var showStorageLimitAlert = false
     @State private var importError: String? = nil
 
     private var isRegularWidth: Bool {
@@ -178,11 +178,6 @@ struct HomeView: View {
         } message: { project in
             Text("You will lose access to \(project.name) and it will be removed from your library.")
         }
-        .alert("Storage Full", isPresented: $showStorageLimitAlert) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text("You've used all \(store.formattedStorageLimit) of your storage. Delete some tracks to free up space.")
-        }
         .alert("Import Error", isPresented: Binding(get: { importError != nil }, set: { if !$0 { importError = nil } })) {
             Button("OK", role: .cancel) {}
         } message: {
@@ -214,7 +209,7 @@ struct HomeView: View {
                 if store.hasStorageCapacity {
                     isShowingDocumentPicker = true
                 } else {
-                    showStorageLimitAlert = true
+                    store.presentStorageUpsell(.uploadFull)
                 }
             } label: {
                 HStack {
@@ -263,7 +258,7 @@ struct HomeView: View {
                                 if store.hasStorageCapacity {
                                     projectAddingTracks = project
                                 } else {
-                                    showStorageLimitAlert = true
+                                    store.presentStorageUpsell(.uploadFull)
                                 }
                             } label: {
                                 Label("Add tracks", systemImage: "plus")
@@ -295,49 +290,6 @@ struct HomeView: View {
 
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
-        ToolbarItem(placement: .topBarTrailing) {
-            HStack(spacing: 8) {
-                if isRegularWidth {
-                    Button {
-                        isShowingNotifications = true
-                    } label: {
-                        notificationsIcon
-                    }
-                    .buttonStyle(.plain)
-                    .matchedTransitionSource(id: ChromeZoom.notifications, in: chromeZoomNamespace)
-                } else {
-                    NavigationLink(value: NotificationsRoute()) {
-                        notificationsIcon
-                    }
-                    .buttonStyle(.plain)
-                }
-
-                Button {
-                    player.isShowingNowPlaying = false
-                    searchState.activateOrFocus(scope: .library, placeholder: "Search your library")
-                } label: {
-                    Image(systemName: "magnifyingglass")
-                        .font(.system(size: 14, weight: .medium))
-                        .frame(width: 32, height: 32)
-                }
-
-                if isRegularWidth {
-                    Button {
-                        isShowingProfile = true
-                    } label: {
-                        profileIcon
-                    }
-                    .buttonStyle(.plain)
-                    .matchedTransitionSource(id: ChromeZoom.profile, in: chromeZoomNamespace)
-                } else {
-                    NavigationLink(value: ProfileRoute()) {
-                        profileIcon
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-        }
-
         if !store.projects.isEmpty {
             ToolbarItem(placement: .topBarLeading) {
                 Button {
@@ -345,7 +297,6 @@ struct HomeView: View {
                 } label: {
                     Image(systemName: "plus")
                         .font(.system(size: 14, weight: .semibold))
-                        .frame(width: 32, height: 32)
                 }
                 .matchedTransitionSource(
                     id: CreateProjectZoom.sourceID,
@@ -353,26 +304,81 @@ struct HomeView: View {
                 )
             }
         }
+
+        // First glass group: notifications + search.
+        ToolbarItemGroup(placement: .topBarTrailing) {
+            notificationsButton
+            searchButton
+        }
+
+        ToolbarSpacer(.fixed, placement: .topBarTrailing)
+
+        // Second glass group: profile picture button.
+        ToolbarItem(placement: .topBarTrailing) {
+            profileButton
+        }
+        .sharedBackgroundVisibility(.hidden)
+    }
+
+    @ViewBuilder
+    private var notificationsButton: some View {
+        if isRegularWidth {
+            Button {
+                isShowingNotifications = true
+            } label: {
+                notificationsIcon
+            }
+            .matchedTransitionSource(id: ChromeZoom.notifications, in: chromeZoomNamespace)
+        } else {
+            NavigationLink(value: NotificationsRoute()) {
+                notificationsIcon
+            }
+        }
+    }
+
+    private var searchButton: some View {
+        Button {
+            player.isShowingNowPlaying = false
+            searchState.activateOrFocus(scope: .library, placeholder: "Search your library")
+        } label: {
+            Image(systemName: "magnifyingglass")
+        }
+    }
+
+    @ViewBuilder
+    private var profileButton: some View {
+        if isRegularWidth {
+            Button {
+                isShowingProfile = true
+            } label: {
+                profileAvatar
+            }
+            .buttonStyle(.plain)
+            .matchedTransitionSource(id: ChromeZoom.profile, in: chromeZoomNamespace)
+        } else {
+            NavigationLink(value: ProfileRoute()) {
+                profileAvatar
+            }
+            .buttonStyle(.plain)
+        }
     }
 
     private var notificationsIcon: some View {
         Image(systemName: "bell")
-            .font(.system(size: 14, weight: .medium))
-            .frame(width: 32, height: 32)
             .overlay(alignment: .topTrailing) {
                 if store.unreadNotificationCount > 0 {
                     Circle()
                         .fill(.red)
                         .frame(width: 8, height: 8)
-                        .offset(x: -4, y: 4)
+                        .offset(x: 5, y: -5)
                 }
             }
     }
 
-    private var profileIcon: some View {
-        Image(systemName: "person")
-            .font(.system(size: 14, weight: .medium))
-            .frame(width: 32, height: 32)
+    /// Circular profile picture that fills its glass button edge-to-edge (no inner padding).
+    private var profileAvatar: some View {
+        ToolbarProfileAvatar(photoURL: auth.photoURL, size: 42)
+            .glassEffect(.regular.interactive(), in: .circle)
     }
 
     // MARK: - Import helpers
@@ -388,7 +394,7 @@ struct HomeView: View {
 
                 if fileSize > 0, fileSize > store.freeStorageBytes {
                     let name = url.deletingPathExtension().lastPathComponent
-                    importError = "\"\(name)\" is too large for your remaining storage (\(store.formattedFreeStorage) free). Free up space in Settings → Storage & Sync."
+                    store.presentStorageUpsell(.uploadTooLarge(fileName: name))
                     continue
                 }
 
@@ -412,7 +418,7 @@ struct HomeView: View {
 
                 if fileSize > 0, fileSize > store.freeStorageBytes {
                     let name = url.deletingPathExtension().lastPathComponent
-                    importError = "\"\(name)\" is too large for your remaining storage (\(store.formattedFreeStorage) free). Free up space in Settings → Storage & Sync."
+                    store.presentStorageUpsell(.uploadTooLarge(fileName: name))
                     continue
                 }
 
@@ -511,5 +517,48 @@ private struct ProjectCard: View {
             player.play(track: first, in: project)
         }
         playHapticTick &+= 1
+    }
+}
+
+// MARK: - Toolbar Profile Avatar
+
+/// Circular avatar for the toolbar profile button. Renders the user's Firebase
+/// photo edge-to-edge with a circular avatar placeholder fallback (no inner padding).
+private struct ToolbarProfileAvatar: View {
+    let photoURL: URL?
+    var size: CGFloat = 34
+
+    var body: some View {
+        Group {
+            if let photoURL {
+                AsyncImage(url: photoURL) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image
+                            .resizable()
+                            .scaledToFill()
+                    case .failure:
+                        placeholder
+                    default:
+                        placeholder
+                    }
+                }
+            } else {
+                placeholder
+            }
+        }
+        .frame(width: size, height: size)
+        .clipShape(Circle())
+        .contentShape(Circle())
+    }
+
+    private var placeholder: some View {
+        ZStack {
+            Circle()
+                .fill(Color(.secondarySystemBackground))
+            Image(systemName: "person.fill")
+                .font(.system(size: size * 0.42, weight: .medium))
+                .foregroundStyle(Color(.tertiaryLabel))
+        }
     }
 }

@@ -33,6 +33,12 @@ enum CloudPaths {
         userDocument(userID: userID).collection("private").document(docID)
     }
 
+    /// Server-maintained storage usage/quota state, written only by the
+    /// storage-limit Cloud Functions. `users/{userID}/storage/state`.
+    static func storageStateDocument(userID: String) -> DocumentReference {
+        userDocument(userID: userID).collection("storage").document("state")
+    }
+
     // MARK: - Notifications
 
     /// In-app notifications addressed to a user: `users/{userID}/notifications`.

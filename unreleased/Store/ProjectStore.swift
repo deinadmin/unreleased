@@ -38,6 +38,7 @@ final class ProjectStore {
 
     private var syncService: ProjectSyncService?
     private var planService: UserPlanService?
+    private var storageService: StorageEnforcementService?
     private var profileService: UserProfileService?
     private var sharedSyncService: SharedProjectSyncService?
     private var notificationsService: NotificationsService?
@@ -56,6 +57,19 @@ final class ProjectStore {
     // MARK: - Plan
 
     var currentPlan: UserPlan = .default
+
+    // MARK: - Storage upsell
+
+    /// Non-nil while the storage upsell sheet should be presented. Observed at the
+    /// app root, which shows `StorageUpsellSheet`. Set via `presentStorageUpsell`.
+    var storageUpsell: StorageUpsellContext? = nil
+
+    /// Presents the storage upsell for the given reason (deduped so a reason that's
+    /// already on screen isn't re-presented).
+    func presentStorageUpsell(_ reason: StorageUpsellContext.Reason) {
+        guard storageUpsell?.reason != reason else { return }
+        storageUpsell = StorageUpsellContext(reason: reason)
+    }
 
     // MARK: - Profile / Username
 
@@ -157,6 +171,22 @@ final class ProjectStore {
         return totalUsedStorageBytes < limit
     }
 
+    /// True when the library already exceeds the plan limit — typically after a
+    /// downgrade. Existing tracks are kept, but cloud streaming is paused until
+    /// the user frees up enough space to get back under the limit.
+    var isOverStorageLimit: Bool {
+        guard let limit = storageLimitBytes else { return false }
+        return totalUsedStorageBytes > limit
+    }
+
+    /// Whether adding `additionalBytes` would still fit within the plan limit.
+    /// Used to gate uploads so a well-behaved client never trips the server-side
+    /// enforcement (which would otherwise delete the upload and prompt an upsell).
+    func canStore(additionalBytes: Int64) -> Bool {
+        guard let limit = storageLimitBytes else { return true }
+        return totalUsedStorageBytes + max(0, additionalBytes) <= limit
+    }
+
     var formattedTotalUsed: String {
         ByteCountFormatter.string(fromByteCount: totalUsedStorageBytes, countStyle: .file)
     }
@@ -183,6 +213,9 @@ final class ProjectStore {
     func configureSync(userID: String?) {
         planService?.stop()
         planService = nil
+
+        storageService?.stop()
+        storageService = nil
 
         profileService?.stop()
         profileService = nil
@@ -215,6 +248,18 @@ final class ProjectStore {
         plan.start(userID: userID) { [weak self] updated in
             self?.currentPlan = updated
         }
+
+        // Server-side quota enforcement backstop: surfaces an upsell when the
+        // Cloud Function rejects an over-limit upload (e.g. from a tampered app).
+        let storage = StorageEnforcementService()
+        storageService = storage
+        storage.start(
+            userID: userID,
+            onState: { _ in },
+            onRejection: { [weak self] in
+                self?.presentStorageUpsell(.serverBlocked)
+            }
+        )
 
         let profile = UserProfileService()
         profileService = profile
@@ -253,6 +298,7 @@ final class ProjectStore {
             self?.updateSyncStatus()
         }
         service.usernameProvider = { [weak self] in self?.currentUsername }
+        service.canUploadAudioProvider = { [weak self] in !(self?.isOverStorageLimit ?? false) }
 
         syncService = service
         service.start()
@@ -632,6 +678,14 @@ final class ProjectStore {
 
     func downloadTrack(_ track: Track, in projectID: UUID) {
         guard !isDownloading(track.id), !isTrackDownloaded(track) else { return }
+
+        // Over the storage limit (e.g. after a downgrade): block pulling more
+        // data down from the cloud until the user frees up space. Already-cached
+        // tracks can still be pinned offline.
+        if isOverStorageLimit, !hasCachedAudio(for: track) {
+            presentStorageUpsell(.overLimitPlayback)
+            return
+        }
 
         downloadTasks[track.id]?.cancel()
         downloadTasks[track.id] = Task { @MainActor in

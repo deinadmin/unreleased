@@ -13,7 +13,7 @@ struct SaveInSheet: View {
     @State private var searchText = ""
     @State private var isShowingCreate = false
     @State private var isSaving = false
-    @State private var showStorageLimitAlert = false
+    @State private var storageUpsell: StorageUpsellContext?
 
     private var ownerLabel: String {
         if let email = auth.accountLabel,
@@ -59,10 +59,11 @@ struct SaveInSheet: View {
                 saveToProject(project)
             }
         }
-        .alert("Storage Full", isPresented: $showStorageLimitAlert) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text("You've used all \(store.formattedStorageLimit) of your storage. Delete some tracks to free up space.")
+        .sheet(item: $storageUpsell) { context in
+            StorageUpsellSheet(context: context) {
+                onBack()
+            }
+            .environment(store)
         }
     }
 
@@ -115,7 +116,7 @@ struct SaveInSheet: View {
             if store.hasStorageCapacity {
                 isShowingCreate = true
             } else {
-                showStorageLimitAlert = true
+                storageUpsell = StorageUpsellContext(reason: .uploadFull)
             }
         } label: {
             HStack(spacing: 14) {
@@ -179,7 +180,7 @@ struct SaveInSheet: View {
 
     private func saveToProject(_ project: Project) {
         guard store.hasStorageCapacity else {
-            showStorageLimitAlert = true
+            storageUpsell = StorageUpsellContext(reason: .uploadFull)
             return
         }
 
@@ -188,7 +189,8 @@ struct SaveInSheet: View {
         if accessing { audioURL.stopAccessingSecurityScopedResource() }
 
         if fileSize > 0, fileSize > store.freeStorageBytes {
-            showStorageLimitAlert = true
+            let name = audioURL.deletingPathExtension().lastPathComponent
+            storageUpsell = StorageUpsellContext(reason: .uploadTooLarge(fileName: name))
             return
         }
 

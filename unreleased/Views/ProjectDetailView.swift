@@ -18,7 +18,6 @@ struct ProjectDetailView: View {
     @State private var isShowingEdit = false
     @State private var isShowingShare = false
     @State private var importError: String? = nil
-    @State private var showStorageLimitAlert = false
     @State private var trackForInfo: Track? = nil
     @State private var showNavTitle = false
     @State private var showDeleteConfirm = false
@@ -107,11 +106,6 @@ struct ProjectDetailView: View {
             } else {
                 Text("This will permanently delete the project and all of its tracks.")
             }
-        }
-        .alert("Storage Full", isPresented: $showStorageLimitAlert) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text("You've used all \(store.formattedStorageLimit) of your storage. Delete some tracks to free up space.")
         }
         .alert("Import Error", isPresented: Binding(get: { importError != nil }, set: { if !$0 { importError = nil } })) {
             Button("OK", role: .cancel) {}
@@ -209,7 +203,7 @@ struct ProjectDetailView: View {
         if store.hasStorageCapacity {
             isShowingDocumentPicker = true
         } else {
-            showStorageLimitAlert = true
+            store.presentStorageUpsell(.uploadFull)
         }
     }
 
@@ -314,7 +308,7 @@ struct ProjectDetailView: View {
                             if store.hasStorageCapacity {
                                 isShowingDocumentPicker = true
                             } else {
-                                showStorageLimitAlert = true
+                                store.presentStorageUpsell(.uploadFull)
                             }
                         } label: {
                             Label("Add tracks", systemImage: "plus")
@@ -355,7 +349,7 @@ struct ProjectDetailView: View {
 
                 if fileSize > 0, fileSize > store.freeStorageBytes {
                     let name = url.deletingPathExtension().lastPathComponent
-                    importError = "\"\(name)\" is too large for your remaining storage (\(store.formattedFreeStorage) free). Free up space in Settings → Storage & Sync."
+                    store.presentStorageUpsell(.uploadTooLarge(fileName: name))
                     continue
                 }
 

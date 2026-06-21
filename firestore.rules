@@ -33,6 +33,16 @@ service cloud.firestore {
         allow read, write: if request.auth != null && request.auth.uid == userId;
       }
 
+      // ── Storage enforcement state ──────────────────────────────────────────
+      // Server-maintained usage/quota doc (`storage/state`) written exclusively by
+      // the storage-limit Cloud Functions. The owner may read it to drive usage
+      // displays and upsell prompts; clients can never write it, so a tampered app
+      // cannot fake its usage or clear a quota rejection.
+      match /storage/{docId} {
+        allow read: if request.auth != null && request.auth.uid == userId;
+        allow write: if false;
+      }
+
       // ── Notifications ──────────────────────────────────────────────────────
       // The recipient reads/updates (mark read)/deletes their own notifications.
       // Any authenticated user may create a notification addressed to this user,

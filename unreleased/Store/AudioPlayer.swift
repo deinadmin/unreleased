@@ -88,6 +88,14 @@ final class AudioPlayer {
             return
         }
 
+        // Over the storage limit (e.g. after a downgrade): streaming uncached cloud
+        // tracks is paused until the user frees up space. Cached/downloaded tracks
+        // remain playable, so only gate when there's no local copy.
+        if !hasLocal, store.isOverStorageLimit {
+            store.presentStorageUpsell(.overLimitPlayback)
+            return
+        }
+
         if !fromQueue {
             contextProjectID = project.id
             contextTrackID = track.id

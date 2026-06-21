@@ -26,6 +26,10 @@ final class ProjectSyncService {
     private let projectRemover: ProjectRemover
     /// Provides the current user's username for embedding in project pushes.
     var usernameProvider: (() -> String?)? = nil
+    /// Returns false when the library is over the plan's storage limit, so audio
+    /// uploads are held back rather than uploaded and immediately rejected by the
+    /// server-side quota enforcement (which would also loop and re-prompt upsells).
+    var canUploadAudioProvider: (() -> Bool)? = nil
 
     private var listener: ListenerRegistration?
     private var pushTask: Task<Void, Never>?
@@ -289,6 +293,10 @@ final class ProjectSyncService {
     // MARK: - Audio upload
 
     private func uploadAudio(projectID: UUID, track: Track) async {
+        // Hold uploads while over the storage limit; the server would reject them
+        // anyway. They resume automatically once the user frees up space.
+        if let canUploadAudioProvider, !canUploadAudioProvider() { return }
+
         let localURL = audioDirectory.appendingPathComponent(track.fileName)
         guard FileManager.default.fileExists(atPath: localURL.path) else { return }
 
