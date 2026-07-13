@@ -112,6 +112,7 @@ struct ProjectDetailView: View {
         } message: {
             Text(importError ?? "")
         }
+        .importingOverlay(isPresented: isImporting)
         .task(id: projectID) {
             await resolveOwnerLabel()
             await resolveLinkEnabled()
@@ -286,7 +287,8 @@ struct ProjectDetailView: View {
                     } label: {
                         Image(systemName: "square.and.arrow.up")
                             .font(.system(size: 14, weight: .medium))
-                            .frame(width: 32, height: 32)
+                            .frame(width: 44, height: 44)
+                            .contentShape(Rectangle())
                     }
                 }
 
@@ -299,7 +301,8 @@ struct ProjectDetailView: View {
                 } label: {
                     Image(systemName: "magnifyingglass")
                         .font(.system(size: 14, weight: .medium))
-                        .frame(width: 32, height: 32)
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
                 }
 
                 Menu {
@@ -331,7 +334,8 @@ struct ProjectDetailView: View {
                 } label: {
                     Image(systemName: "ellipsis")
                         .font(.system(size: 14, weight: .medium))
-                        .frame(width: 32, height: 32)
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
                 }
             }
         }
@@ -342,10 +346,11 @@ struct ProjectDetailView: View {
     private func importTracks(urls: [URL], into project: Project) {
         isImporting = true
         Task {
+            // Let the importing overlay paint before any work begins.
+            await Task.yield()
+            var imported: [Track] = []
             for url in urls {
-                let accessing = url.startAccessingSecurityScopedResource()
-                let fileSize = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int64) ?? 0
-                if accessing { url.stopAccessingSecurityScopedResource() }
+                let fileSize = await store.fileSize(at: url)
 
                 if fileSize > 0, fileSize > store.freeStorageBytes {
                     let name = url.deletingPathExtension().lastPathComponent
@@ -355,11 +360,12 @@ struct ProjectDetailView: View {
 
                 do {
                     let track = try await store.importAudioFile(from: url)
-                    store.addTrack(track, to: project.id)
+                    imported.append(track)
                 } catch {
                     importError = error.localizedDescription
                 }
             }
+            store.addTracks(imported, to: project.id)
             isImporting = false
         }
     }

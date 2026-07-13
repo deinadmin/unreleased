@@ -45,6 +45,9 @@ final class ProjectStore {
     var currentUserID: String?
     private var downloadTasks: [UUID: Task<Void, Never>] = [:]
     private var suppressSync = false
+    /// Serial queue for the (potentially large) JSON encode + atomic write so it
+    /// never blocks the main thread — e.g. while importing tracks with waveforms.
+    private let persistQueue = DispatchQueue(label: "ProjectStore.persist", qos: .utility)
     /// Stable `UIImage` instances so SwiftUI doesn't crossfade covers on unrelated state updates.
     private var coverImageCache: [String: UIImage] = [:]
     /// Kept weak so store updates can refresh lock-screen / Control Center metadata.
@@ -297,6 +300,9 @@ final class ProjectStore {
         service.onActivityChanged = { [weak self] in
             self?.updateSyncStatus()
         }
+        service.onCoverDownloaded = { [weak self] projectID in
+            self?.handleCoverDownloaded(projectID: projectID)
+        }
         service.usernameProvider = { [weak self] in self?.currentUsername }
         service.canUploadAudioProvider = { [weak self] in !(self?.isOverStorageLimit ?? false) }
 
@@ -467,7 +473,12 @@ final class ProjectStore {
         let fileName = project.coverImageFileName ?? "\(project.id.uuidString).jpg"
         let destination = coverImagesURL.appendingPathComponent(fileName)
         guard !FileManager.default.fileExists(atPath: destination.path) else { return }
-        try? await AudioFileCache.shared.download(storagePath: storagePath, to: destination)
+        do {
+            try await AudioFileCache.shared.download(storagePath: storagePath, to: destination)
+            handleCoverDownloaded(projectID: project.id)
+        } catch {
+            print("ProjectStore: shared cover download failed for \(project.id) — \(error)")
+        }
     }
 
     // MARK: - Track CRUD
@@ -478,6 +489,20 @@ final class ProjectStore {
         projects[index].updatedDate = Date()
         save()
         syncService?.enqueueAudioUpload(projectID: projectID, track: track)
+    }
+
+    /// Appends several tracks in a single mutation + save. Used by import flows so
+    /// the project list re-renders (and persists) once instead of once per track,
+    /// keeping the main thread free while an import is in progress.
+    func addTracks(_ tracks: [Track], to projectID: UUID) {
+        guard !tracks.isEmpty,
+              let index = projects.firstIndex(where: { $0.id == projectID }) else { return }
+        projects[index].tracks.append(contentsOf: tracks)
+        projects[index].updatedDate = Date()
+        save()
+        for track in tracks {
+            syncService?.enqueueAudioUpload(projectID: projectID, track: track)
+        }
     }
 
     func deleteTrack(_ track: Track, from projectID: UUID) {
@@ -585,6 +610,19 @@ final class ProjectStore {
         return project.gradient
     }
 
+    /// Called by the sync service after a cover image file has been written to disk.
+    /// Loading the image into the cache mutates an @Observable tracked property,
+    /// which causes SwiftUI to re-render any view that previously got a nil cover.
+    private func handleCoverDownloaded(projectID: UUID) {
+        guard let project = projects.first(where: { $0.id == projectID }),
+              let fileName = project.coverImageFileName
+        else { return }
+        // Remove any stale cache entry (nil was never cached, but guard against a
+        // race where a previous call stored a partial result), then re-load from disk.
+        coverImageCache.removeValue(forKey: fileName)
+        _ = loadCoverImage(fileName: fileName)
+    }
+
     func enqueueCoverUpload(projectID: UUID) {
         syncService?.enqueueCoverUpload(projectID: projectID)
     }
@@ -604,18 +642,36 @@ final class ProjectStore {
 
     // MARK: - Audio Import
 
-    func importAudioFile(from sourceURL: URL) async throws -> Track {
-        let accessing = sourceURL.startAccessingSecurityScopedResource()
-        defer { if accessing { sourceURL.stopAccessingSecurityScopedResource() } }
+    /// Reads a (possibly security-scoped / iCloud) file's size off the main actor.
+    /// Touching attributes of a not-yet-materialized cloud file can block, so this
+    /// must never run on the main thread during an import.
+    func fileSize(at url: URL) async -> Int64 {
+        await Task.detached(priority: .userInitiated) {
+            let accessing = url.startAccessingSecurityScopedResource()
+            defer { if accessing { url.stopAccessingSecurityScopedResource() } }
+            let size = try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int64
+            return (size ?? nil) ?? 0
+        }.value
+    }
 
+    func importAudioFile(from sourceURL: URL) async throws -> Track {
         let ext = sourceURL.pathExtension.lowercased()
         let fileName = "\(UUID().uuidString).\(ext)"
+        // Compute destinations on the main actor, then perform the blocking
+        // file I/O off the main actor so the UI never hangs during import.
         let destURL = audioFilesURL.appendingPathComponent(fileName)
+        let downloadsFolder = downloadsURL
+        let downloadDestURL = downloadsFolder.appendingPathComponent(fileName)
 
-        try FileManager.default.copyItem(at: sourceURL, to: destURL)
+        // Copy the source into the app's audio store (heavy I/O — off main).
+        let fileSize: Int64 = try await Task.detached(priority: .userInitiated) {
+            let accessing = sourceURL.startAccessingSecurityScopedResource()
+            defer { if accessing { sourceURL.stopAccessingSecurityScopedResource() } }
 
-        let attrs = try FileManager.default.attributesOfItem(atPath: destURL.path)
-        let fileSize = (attrs[.size] as? Int64) ?? 0
+            try FileManager.default.copyItem(at: sourceURL, to: destURL)
+            let attrs = try FileManager.default.attributesOfItem(atPath: destURL.path)
+            return (attrs[.size] as? Int64) ?? 0
+        }.value
 
         let asset = AVURLAsset(url: destURL)
         let duration: TimeInterval
@@ -631,16 +687,28 @@ final class ProjectStore {
 
         let waveform = await WaveformAnalyzer.analyze(url: destURL, targetBars: 200)
 
-        var track = Track(
+        // Pin a copy into the offline Downloads folder (heavy I/O — off main).
+        let pinned = await Task.detached(priority: .userInitiated) { () -> Bool in
+            do {
+                try FileManager.default.createDirectory(at: downloadsFolder, withIntermediateDirectories: true)
+                if FileManager.default.fileExists(atPath: downloadDestURL.path) {
+                    try FileManager.default.removeItem(at: downloadDestURL)
+                }
+                try FileManager.default.copyItem(at: destURL, to: downloadDestURL)
+                return true
+            } catch {
+                return false
+            }
+        }.value
+
+        return Track(
             title: title,
             fileName: fileName,
             fileSize: fileSize,
             duration: duration,
             waveformData: waveform.isEmpty ? nil : waveform,
-            isDownloaded: true
+            isDownloaded: pinned
         )
-        try? pinTrackToDownloads(&track)
-        return track
     }
 
     // MARK: - Downloads
@@ -990,11 +1058,16 @@ final class ProjectStore {
     }
 
     private func persistLocalOnly() {
-        do {
-            let data = try JSONEncoder().encode(projects)
-            try data.write(to: dataURL, options: .atomicWrite)
-        } catch {
-            print("ProjectStore: save failed — \(error)")
+        // Snapshot the value-type projects and encode/write off the main thread.
+        let snapshot = projects
+        let url = dataURL
+        persistQueue.async {
+            do {
+                let data = try JSONEncoder().encode(snapshot)
+                try data.write(to: url, options: .atomicWrite)
+            } catch {
+                print("ProjectStore: save failed — \(error)")
+            }
         }
         mirrorProjectsToAppGroup()
     }
@@ -1018,7 +1091,8 @@ final class ProjectStore {
     /// account starts from a clean slate rather than seeing the previous user's projects.
     func clearLocalLibrary() {
         projects = []
-        try? FileManager.default.removeItem(at: dataURL)
+        let url = dataURL
+        persistQueue.async { try? FileManager.default.removeItem(at: url) }
         AudioImportBridge.mirrorProjects([])
     }
 

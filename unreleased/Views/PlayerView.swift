@@ -512,12 +512,18 @@ struct PlayerView: View {
                     RoundedRectangle(cornerRadius: 18, style: .continuous)
                         .fill(.white)
                         .frame(width: 62, height: 62)
-                    Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
-                        .font(.system(size: 26, weight: .bold))
-                        .foregroundStyle(.black)
-                        .animation(nil, value: player.isPlaying)
+                    if player.isLoadingAudio {
+                        TwoToneCircleSpinner(diameter: 28, lineWidth: 2.5)
+                            .environment(\.colorScheme, .light)
+                    } else {
+                        Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
+                            .font(.system(size: 26, weight: .bold))
+                            .foregroundStyle(.black)
+                            .animation(nil, value: player.isPlaying)
+                    }
                 }
             }
+            .disabled(player.isLoadingAudio)
             .sensoryFeedback(.impact(weight: .medium), trigger: player.isPlaying)
 
             Spacer()
@@ -1067,17 +1073,8 @@ private struct HeroCoverView: View {
                 // Mini-bar play/pause icon (or loading indicator).
                 Group {
                     if isLoadingAudio {
-                        Group {
-                            if loadingProgress > 0 {
-                                ProgressView(value: loadingProgress)
-                                    .progressViewStyle(.circular)
-                            } else {
-                                ProgressView()
-                                    .progressViewStyle(.circular)
-                            }
-                        }
-                        .tint(.white)
-                        .scaleEffect(0.9)
+                        TwoToneCircleSpinner(diameter: 18, lineWidth: 2)
+                            .environment(\.colorScheme, .dark)
                     } else {
                         Image(systemName: isPlaying ? "pause.fill" : "play.fill")
                             .font(.system(size: 14, weight: .bold))

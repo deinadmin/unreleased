@@ -43,6 +43,8 @@ final class ProjectSyncService {
     private var isPushing = false
 
     var onActivityChanged: (@MainActor () -> Void)?
+    /// Called on the main actor after a cover image has been successfully downloaded to disk.
+    var onCoverDownloaded: (@MainActor (UUID) -> Void)?
 
     /// True while metadata is pushing, uploads are running, or cloud work is still pending.
     var isActive: Bool {
@@ -370,6 +372,7 @@ final class ProjectSyncService {
 
         do {
             try await AudioFileCache.shared.download(storagePath: storagePath, to: destination)
+            onCoverDownloaded?(projectID)
         } catch {
             failedCoverStoragePaths.insert(storagePath)
             print("ProjectSyncService: cover download failed for \(projectID) — \(error)")

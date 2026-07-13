@@ -63,6 +63,43 @@ final class PushNotificationManager: NSObject {
             "updatedAt": Timestamp(date: Date()),
         ], merge: true)
     }
+
+    struct Preferences {
+        var enabled: Bool
+        var projectInvites: Bool
+
+        static let defaults = Preferences(enabled: true, projectInvites: true)
+    }
+
+    /// Loads the server-enforced notification preferences for the signed-in user.
+    /// Missing values default to enabled so existing users keep their current behavior.
+    func loadPreferences() async -> Preferences {
+        guard let uid = Auth.auth().currentUser?.uid else { return .defaults }
+        do {
+            let snapshot = try await CloudPaths.userPrivateDocument(userID: uid, docID: "push").getDocument()
+            return Preferences(
+                enabled: snapshot.get("notificationsEnabled") as? Bool ?? true,
+                projectInvites: snapshot.get("projectInvitesEnabled") as? Bool ?? true
+            )
+        } catch {
+            print("PushNotificationManager: preference load failed — \(error)")
+            return .defaults
+        }
+    }
+
+    /// Persists preferences alongside the token read by the push Cloud Function.
+    func savePreferences(_ preferences: Preferences) async {
+        guard let uid = Auth.auth().currentUser?.uid else { return }
+        do {
+            try await CloudPaths.userPrivateDocument(userID: uid, docID: "push").setData([
+                "notificationsEnabled": preferences.enabled,
+                "projectInvitesEnabled": preferences.projectInvites,
+                "updatedAt": Timestamp(date: Date()),
+            ], merge: true)
+        } catch {
+            print("PushNotificationManager: preference save failed — \(error)")
+        }
+    }
 }
 
 // MARK: - UNUserNotificationCenterDelegate

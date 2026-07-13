@@ -29,6 +29,10 @@ struct ProjectShareSheet: View {
     @State private var invitingUIDs: Set<String> = []
     @FocusState private var searchFocused: Bool
 
+    // Remove-listener / cancel-invite confirmation
+    @State private var inviteeToRemove: InviteeInfo?
+    @State private var pendingToCancel: PendingInviteInfo?
+
     private var deepLinkOwnerID: String? {
         project.ownerID ?? auth.signedInUserID
     }
@@ -66,6 +70,36 @@ struct ProjectShareSheet: View {
             .navigationTitle("Share Project")
             .navigationSubtitle(project.name)
             .navigationBarTitleDisplayMode(.inline)
+        }
+        .alert("Remove Listener", isPresented: Binding(
+            get: { inviteeToRemove != nil },
+            set: { if !$0 { inviteeToRemove = nil } }
+        )) {
+            if let invitee = inviteeToRemove {
+                Button("Remove @\(invitee.username)", role: .destructive) {
+                    Task { await removeInvitee(invitee) }
+                }
+            }
+            Button("Cancel", role: .cancel) { inviteeToRemove = nil }
+        } message: {
+            if let invitee = inviteeToRemove {
+                Text("@\(invitee.username) will no longer have access to this project.")
+            }
+        }
+        .alert("Cancel Invite", isPresented: Binding(
+            get: { pendingToCancel != nil },
+            set: { if !$0 { pendingToCancel = nil } }
+        )) {
+            if let pending = pendingToCancel {
+                Button("Cancel Invite", role: .destructive) {
+                    Task { await cancelInvite(pending) }
+                }
+            }
+            Button("Keep Invite", role: .cancel) { pendingToCancel = nil }
+        } message: {
+            if let pending = pendingToCancel {
+                Text("The invite sent to @\(pending.username) will be withdrawn.")
+            }
         }
         .blur(radius: showQRCode ? 20 : 0)
         .overlay {
@@ -428,7 +462,7 @@ struct ProjectShareSheet: View {
             Spacer()
 
             Button {
-                Task { await cancelInvite(pending) }
+                pendingToCancel = pending
             } label: {
                 Image(systemName: "xmark.circle")
                     .font(.system(size: 16))
@@ -457,7 +491,7 @@ struct ProjectShareSheet: View {
             Spacer()
 
             Button {
-                Task { await removeInvitee(invitee) }
+                inviteeToRemove = invitee
             } label: {
                 Image(systemName: "minus.circle")
                     .font(.system(size: 16))

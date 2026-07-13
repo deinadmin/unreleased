@@ -14,6 +14,9 @@ struct ContentView: View {
     @State private var searchState = AppSearchState()
     @State private var showingSaveInSheet = false
     @State private var pendingInvite: PendingInvite? = nil
+    /// Tracks the live layout height of the PlayerView so the toast can be
+    /// positioned above the expanded card with the same spacing used for the mini player.
+    @State private var playerViewHeight: CGFloat = 0
 
     private var needsUsername: Bool {
         auth.isSignedIn && store.hasCheckedUsername && store.currentUsername == nil
@@ -43,7 +46,12 @@ struct ContentView: View {
     }
 
     private var toastBottomInset: CGFloat {
-        showsBottomChrome
+        // When the full-screen player is open, position the toast above its top
+        // edge using the measured card height (same spacing as above the mini player).
+        if player.isShowingNowPlaying {
+            return playerViewHeight + toastSpacingAbovePlayer
+        }
+        return showsBottomChrome
             ? miniPlayerReservedHeight + toastSpacingAbovePlayer
             : toastBottomInsetWithoutPlayer
     }
@@ -112,11 +120,11 @@ struct ContentView: View {
                 }
             }
 
-            if let toast = toastCenter.toast, !player.isShowingNowPlaying, !searchState.isActive {
+            if let toast = toastCenter.toast, !searchState.isActive {
                 PlayerToastBanner(toast: toast)
                     .padding(.bottom, toastBottomInset)
                     .frame(maxWidth: .infinity)
-                    .zIndex(2)
+                    .zIndex(11)
                     .transition(
                         .asymmetric(
                             insertion: .opacity.combined(with: .offset(y: 10)),
@@ -385,6 +393,7 @@ struct ContentView: View {
                     .environment(store)
                     .frame(maxWidth: .infinity, alignment: .bottom)
                     .zIndex(player.isShowingNowPlaying ? 10 : 1)
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { playerViewHeight = $0 }
                     .transition(
                         .asymmetric(
                             insertion: .opacity.combined(with: .offset(y: 18)),

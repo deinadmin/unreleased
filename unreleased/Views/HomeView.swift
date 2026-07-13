@@ -29,6 +29,7 @@ struct HomeView: View {
 
     @State private var editingProject: Project?
     @State private var projectAddingTracks: Project?
+    @State private var projectPendingShare: Project?
     @State private var projectPendingDelete: Project?
     @State private var projectPendingLeave: Project?
     @State private var isImportingToExisting = false
@@ -113,6 +114,9 @@ struct HomeView: View {
         .sheet(isPresented: $isShowingNotifications) {
             NavigationStack {
                 NotificationsView()
+                    .navigationDestination(for: ProfileRoute.self) { _ in
+                        ProfileView()
+                    }
             }
             .navigationTransition(
                 .zoom(sourceID: ChromeZoom.notifications, in: chromeZoomNamespace)
@@ -143,6 +147,9 @@ struct HomeView: View {
                 },
                 onCancel: { projectAddingTracks = nil }
             )
+        }
+        .sheet(item: $projectPendingShare) { project in
+            ProjectShareSheet(project: project)
         }
         .alert(
             "Delete Project?",
@@ -183,6 +190,7 @@ struct HomeView: View {
         } message: {
             Text(importError ?? "")
         }
+        .importingOverlay(isPresented: isImporting || isImportingToExisting)
     }
 
     // MARK: - Empty State
@@ -270,6 +278,12 @@ struct HomeView: View {
                                 Label("Edit", systemImage: "pencil")
                             }
 
+                            Button {
+                                projectPendingShare = project
+                            } label: {
+                                Label("Share", systemImage: "square.and.arrow.up")
+                            }
+
                             Button(role: .destructive) {
                                 projectPendingDelete = project
                             } label: {
@@ -297,6 +311,7 @@ struct HomeView: View {
                 } label: {
                     Image(systemName: "plus")
                         .font(.system(size: 14, weight: .semibold))
+                        .contentShape(Circle())
                 }
                 .matchedTransitionSource(
                     id: CreateProjectZoom.sourceID,
@@ -342,6 +357,8 @@ struct HomeView: View {
             searchState.activateOrFocus(scope: .library, placeholder: "Search your library")
         } label: {
             Image(systemName: "magnifyingglass")
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
         }
     }
 
@@ -373,6 +390,8 @@ struct HomeView: View {
                         .offset(x: 5, y: -5)
                 }
             }
+            .frame(width: 44, height: 44)
+            .contentShape(Rectangle())
     }
 
     /// Circular profile picture that fills its glass button edge-to-edge (no inner padding).
@@ -387,10 +406,11 @@ struct HomeView: View {
         guard !urls.isEmpty else { return }
         isImportingToExisting = true
         Task {
+            // Let the importing overlay paint before any work begins.
+            await Task.yield()
+            var imported: [Track] = []
             for url in urls {
-                let accessing = url.startAccessingSecurityScopedResource()
-                let fileSize = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int64) ?? 0
-                if accessing { url.stopAccessingSecurityScopedResource() }
+                let fileSize = await store.fileSize(at: url)
 
                 if fileSize > 0, fileSize > store.freeStorageBytes {
                     let name = url.deletingPathExtension().lastPathComponent
@@ -399,9 +419,10 @@ struct HomeView: View {
                 }
 
                 if let track = try? await store.importAudioFile(from: url) {
-                    store.addTrack(track, to: project.id)
+                    imported.append(track)
                 }
             }
+            store.addTracks(imported, to: project.id)
             isImportingToExisting = false
         }
     }
@@ -410,11 +431,11 @@ struct HomeView: View {
         guard !urls.isEmpty else { return }
         isImporting = true
         Task {
+            // Let the importing overlay paint before any work begins.
+            await Task.yield()
             var tracks: [Track] = []
             for url in urls {
-                let accessing = url.startAccessingSecurityScopedResource()
-                let fileSize = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int64) ?? 0
-                if accessing { url.stopAccessingSecurityScopedResource() }
+                let fileSize = await store.fileSize(at: url)
 
                 if fileSize > 0, fileSize > store.freeStorageBytes {
                     let name = url.deletingPathExtension().lastPathComponent
@@ -524,7 +545,7 @@ private struct ProjectCard: View {
 
 /// Circular avatar for the toolbar profile button. Renders the user's Firebase
 /// photo edge-to-edge with a circular avatar placeholder fallback (no inner padding).
-private struct ToolbarProfileAvatar: View {
+struct ToolbarProfileAvatar: View {
     let photoURL: URL?
     var size: CGFloat = 34
 
@@ -553,12 +574,7 @@ private struct ToolbarProfileAvatar: View {
     }
 
     private var placeholder: some View {
-        ZStack {
-            Circle()
-                .fill(Color(.secondarySystemBackground))
-            Image(systemName: "person.fill")
-                .font(.system(size: size * 0.42, weight: .medium))
-                .foregroundStyle(Color(.tertiaryLabel))
-        }
+        Image(systemName: "person.fill")
+            .font(.system(size: size * 0.42, weight: .medium))
     }
 }

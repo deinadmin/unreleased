@@ -34,6 +34,19 @@ export const sendNotificationPush = onDocumentCreated(
       return;
     }
 
+    // Missing settings preserve notification behavior for existing users.
+    if (tokenSnap.get("notificationsEnabled") === false) {
+      logger.info(`Notifications disabled for user ${userId}; skipping push.`);
+      return;
+    }
+    if (
+      data.type === "projectInvite" &&
+      tokenSnap.get("projectInvitesEnabled") === false
+    ) {
+      logger.info(`Project invite pushes disabled for user ${userId}; skipping push.`);
+      return;
+    }
+
     const { title, body } = buildMessage(data);
 
     try {

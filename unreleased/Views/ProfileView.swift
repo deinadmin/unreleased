@@ -228,6 +228,7 @@ struct ProfileView: View {
                 .background(Color(.secondarySystemBackground), in: Capsule())
         }
         .buttonStyle(.scale)
+        .padding(.bottom, 30)
     }
 
     private func signOut() {

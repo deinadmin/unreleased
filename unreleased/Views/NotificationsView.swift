@@ -3,6 +3,7 @@ import SwiftUI
 struct NotificationsView: View {
     @Environment(ProjectStore.self) private var store
     @Environment(ProjectLinkRouter.self) private var linkRouter
+    @Environment(AuthManager.self) private var auth
     @Environment(\.dismiss) private var dismiss
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
@@ -71,12 +72,24 @@ struct NotificationsView: View {
     private var toolbarContent: some ToolbarContent {
         if store.unreadNotificationCount > 0 {
             ToolbarItem(placement: .topBarTrailing) {
-                Button("Mark all read") {
+                Button {
                     store.markAllNotificationsRead()
+                } label: {
+                    Label("Mark all read", systemImage: "checkmark.circle.fill")
                 }
                 .font(.system(size: 14, weight: .medium))
             }
+            ToolbarSpacer(.fixed, placement: .topBarTrailing)
         }
+
+        ToolbarItem(placement: .topBarTrailing) {
+            NavigationLink(value: ProfileRoute()) {
+                ToolbarProfileAvatar(photoURL: auth.photoURL, size: 42)
+                    .glassEffect(.regular.interactive(), in: .circle)
+            }
+            .buttonStyle(.plain)
+        }
+        .sharedBackgroundVisibility(.hidden)
     }
 
     // MARK: - Actions
