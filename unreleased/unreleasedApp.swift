@@ -8,6 +8,7 @@ struct unreleasedApp: App {
     @Environment(\.scenePhase) private var scenePhase
     @UIApplicationDelegateAdaptor(PushAppDelegate.self) private var pushDelegate
     @State private var authManager: AuthManager
+    @State private var profileAvatarStore = ProfileAvatarStore()
     @State private var importManager = AudioFileImportManager()
     @State private var linkRouter = ProjectLinkRouter()
 
@@ -41,7 +42,9 @@ struct unreleasedApp: App {
     var body: some Scene {
         WindowGroup {
             AuthRootView()
+                .tint(.primary)
                 .environment(authManager)
+                .environment(profileAvatarStore)
                 .buttonStyle(.scale)
                 .environment(importManager)
                 .environment(linkRouter)

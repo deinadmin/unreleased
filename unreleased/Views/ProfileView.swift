@@ -5,33 +5,55 @@ struct ProfileView: View {
     @Environment(AuthManager.self) private var auth
     @Environment(ProjectStore.self) private var store
     @Environment(AudioPlayer.self) private var player
+    @Environment(ProfileAvatarStore.self) private var avatarStore
 
     @State private var showSignOutConfirm = false
     @State private var showHelpMail = false
+    @State private var isAvatarOverlayPresented = false
+    @State private var avatarExpansionProgress: CGFloat = 0
+    @State private var avatarSourceFrame: CGRect = .zero
+    @State private var avatarDragOffset: CGSize = .zero
+    @State private var showPhotoPicker = false
+    @State private var isUploadingAvatar = false
+    @State private var avatarUploadProgress: Double = 0
+    @State private var avatarErrorMessage: String?
+    @State private var avatarTapHapticTrigger = 0
 
     private let supportEmail = "me@designedbycarl.de"
     private let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
+    private let avatarDismissThreshold: CGFloat = 120
+    private let avatarDragResistance: CGFloat = 90
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: 0) {
-                header
-                    .padding(.top, 32)
-                    .padding(.bottom, 36)
+        ZStack {
+            ScrollView {
+                VStack(spacing: 0) {
+                    header
+                        .padding(.top, 32)
+                        .padding(.bottom, 36)
 
-                myPlanSection
-                    .padding(.horizontal, 20)
+                    myPlanSection
+                        .padding(.horizontal, 20)
 
-                settingsSection
-                    .padding(.horizontal, 20)
-                    .padding(.top, 24)
+                    settingsSection
+                        .padding(.horizontal, 20)
+                        .padding(.top, 24)
 
-                signOutButton
-                    .padding(.horizontal, 20)
-                    .padding(.top, 32)
-                    .padding(.bottom, 40)
+                    signOutButton
+                        .padding(.horizontal, 20)
+                        .padding(.top, 32)
+                        .padding(.bottom, 40)
+                }
+            }
+            .blur(radius: 14 * avatarExpansionProgress)
+            .allowsHitTesting(!isAvatarOverlayPresented)
+
+            if isAvatarOverlayPresented {
+                expandedAvatarOverlay
+                    .zIndex(1)
             }
         }
+        .sensoryFeedback(.increase, trigger: avatarTapHapticTrigger)
         .navigationTitle("Profile")
         .navigationBarTitleDisplayMode(.inline)
         .alert("Sign Out?", isPresented: $showSignOutConfirm) {
@@ -40,14 +62,38 @@ struct ProfileView: View {
         } message: {
             Text("You’ll need to sign in again to access your library.")
         }
+        .sheet(isPresented: $showPhotoPicker) {
+            SquarePhotoPicker(onImagePicked: uploadAvatar)
+        }
+        .alert("Couldn’t Update Photo", isPresented: avatarErrorBinding) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(avatarErrorMessage ?? "Please try again.")
+        }
     }
 
     // MARK: - Header
 
     private var header: some View {
         VStack(spacing: 6) {
-            ProfileAvatarView(photoURL: auth.photoURL, size: 108)
-                .padding(.bottom, 6)
+            Button {
+                expandAvatar()
+            } label: {
+                ProfileAvatarView(size: 108)
+                    .opacity(isAvatarOverlayPresented ? 0 : 1)
+                    .animation(nil, value: isAvatarOverlayPresented)
+                    .transaction { transaction in
+                        transaction.disablesAnimations = true
+                    }
+                    .onGeometryChange(for: CGRect.self) { proxy in
+                        proxy.frame(in: .global)
+                    } action: { frame in
+                        avatarSourceFrame = frame
+                    }
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Change profile photo")
+            .padding(.bottom, 6)
 
             Text(primaryLabel)
                 .font(.system(size: 22, weight: .bold))
@@ -63,6 +109,197 @@ struct ProfileView: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.horizontal, 20)
+    }
+
+    private var expandedAvatarOverlay: some View {
+        GeometryReader { proxy in
+            let targetSize = min(248, proxy.size.width - 80)
+            let overlayFrame = proxy.frame(in: .global)
+            let sourceCenter = CGPoint(
+                x: avatarSourceFrame.midX - overlayFrame.minX,
+                y: avatarSourceFrame.midY - overlayFrame.minY
+            )
+            let targetCenter = screenCenter(relativeTo: overlayFrame, fallbackSize: proxy.size)
+            let buttonCenter = bottomActionCenter(relativeTo: overlayFrame, fallbackSize: proxy.size)
+            let currentSize = interpolate(from: avatarSourceFrame.width, to: targetSize)
+            let currentScale = currentSize / targetSize
+            let currentCenter = CGPoint(
+                x: interpolate(from: sourceCenter.x, to: targetCenter.x),
+                y: interpolate(from: sourceCenter.y, to: targetCenter.y)
+            )
+            let buttonProgress = min(max((avatarExpansionProgress - 0.58) / 0.42, 0), 1)
+
+            ZStack(alignment: .topLeading) {
+                Button {
+                    avatarTapHapticTrigger += 1
+                    collapseAvatar()
+                } label: {
+                    Color.black
+                        .opacity(0.18 * avatarExpansionProgress)
+                        .ignoresSafeArea()
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Close profile photo")
+
+                ProfileAvatarView(size: targetSize)
+                    .scaleEffect(currentScale)
+                    .shadow(
+                        color: .black.opacity(0.2 * avatarExpansionProgress),
+                        radius: 24 * avatarExpansionProgress,
+                        y: 12 * avatarExpansionProgress
+                    )
+                    .offset(avatarDragOffset)
+                    .position(currentCenter)
+                    .gesture(avatarDismissGesture)
+
+                ProfilePhotoActionButton(
+                    isUploading: isUploadingAvatar,
+                    progress: avatarUploadProgress,
+                    action: { showPhotoPicker = true }
+                )
+                .opacity(buttonProgress)
+                .offset(y: 14 * (1 - buttonProgress))
+                .position(
+                    x: buttonCenter.x,
+                    y: buttonCenter.y
+                )
+            }
+        }
+    }
+
+    private func interpolate(from start: CGFloat, to end: CGFloat) -> CGFloat {
+        start + (end - start) * avatarExpansionProgress
+    }
+
+    private func screenCenter(relativeTo overlayFrame: CGRect, fallbackSize: CGSize) -> CGPoint {
+        let screenBounds = activeWindowScene?.screen.bounds
+
+        guard let screenBounds else {
+            return CGPoint(x: fallbackSize.width / 2, y: fallbackSize.height / 2)
+        }
+        return CGPoint(
+            x: screenBounds.midX - overlayFrame.minX,
+            y: screenBounds.midY - overlayFrame.minY
+        )
+    }
+
+    private func bottomActionCenter(relativeTo overlayFrame: CGRect, fallbackSize: CGSize) -> CGPoint {
+        guard let scene = activeWindowScene else {
+            return CGPoint(x: fallbackSize.width / 2, y: fallbackSize.height - 46)
+        }
+
+        let safeAreaBottom = scene.windows.first(where: \.isKeyWindow)?.safeAreaInsets.bottom ?? 0
+        return CGPoint(
+            x: scene.screen.bounds.midX - overlayFrame.minX,
+            y: scene.screen.bounds.maxY - overlayFrame.minY - safeAreaBottom - 46
+        )
+    }
+
+    private var activeWindowScene: UIWindowScene? {
+        UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .first(where: { $0.activationState == .foregroundActive })
+    }
+
+    private var avatarDismissGesture: some Gesture {
+        DragGesture(minimumDistance: 2)
+            .onChanged { value in
+                guard avatarExpansionProgress > 0.98, !isUploadingAvatar else { return }
+                avatarDragOffset = rubberBanded(value.translation)
+            }
+            .onEnded { value in
+                guard avatarExpansionProgress > 0.98, !isUploadingAvatar else {
+                    avatarDragOffset = .zero
+                    return
+                }
+
+                let distance = hypot(value.translation.width, value.translation.height)
+                if distance >= avatarDismissThreshold {
+                    avatarTapHapticTrigger += 1
+                    collapseAvatar()
+                } else {
+                    withAnimation(.spring(response: 0.34, dampingFraction: 0.82)) {
+                        avatarDragOffset = .zero
+                    }
+                }
+            }
+    }
+
+    /// Preserves drag direction while progressively reducing movement at distance.
+    private func rubberBanded(_ translation: CGSize) -> CGSize {
+        let distance = hypot(translation.width, translation.height)
+        guard distance > 0 else { return .zero }
+
+        let resistedDistance = avatarDragResistance * log1p(distance / avatarDragResistance)
+        let scale = resistedDistance / distance
+        return CGSize(width: translation.width * scale, height: translation.height * scale)
+    }
+
+    private func expandAvatar() {
+        guard !isAvatarOverlayPresented, !avatarSourceFrame.isEmpty else { return }
+        avatarTapHapticTrigger += 1
+        avatarExpansionProgress = 0
+        isAvatarOverlayPresented = true
+        Task { @MainActor in
+            await Task.yield()
+            withAnimation(.spring(response: 0.34, dampingFraction: 0.82)) {
+                avatarExpansionProgress = 1
+            }
+        }
+    }
+
+    private var avatarErrorBinding: Binding<Bool> {
+        Binding(
+            get: { avatarErrorMessage != nil },
+            set: { if !$0 { avatarErrorMessage = nil } }
+        )
+    }
+
+    private func collapseAvatar() {
+        guard !isUploadingAvatar else { return }
+        withAnimation(
+            .spring(response: 0.3, dampingFraction: 0.84),
+            completionCriteria: .logicallyComplete
+        ) {
+            avatarExpansionProgress = 0
+            avatarDragOffset = .zero
+        } completion: {
+            isAvatarOverlayPresented = false
+        }
+    }
+
+    private func uploadAvatar(_ image: UIImage) {
+        let previousAvatar = avatarStore.image
+        avatarStore.setImage(image)
+        avatarUploadProgress = 0
+        withAnimation(.smooth(duration: 0.28)) {
+            isUploadingAvatar = true
+        }
+
+        Task {
+            do {
+                let optimizedAvatar = try await auth.updateProfilePhoto(image) { progress in
+                    withAnimation(.smooth(duration: 0.2)) {
+                        avatarUploadProgress = progress
+                    }
+                }
+                avatarStore.setImage(optimizedAvatar)
+                avatarUploadProgress = 1
+                withAnimation(.smooth(duration: 0.22)) {
+                    isUploadingAvatar = false
+                    avatarUploadProgress = 0
+                }
+                collapseAvatar()
+            } catch {
+                avatarStore.setImage(previousAvatar)
+                withAnimation(.smooth(duration: 0.22)) {
+                    isUploadingAvatar = false
+                    avatarUploadProgress = 0
+                }
+                avatarErrorMessage = error.localizedDescription
+            }
+        }
     }
 
     /// `@username` when set; email as fallback; otherwise the OAuth display name.
@@ -249,32 +486,84 @@ struct ProfileView: View {
     }
 }
 
+private struct ProfilePhotoActionButton: View {
+    let isUploading: Bool
+    let progress: Double
+    let action: () -> Void
+
+    private let size = CGSize(width: 240, height: 48)
+    private let shape = RoundedRectangle(cornerRadius: 14, style: .continuous)
+
+    private var clampedProgress: CGFloat {
+        guard isUploading else { return 0 }
+        return CGFloat(min(max(progress, 0), 1))
+    }
+
+    var body: some View {
+        Button(action: action) {
+            GeometryReader { proxy in
+                ZStack(alignment: .leading) {
+                    shape.fill(Color.accentColor.opacity(0.12))
+
+                    Rectangle()
+                        .fill(Color.accentColor)
+                        .frame(width: proxy.size.width * clampedProgress)
+                        .frame(maxHeight: .infinity)
+
+                    buttonContent
+                        .foregroundStyle(Color.accentColor)
+
+                    buttonContent
+                        .foregroundStyle(Color(uiColor: .systemBackground))
+                        .mask(alignment: .leading) {
+                            Rectangle()
+                                .frame(width: proxy.size.width * clampedProgress)
+                        }
+                }
+                .clipShape(shape)
+                .animation(.smooth(duration: 0.2), value: clampedProgress)
+            }
+            .frame(width: size.width, height: size.height)
+            .contentShape(shape)
+        }
+        .buttonStyle(.scale)
+        .disabled(isUploading)
+        .accessibilityLabel(isUploading ? "Uploading profile photo" : "Choose new profile photo")
+        .accessibilityValue(isUploading ? "\(Int(clampedProgress * 100)) percent" : "")
+    }
+
+    private var buttonContent: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "photo.on.rectangle")
+                .font(.system(size: 14, weight: .semibold))
+            Text(isUploading ? "Uploading…" : "Choose New Photo")
+                .contentTransition(.interpolate)
+        }
+        .font(.system(size: 15, weight: .medium))
+        .frame(width: size.width, height: size.height)
+        .animation(.smooth(duration: 0.28), value: isUploading)
+    }
+}
+
 // MARK: - Avatar
 
 private struct ProfileAvatarView: View {
-    let photoURL: URL?
+    @Environment(ProfileAvatarStore.self) private var avatarStore
     var size: CGFloat = 108
 
     var body: some View {
         Group {
-            if let photoURL {
-                AsyncImage(url: photoURL) { phase in
-                    switch phase {
-                    case .success(let image):
-                        image
-                            .resizable()
-                            .scaledToFill()
-                    case .failure:
-                        placeholder
-                    default:
-                        placeholder
-                            .overlay {
-                                ProgressView()
-                            }
-                    }
-                }
+            if let image = avatarStore.image {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
             } else {
                 placeholder
+                    .overlay {
+                        if avatarStore.isLoading {
+                            ProgressView()
+                        }
+                    }
             }
         }
         .frame(width: size, height: size)
@@ -283,6 +572,7 @@ private struct ProfileAvatarView: View {
             Circle()
                 .strokeBorder(Color.primary.opacity(0.06), lineWidth: 1)
         }
+        .compositingGroup()
     }
 
     private var placeholder: some View {
@@ -335,6 +625,7 @@ private struct ProfileSettingsRowLabel: View {
         ProfileView()
     }
     .environment(AuthManager())
+    .environment(ProfileAvatarStore())
     .environment(ProjectStore())
     .environment(AudioPlayer(store: ProjectStore()))
 }

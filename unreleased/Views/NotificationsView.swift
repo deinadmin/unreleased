@@ -3,7 +3,6 @@ import SwiftUI
 struct NotificationsView: View {
     @Environment(ProjectStore.self) private var store
     @Environment(ProjectLinkRouter.self) private var linkRouter
-    @Environment(AuthManager.self) private var auth
     @Environment(\.dismiss) private var dismiss
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
@@ -84,7 +83,7 @@ struct NotificationsView: View {
 
         ToolbarItem(placement: .topBarTrailing) {
             NavigationLink(value: ProfileRoute()) {
-                ToolbarProfileAvatar(photoURL: auth.photoURL, size: 42)
+                ToolbarProfileAvatar(size: 42)
                     .glassEffect(.regular.interactive(), in: .circle)
             }
             .buttonStyle(.plain)

@@ -396,7 +396,7 @@ struct HomeView: View {
 
     /// Circular profile picture that fills its glass button edge-to-edge (no inner padding).
     private var profileAvatar: some View {
-        ToolbarProfileAvatar(photoURL: auth.photoURL, size: 42)
+        ToolbarProfileAvatar(size: 42)
             .glassEffect(.regular.interactive(), in: .circle)
     }
 
@@ -546,24 +546,15 @@ private struct ProjectCard: View {
 /// Circular avatar for the toolbar profile button. Renders the user's Firebase
 /// photo edge-to-edge with a circular avatar placeholder fallback (no inner padding).
 struct ToolbarProfileAvatar: View {
-    let photoURL: URL?
+    @Environment(ProfileAvatarStore.self) private var avatarStore
     var size: CGFloat = 34
 
     var body: some View {
         Group {
-            if let photoURL {
-                AsyncImage(url: photoURL) { phase in
-                    switch phase {
-                    case .success(let image):
-                        image
-                            .resizable()
-                            .scaledToFill()
-                    case .failure:
-                        placeholder
-                    default:
-                        placeholder
-                    }
-                }
+            if let image = avatarStore.image {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
             } else {
                 placeholder
             }

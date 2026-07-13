@@ -105,6 +105,10 @@ enum CloudPaths {
         "users/\(userID)/covers/\(fileName)"
     }
 
+    static func profilePhotoReference(userID: String) -> StorageReference {
+        Storage.storage().reference(withPath: "users/\(userID)/profile/avatar.jpg")
+    }
+
     static func storageReference(storagePath: String) -> StorageReference {
         Storage.storage().reference(withPath: storagePath)
     }

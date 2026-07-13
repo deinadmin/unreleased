@@ -47,6 +47,7 @@ struct NotificationSettingsView: View {
             ) {
                 Toggle("", isOn: generalBinding)
                     .labelsHidden()
+                    .tint(Color(uiColor: .systemGreen))
             }
         }
     }
@@ -61,6 +62,7 @@ struct NotificationSettingsView: View {
             ) {
                 Toggle("", isOn: preferenceBinding(\.projectInvites))
                     .labelsHidden()
+                    .tint(Color(uiColor: .systemGreen))
             }
         }
     }

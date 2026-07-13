@@ -2,6 +2,8 @@ import AuthenticationServices
 import CryptoKit
 import FirebaseAuth
 import FirebaseCore
+import FirebaseFirestore
+import FirebaseStorage
 import Foundation
 import GoogleSignIn
 import UIKit
@@ -72,6 +74,61 @@ final class AuthManager {
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+
+    // MARK: - Profile photo
+
+    /// Uploads a compact avatar to Storage and keeps the Firebase Auth profile in sync.
+    func updateProfilePhoto(
+        _ image: UIImage,
+        onProgress: @escaping @MainActor (Double) -> Void
+    ) async throws -> UIImage {
+        guard let user else {
+            throw NSError(
+                domain: "AuthManager",
+                code: 401,
+                userInfo: [NSLocalizedDescriptionKey: "Sign in before changing your profile photo."]
+            )
+        }
+
+        let avatar = image.resizedForProfilePhoto(maxDimension: 512)
+        guard let data = avatar.jpegData(compressionQuality: 0.72) else {
+            throw NSError(
+                domain: "AuthManager",
+                code: 422,
+                userInfo: [NSLocalizedDescriptionKey: "The selected photo could not be processed."]
+            )
+        }
+
+        let reference = CloudPaths.profilePhotoReference(userID: user.uid)
+        let metadata = StorageMetadata()
+        metadata.contentType = "image/jpeg"
+        metadata.cacheControl = "public,max-age=31536000,immutable"
+        onProgress(0)
+        _ = try await reference.putDataAsync(
+            data,
+            metadata: metadata,
+            onProgress: onProgress
+        )
+        onProgress(1)
+
+        let storageURL = try await reference.downloadURL()
+        var components = URLComponents(url: storageURL, resolvingAgainstBaseURL: false)
+        var queryItems = components?.queryItems ?? []
+        queryItems.append(URLQueryItem(name: "v", value: String(Int(Date().timeIntervalSince1970))))
+        components?.queryItems = queryItems
+        let photoURL = components?.url ?? storageURL
+
+        let request = user.createProfileChangeRequest()
+        request.photoURL = photoURL
+        try await request.commitChanges()
+        try await CloudPaths.userProfileDocument(userID: user.uid).setData([
+            "avatarURL": photoURL.absoluteString,
+            "avatarUpdatedAt": FieldValue.serverTimestamp(),
+        ], merge: true)
+        try await user.reload()
+        self.user = Auth.auth().currentUser
+        return avatar
     }
 
     // MARK: - Sign in with Apple
@@ -299,3 +356,59 @@ final class AuthManager {
     }
 }
 
+private extension StorageReference {
+    func putDataAsync(
+        _ data: Data,
+        metadata: StorageMetadata?,
+        onProgress: @escaping @MainActor (Double) -> Void
+    ) async throws -> StorageMetadata {
+        try await withCheckedThrowingContinuation { continuation in
+            let task = putData(data, metadata: metadata)
+            var finished = false
+            var progressHandle: String?
+            var successHandle: String?
+            var failureHandle: String?
+
+            func complete(_ result: Result<StorageMetadata, Error>) {
+                guard !finished else { return }
+                finished = true
+                if let progressHandle { task.removeObserver(withHandle: progressHandle) }
+                if let successHandle { task.removeObserver(withHandle: successHandle) }
+                if let failureHandle { task.removeObserver(withHandle: failureHandle) }
+                continuation.resume(with: result)
+            }
+
+            progressHandle = task.observe(.progress) { snapshot in
+                guard let progress = snapshot.progress, progress.totalUnitCount > 0 else { return }
+                let fraction = Double(progress.completedUnitCount) / Double(progress.totalUnitCount)
+                Task { @MainActor in onProgress(fraction) }
+            }
+            successHandle = task.observe(.success) { snapshot in
+                if let metadata = snapshot.metadata {
+                    complete(.success(metadata))
+                } else {
+                    complete(.failure(URLError(.badServerResponse)))
+                }
+            }
+            failureHandle = task.observe(.failure) { snapshot in
+                complete(.failure(snapshot.error ?? URLError(.badServerResponse)))
+            }
+        }
+    }
+}
+
+private extension UIImage {
+    func resizedForProfilePhoto(maxDimension: CGFloat) -> UIImage {
+        let longestSide = max(size.width, size.height)
+        guard longestSide > maxDimension else { return self }
+
+        let scale = maxDimension / longestSide
+        let targetSize = CGSize(width: size.width * scale, height: size.height * scale)
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.opaque = true
+        return UIGraphicsImageRenderer(size: targetSize, format: format).image { _ in
+            draw(in: CGRect(origin: .zero, size: targetSize))
+        }
+    }
+}
