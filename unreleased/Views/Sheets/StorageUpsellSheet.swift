@@ -40,7 +40,7 @@ struct StorageUpsellSheet: View {
     var body: some View {
         GeometryReader { geometry in
             let bottomSafeArea = geometry.safeAreaInsets.bottom
-            let actionBottomInset = max(16, bottomSafeArea - 18)
+            let actionBottomInset = max(16, bottomSafeArea)
             let actionOverlayHeight = 132 + actionBottomInset
 
             ZStack(alignment: .bottom) {
@@ -60,10 +60,7 @@ struct StorageUpsellSheet: View {
                     }
                 }
 
-                actions(
-                    bottomSafeArea: bottomSafeArea,
-                    bottomInset: actionBottomInset
-                )
+                actions(bottomInset: actionBottomInset)
             }
             .ignoresSafeArea(edges: .bottom)
         }
@@ -198,7 +195,7 @@ struct StorageUpsellSheet: View {
 
     // MARK: - Actions
 
-    private func actions(bottomSafeArea: CGFloat, bottomInset: CGFloat) -> some View {
+    private func actions(bottomInset: CGFloat) -> some View {
         VStack(spacing: 12) {
             Button {
                 dismiss()
@@ -211,7 +208,7 @@ struct StorageUpsellSheet: View {
                     .frame(height: 52)
                     .background(
                         LinearGradient(colors: accentGradient, startPoint: .leading, endPoint: .trailing),
-                        in: Capsule()
+                        in: RoundedRectangle(cornerRadius: 14, style: .continuous)
                     )
             }
             .buttonStyle(.scale)
@@ -226,7 +223,7 @@ struct StorageUpsellSheet: View {
                     .frame(height: 52)
                     .background(
                         Color(.secondarySystemGroupedBackground),
-                        in: notNowShape(bottomSafeArea: bottomSafeArea)
+                        in: RoundedRectangle(cornerRadius: 14, style: .continuous)
                     )
             }
             .buttonStyle(.scale)
@@ -235,13 +232,6 @@ struct StorageUpsellSheet: View {
         .padding(.top, 16)
         .padding(.bottom, bottomInset)
         .background(Color(.systemGroupedBackground))
-    }
-
-    private func notNowShape(bottomSafeArea: CGFloat) -> ConcentricRectangle {
-        ConcentricRectangle(
-            uniformTopCorners: .fixed(26),
-            uniformBottomCorners: bottomSafeArea > 0 ? .concentric : .fixed(26)
-        )
     }
 
     // MARK: - Reason-driven copy

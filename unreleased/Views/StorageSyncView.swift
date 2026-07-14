@@ -12,6 +12,9 @@ struct StorageSyncView: View {
         .listStyle(.insetGrouped)
         .navigationTitle("Storage & Sync")
         .navigationBarTitleDisplayMode(.inline)
+        .navigationDestination(for: DeleteTracksRoute.self) { _ in
+            DeleteTracksView()
+        }
     }
 
     // MARK: - Storage
@@ -103,6 +106,11 @@ struct StorageSyncView: View {
                     title: "Tracks",
                     value: "\(totalTrackCount)"
                 )
+
+                NavigationLink(value: DeleteTracksRoute()) {
+                    Label("Delete tracks", systemImage: "trash")
+                        .font(.system(size: 16))
+                }
 
                 settingsRow(
                     icon: "icloud.and.arrow.up",

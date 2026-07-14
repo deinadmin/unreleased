@@ -6,6 +6,7 @@ struct ProfileView: View {
     @Environment(ProjectStore.self) private var store
     @Environment(AudioPlayer.self) private var player
     @Environment(ProfileAvatarStore.self) private var avatarStore
+    @Environment(MiniPlayerVisibility.self) private var miniPlayerVisibility
 
     @State private var showSignOutConfirm = false
     @State private var showHelpMail = false
@@ -13,6 +14,7 @@ struct ProfileView: View {
     @State private var avatarExpansionProgress: CGFloat = 0
     @State private var avatarSourceFrame: CGRect = .zero
     @State private var avatarDragOffset: CGSize = .zero
+    @State private var avatarDragDistance: CGFloat = 0
     @State private var showPhotoPicker = false
     @State private var isUploadingAvatar = false
     @State private var avatarUploadProgress: Double = 0
@@ -45,7 +47,7 @@ struct ProfileView: View {
                         .padding(.bottom, 40)
                 }
             }
-            .blur(radius: 14 * avatarExpansionProgress)
+            .blur(radius: 14 * avatarExpansionProgress * avatarDragBlurProgress)
             .allowsHitTesting(!isAvatarOverlayPresented)
 
             if isAvatarOverlayPresented {
@@ -69,6 +71,9 @@ struct ProfileView: View {
             Button("OK", role: .cancel) {}
         } message: {
             Text(avatarErrorMessage ?? "Please try again.")
+        }
+        .onDisappear {
+            miniPlayerVisibility.show(for: .enlargedProfilePhoto)
         }
     }
 
@@ -158,7 +163,8 @@ struct ProfileView: View {
                     progress: avatarUploadProgress,
                     action: { showPhotoPicker = true }
                 )
-                .opacity(buttonProgress)
+                .opacity(buttonProgress * avatarDragBlurProgress)
+                .blur(radius: 8 * (1 - avatarDragBlurProgress))
                 .offset(y: 14 * (1 - buttonProgress))
                 .position(
                     x: buttonCenter.x,
@@ -206,11 +212,13 @@ struct ProfileView: View {
         DragGesture(minimumDistance: 2)
             .onChanged { value in
                 guard avatarExpansionProgress > 0.98, !isUploadingAvatar else { return }
+                avatarDragDistance = hypot(value.translation.width, value.translation.height)
                 avatarDragOffset = rubberBanded(value.translation)
             }
             .onEnded { value in
                 guard avatarExpansionProgress > 0.98, !isUploadingAvatar else {
                     avatarDragOffset = .zero
+                    avatarDragDistance = 0
                     return
                 }
 
@@ -221,9 +229,14 @@ struct ProfileView: View {
                 } else {
                     withAnimation(.spring(response: 0.34, dampingFraction: 0.82)) {
                         avatarDragOffset = .zero
+                        avatarDragDistance = 0
                     }
                 }
             }
+    }
+
+    private var avatarDragBlurProgress: CGFloat {
+        1 - min(avatarDragDistance / avatarDismissThreshold, 1)
     }
 
     /// Preserves drag direction while progressively reducing movement at distance.
@@ -240,6 +253,8 @@ struct ProfileView: View {
         guard !isAvatarOverlayPresented, !avatarSourceFrame.isEmpty else { return }
         avatarTapHapticTrigger += 1
         avatarExpansionProgress = 0
+        avatarDragDistance = 0
+        miniPlayerVisibility.hide(for: .enlargedProfilePhoto)
         isAvatarOverlayPresented = true
         Task { @MainActor in
             await Task.yield()
@@ -265,7 +280,9 @@ struct ProfileView: View {
             avatarExpansionProgress = 0
             avatarDragOffset = .zero
         } completion: {
+            avatarDragDistance = 0
             isAvatarOverlayPresented = false
+            miniPlayerVisibility.show(for: .enlargedProfilePhoto)
         }
     }
 
@@ -631,4 +648,5 @@ private struct ProfileSettingsRowLabel: View {
     .environment(ProfileAvatarStore())
     .environment(ProjectStore())
     .environment(AudioPlayer(store: ProjectStore()))
+    .environment(MiniPlayerVisibility())
 }

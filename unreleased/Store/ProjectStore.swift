@@ -3,6 +3,11 @@ import Observation
 import AVFoundation
 import SwiftUI
 
+struct OwnedTrackDeletionID: Hashable {
+    let projectID: UUID
+    let trackID: UUID
+}
+
 @Observable
 final class ProjectStore {
     var projects: [Project] = []
@@ -547,6 +552,50 @@ final class ProjectStore {
 
         let service = syncService
         Task { await service?.deleteTrackFromCloud(track) }
+    }
+
+    /// Deletes several tracks from user-owned projects in one
+    /// mutation. Shared projects are intentionally excluded as a second layer of
+    /// protection beyond the filtering performed by the deletion screen.
+    func deleteOwnedTracks(at locations: Set<OwnedTrackDeletionID>) {
+        guard !locations.isEmpty else { return }
+
+        var deletedTracks: [Track] = []
+        let deletionDate = Date()
+        let trackIDsByProject = Dictionary(grouping: locations, by: \.projectID)
+            .mapValues { Set($0.map(\.trackID)) }
+
+        for projectIndex in projects.indices where !projects[projectIndex].isShared {
+            guard let trackIDs = trackIDsByProject[projects[projectIndex].id] else { continue }
+            let matchingTracks = projects[projectIndex].tracks.filter { trackIDs.contains($0.id) }
+            guard !matchingTracks.isEmpty else { continue }
+
+            deletedTracks.append(contentsOf: matchingTracks)
+            projects[projectIndex].tracks.removeAll { trackIDs.contains($0.id) }
+            projects[projectIndex].updatedDate = deletionDate
+        }
+
+        guard !deletedTracks.isEmpty else { return }
+
+        if let currentTrackID = audioPlayer?.currentTrack?.id,
+           deletedTracks.contains(where: { $0.id == currentTrackID }) {
+            audioPlayer?.stop()
+        }
+
+        for track in deletedTracks {
+            cancelDownload(trackID: track.id)
+            deleteAudioFile(fileName: track.fileName)
+            deleteDownloadedFile(fileName: track.fileName)
+        }
+
+        save()
+
+        let service = syncService
+        Task {
+            for track in deletedTracks {
+                await service?.deleteTrackFromCloud(track)
+            }
+        }
     }
 
     func moveTrack(in projectID: UUID, from source: IndexSet, to destination: Int) {

@@ -12,6 +12,7 @@ struct ContentView: View {
     @Namespace private var projectZoomNamespace
     @State private var toastCenter = PlayerToastCenter()
     @State private var searchState = AppSearchState()
+    @State private var miniPlayerVisibility = MiniPlayerVisibility()
     @State private var showingSaveInSheet = false
     @State private var pendingInvite: PendingInvite? = nil
     /// Tracks the live layout height of the PlayerView so the toast can be
@@ -32,7 +33,9 @@ struct ContentView: View {
     }
 
     private var showsMiniPlayer: Bool {
-        player.currentTrack != nil && !player.isShowingNowPlaying
+        player.currentTrack != nil
+            && !player.isShowingNowPlaying
+            && !miniPlayerVisibility.isHidden
     }
 
     /// On iPad the search bar floats Spotlight-style near the top, so only the
@@ -143,12 +146,14 @@ struct ContentView: View {
             }
         }
         .animation(.spring(response: 0.38, dampingFraction: 0.86), value: searchState.isActive)
+        .animation(.spring(response: 0.38, dampingFraction: 0.86), value: miniPlayerVisibility.isHidden)
         .animation(.spring(response: 0.4, dampingFraction: 0.86), value: toastCenter.toast)
         .animation(.spring(response: 0.4, dampingFraction: 0.86), value: toastBottomInset)
         .environment(store)
         .environment(player)
         .environment(toastCenter)
         .environment(searchState)
+        .environment(miniPlayerVisibility)
         .environment(\.navigateToTrackNotes) { trackID, projectID in
             if searchState.isActive {
                 searchState.deactivate()
@@ -427,12 +432,20 @@ struct ContentView: View {
                         )
                     )
             } else if player.currentTrack != nil {
+                let miniPlayerIsHidden = miniPlayerVisibility.isHidden
+                    && !player.isShowingNowPlaying
+
                 PlayerView()
                     .environment(player)
                     .environment(store)
                     .frame(maxWidth: .infinity, alignment: .bottom)
+                    .opacity(miniPlayerIsHidden ? 0 : 1)
+                    .offset(y: miniPlayerIsHidden ? 22 : 0)
+                    .allowsHitTesting(!miniPlayerIsHidden)
+                    .accessibilityHidden(miniPlayerIsHidden)
                     .zIndex(player.isShowingNowPlaying ? 10 : 1)
                     .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { playerViewHeight = $0 }
+                    .animation(.smooth(duration: 0.28), value: miniPlayerIsHidden)
                     .transition(
                         .asymmetric(
                             insertion: .opacity.combined(with: .offset(y: 18)),
@@ -442,6 +455,7 @@ struct ContentView: View {
             }
         }
         .animation(.spring(response: 0.38, dampingFraction: 0.86), value: searchState.isActive)
+        .animation(.spring(response: 0.38, dampingFraction: 0.86), value: miniPlayerVisibility.isHidden)
         .animation(.spring(response: 0.44, dampingFraction: 0.84), value: player.currentTrack != nil)
     }
 }
