@@ -443,6 +443,12 @@ struct ProfileView: View {
             }
             .buttonStyle(.plain)
 
+        case "eq":
+            NavigationLink(value: EqualizerRoute()) {
+                ProfileSettingsRowLabel(row: row)
+            }
+            .buttonStyle(.plain)
+
         case "help":
             Button {
                 if MFMailComposeViewController.canSendMail() {
@@ -498,7 +504,7 @@ struct ProfileView: View {
     private var placeholderSettings: [ProfileSettingsRowLabel.Model] {
         [
             .init(id: "notifications", title: "Notifications", icon: "bell"),
-            .init(id: "appearance", title: "Appearance", icon: "circle.lefthalf.filled"),
+            .init(id: "eq", title: "EQ", icon: "slider.horizontal.3"),
             .init(id: "storage", title: "Storage & Sync", icon: "icloud"),
             .init(id: "help", title: "Help & Support", icon: "questionmark.circle"),
             .init(id: "about", title: "About", icon: "info.circle"),

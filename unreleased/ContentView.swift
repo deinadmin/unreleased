@@ -100,6 +100,9 @@ struct ContentView: View {
                     .navigationDestination(for: NotificationSettingsRoute.self) { _ in
                         NotificationSettingsView()
                     }
+                    .navigationDestination(for: EqualizerRoute.self) { _ in
+                        EqualizerView()
+                    }
                     .navigationDestination(for: AboutRoute.self) { _ in
                         AboutView()
                     }

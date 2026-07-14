@@ -9,7 +9,7 @@ import UIKit
 final class AudioPlayer {
     var currentTrack: Track?
     var currentProject: Project?
-    var isPlaying: Bool = false
+    private(set) var isPlaying: Bool = false
     var currentTime: TimeInterval = 0
     var duration: TimeInterval = 0
     var isShowingNowPlaying: Bool = false
@@ -28,6 +28,19 @@ final class AudioPlayer {
     /// Universal — items may come from any project and persist across project changes.
     private(set) var queue: [QueuedItem] = []
 
+    var isEqualizerEnabled: Bool {
+        didSet {
+            applyEqualizerSettings()
+            UserDefaults.standard.set(isEqualizerEnabled, forKey: Self.equalizerEnabledKey)
+        }
+    }
+    private(set) var equalizerGains: [Float] {
+        didSet {
+            applyEqualizerSettings()
+            UserDefaults.standard.set(equalizerGains, forKey: Self.equalizerGainsKey)
+        }
+    }
+
     private let store: ProjectStore
     /// Origin context (project + track position) for what plays after the queue empties.
     /// Updated on direct plays only; preserved while queued tracks (from other projects)
@@ -36,19 +49,71 @@ final class AudioPlayer {
     private var contextTrackID: UUID?
     private var shuffleOrder: [UUID] = []
     private var shuffleIndex: Int = 0
-    private var player: AVPlayer?
-    private var timeObserver: Any?
-    private var endObserver: NSObjectProtocol?
+    private let audioEngine = AVAudioEngine()
+    private let playerNode = AVAudioPlayerNode()
+    private let equalizer = AVAudioUnitEQ(numberOfBands: EqualizerBand.all.count)
+    private var audioFile: AVAudioFile?
+    private var playbackTimer: Timer?
+    private var scheduledStartFrame: AVAudioFramePosition = 0
+    private var scheduleGeneration = 0
     private var nowPlayingArtwork: MPMediaItemArtwork?
     private var loadTask: Task<Void, Never>?
+    private var wasPlayingBeforeInterruption = false
+    // Only mutated on MainActor; deinit is nonisolated and removes the global targets.
+    nonisolated(unsafe) private var remoteCommandTargets: [(command: MPRemoteCommand, target: Any)] = []
 
     private let trackRestartThreshold: TimeInterval = 1.5
+    private static let equalizerEnabledKey = "audio.equalizer.enabled"
+    private static let equalizerGainsKey = "audio.equalizer.gains"
 
     init(store: ProjectStore) {
         self.store = store
+        let savedGains = (UserDefaults.standard.array(forKey: Self.equalizerGainsKey) as? [NSNumber])?
+            .map(\.floatValue)
+        self.equalizerGains = savedGains?.count == EqualizerBand.all.count
+            ? savedGains!
+            : EqualizerPreset.flat.gains
+        self.isEqualizerEnabled = UserDefaults.standard.object(forKey: Self.equalizerEnabledKey) as? Bool ?? false
+
+        audioEngine.attach(playerNode)
+        audioEngine.attach(equalizer)
+        configureEqualizerBands()
+        applyEqualizerSettings()
         configureAudioSessionCategory()
         setupRemoteCommands()
         setupInterruptionHandling()
+    }
+
+    deinit {
+        for registration in remoteCommandTargets {
+            registration.command.removeTarget(registration.target)
+        }
+    }
+
+    // MARK: - Equalizer
+
+    var activeEqualizerPreset: EqualizerPreset? {
+        EqualizerPreset.allCases.first { preset in
+            zip(preset.gains, equalizerGains).allSatisfy { abs($0 - $1) < 0.05 }
+        }
+    }
+
+    func setEqualizerEnabled(_ enabled: Bool) {
+        isEqualizerEnabled = enabled
+    }
+
+    func setEqualizerGain(_ gain: Float, at index: Int) {
+        guard equalizerGains.indices.contains(index) else { return }
+        equalizerGains[index] = min(max(gain, -12), 12)
+    }
+
+    func applyEqualizerPreset(_ preset: EqualizerPreset) {
+        equalizerGains = preset.gains
+        isEqualizerEnabled = true
+    }
+
+    func resetEqualizer() {
+        equalizerGains = EqualizerPreset.flat.gains
     }
 
     // MARK: - Playback Control
@@ -157,53 +222,57 @@ final class AudioPlayer {
 
         currentTrack = track
         currentProject = project
-        duration = track.duration
         currentTime = 0
 
         setupAudioSession()
 
-        let item = AVPlayerItem(url: fileURL)
-        player = AVPlayer(playerItem: item)
-
-        endObserver = NotificationCenter.default.addObserver(
-            forName: .AVPlayerItemDidPlayToEndTime,
-            object: item,
-            queue: .main
-        ) { [weak self] _ in
-            self?.handlePlaybackEnded()
+        var playbackStarted = false
+        do {
+            let file = try AVAudioFile(forReading: fileURL)
+            audioFile = file
+            duration = Double(file.length) / file.processingFormat.sampleRate
+            try configureAudioGraph(for: file.processingFormat)
+            playbackStarted = scheduleAudio(from: 0, shouldPlay: true)
+        } catch {
+            audioFile = nil
+            duration = track.duration
+            isPlaying = false
+            print("AudioPlayer: playback setup failed — \(error)")
+            updateNowPlayingInfo()
+            return
         }
 
-        addTimeObserver()
         refreshNowPlayingArtwork(for: project)
         // Only resync shuffle when this play is part of the active context — queued tracks
         // from foreign projects should not clobber the shuffleOrder of the context project.
         if isShuffleEnabled, !fromQueue {
             syncShuffleIndex(for: track.id)
         }
-        player?.play()
-        isPlaying = true
+        isPlaying = playbackStarted
         updateNowPlayingInfo()
     }
 
     func togglePlayPause() {
         if isLoadingAudio { return }
-        guard player != nil else { return }
+        guard audioFile != nil else { return }
         if isPlaying {
-            player?.pause()
+            pausePlayback()
         } else {
-            player?.play()
+            resumePlayback()
         }
-        isPlaying.toggle()
-        updateNowPlayingInfo()
     }
 
     func seek(to time: TimeInterval) {
+        guard let file = audioFile else { return }
         let clamped = max(0, min(time, duration))
-        let cmTime = CMTime(seconds: clamped, preferredTimescale: 600)
-        player?.seek(to: cmTime) { [weak self] _ in
-            self?.currentTime = clamped
-            self?.updateNowPlayingInfo()
+        let frame = AVAudioFramePosition(clamped * file.processingFormat.sampleRate)
+        let shouldPlay = isPlaying
+        let playbackStarted = scheduleAudio(from: frame, shouldPlay: shouldPlay)
+        if shouldPlay {
+            isPlaying = playbackStarted
         }
+        currentTime = clamped
+        updateNowPlayingInfo()
     }
 
     func toggleShuffle() {
@@ -296,7 +365,7 @@ final class AudioPlayer {
         currentTime = 0
         duration = 0
         nowPlayingArtwork = nil
-        MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
+        updateNowPlayingInfo()
     }
 
     var playbackProgress: Double {
@@ -310,14 +379,29 @@ final class AudioPlayer {
     // MARK: - Private
 
     private func handlePlaybackEnded() {
-        if isLooping, let track = currentTrack, let project = currentProject {
-            play(track: track, in: project, fromQueue: true)
+        playbackTimer?.invalidate()
+        playbackTimer = nil
+
+        if isLooping {
+            currentTime = 0
+            isPlaying = scheduleAudio(from: 0, shouldPlay: true)
+            updateNowPlayingInfo()
             return
         }
 
         guard let next = adjacentTrack(offset: 1) else {
+            if audioEngine.isRunning {
+                audioEngine.pause()
+            }
             isPlaying = false
             currentTime = duration
+            updateNowPlayingInfo()
+            return
+        }
+
+        if next.track.id == currentTrack?.id {
+            currentTime = 0
+            isPlaying = scheduleAudio(from: 0, shouldPlay: true)
             updateNowPlayingInfo()
             return
         }
@@ -531,25 +615,156 @@ final class AudioPlayer {
         return (track, project)
     }
 
-    private func tearDownPlayer() {
-        if let obs = timeObserver {
-            player?.removeTimeObserver(obs)
-            timeObserver = nil
-        }
-        if let obs = endObserver {
-            NotificationCenter.default.removeObserver(obs)
-            endObserver = nil
-        }
-        player?.pause()
-        player = nil
+    private func configureAudioGraph(for format: AVAudioFormat) throws {
+        audioEngine.stop()
+        audioEngine.disconnectNodeOutput(playerNode)
+        audioEngine.disconnectNodeOutput(equalizer)
+        audioEngine.connect(playerNode, to: equalizer, format: format)
+        audioEngine.connect(equalizer, to: audioEngine.mainMixerNode, format: format)
+        audioEngine.prepare()
+        try audioEngine.start()
     }
 
-    private func addTimeObserver() {
-        let interval = CMTime(seconds: 0.1, preferredTimescale: 600)
-        timeObserver = player?.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
-            guard let self else { return }
-            self.currentTime = time.seconds
+    @discardableResult
+    private func scheduleAudio(
+        from requestedFrame: AVAudioFramePosition,
+        shouldPlay: Bool
+    ) -> Bool {
+        guard let file = audioFile else { return false }
+
+        scheduleGeneration += 1
+        let generation = scheduleGeneration
+        playerNode.stop()
+
+        let startFrame = min(max(requestedFrame, 0), file.length)
+        scheduledStartFrame = startFrame
+        let remainingFrames = file.length - startFrame
+        guard remainingFrames > 0 else {
+            currentTime = duration
+            return false
         }
+
+        let frameCount = AVAudioFrameCount(min(remainingFrames, AVAudioFramePosition(UInt32.max)))
+        playerNode.scheduleSegment(
+            file,
+            startingFrame: startFrame,
+            frameCount: frameCount,
+            at: nil,
+            completionCallbackType: .dataPlayedBack
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self, self.scheduleGeneration == generation else { return }
+                self.handlePlaybackEnded()
+            }
+        }
+
+        startPlaybackTimer()
+        if shouldPlay {
+            guard startEngineIfNeeded() else { return false }
+            playerNode.play()
+            return playerNode.isPlaying
+        }
+        return false
+    }
+
+    private func tearDownPlayer() {
+        scheduleGeneration += 1
+        playbackTimer?.invalidate()
+        playbackTimer = nil
+        playerNode.stop()
+        audioEngine.stop()
+        audioFile = nil
+        scheduledStartFrame = 0
+    }
+
+    private func startPlaybackTimer() {
+        playbackTimer?.invalidate()
+        let timer = Timer(timeInterval: 0.1, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.updateCurrentTimeFromEngine()
+            }
+        }
+        playbackTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
+    }
+
+    private func updateCurrentTimeFromEngine() {
+        guard let file = audioFile,
+              let renderTime = playerNode.lastRenderTime,
+              let playerTime = playerNode.playerTime(forNodeTime: renderTime)
+        else { return }
+
+        let renderedFrames = max(playerTime.sampleTime, 0)
+        let elapsedFrames = scheduledStartFrame + renderedFrames
+        currentTime = min(duration, Double(elapsedFrames) / file.processingFormat.sampleRate)
+    }
+
+    @discardableResult
+    private func startEngineIfNeeded() -> Bool {
+        do {
+            try AVAudioSession.sharedInstance().setActive(true)
+            if !audioEngine.isRunning {
+                audioEngine.prepare()
+                try audioEngine.start()
+            }
+            return true
+        } catch {
+            isPlaying = false
+            print("AudioPlayer: engine start failed — \(error)")
+            return false
+        }
+    }
+
+    @discardableResult
+    private func resumePlayback() -> Bool {
+        guard audioFile != nil else {
+            isPlaying = false
+            updateNowPlayingInfo()
+            return false
+        }
+        guard startEngineIfNeeded() else {
+            updateNowPlayingInfo()
+            return false
+        }
+
+        playerNode.play()
+        isPlaying = playerNode.isPlaying
+        updateNowPlayingInfo()
+        return isPlaying
+    }
+
+    private func pausePlayback() {
+        updateCurrentTimeFromEngine()
+        playerNode.pause()
+
+        // AVAudioPlayerNode.pause() alone leaves AVAudioEngine rendering silence.
+        // iOS derives Now Playing activity from that audio session, so halt the
+        // engine as well and restart it in resumePlayback().
+        if audioEngine.isRunning {
+            audioEngine.pause()
+        }
+
+        isPlaying = false
+        updateNowPlayingInfo()
+    }
+
+    private func configureEqualizerBands() {
+        for (index, definition) in EqualizerBand.all.enumerated() {
+            let band = equalizer.bands[index]
+            band.filterType = .parametric
+            band.frequency = definition.frequency
+            band.bandwidth = 1
+        }
+    }
+
+    private func applyEqualizerSettings() {
+        for (index, band) in equalizer.bands.enumerated() {
+            band.gain = equalizerGains.indices.contains(index) ? equalizerGains[index] : 0
+            band.bypass = !isEqualizerEnabled
+        }
+
+        let highestBoost = equalizerGains.max() ?? 0
+        equalizer.globalGain = isEqualizerEnabled ? -min(max(highestBoost * 0.55, 0), 6) : 0
     }
 
     private func setupAudioSession() {
@@ -607,14 +822,21 @@ final class AudioPlayer {
 
         switch type {
         case .began:
+            wasPlayingBeforeInterruption = isPlaying
+            updateCurrentTimeFromEngine()
+            playerNode.pause()
+            if audioEngine.isRunning {
+                audioEngine.pause()
+            }
             isPlaying = false
         case .ended:
             let optionsValue = info[AVAudioSessionInterruptionOptionKey] as? UInt ?? 0
             let options = AVAudioSession.InterruptionOptions(rawValue: optionsValue)
-            if options.contains(.shouldResume) {
-                try? AVAudioSession.sharedInstance().setActive(true)
-                player?.play()
-                isPlaying = true
+            let shouldResume = wasPlayingBeforeInterruption && options.contains(.shouldResume)
+            wasPlayingBeforeInterruption = false
+            if shouldResume {
+                resumePlayback()
+                return
             }
         @unknown default:
             break
@@ -630,45 +852,125 @@ final class AudioPlayer {
 
         // Pause when headphones are unplugged (standard Apple behavior).
         if reason == .oldDeviceUnavailable {
-            player?.pause()
-            isPlaying = false
-            updateNowPlayingInfo()
+            pausePlayback()
         }
     }
 
     private func setupRemoteCommands() {
         let cc = MPRemoteCommandCenter.shared()
 
-        cc.playCommand.addTarget { [weak self] _ in
-            self?.player?.play()
-            self?.isPlaying = true
-            self?.updateNowPlayingInfo()
-            return .success
+        let playTarget = cc.playCommand.addTarget { [weak self] _ in
+            self?.resumeFromRemoteCommand() ?? .noActionableNowPlayingItem
         }
-        cc.pauseCommand.addTarget { [weak self] _ in
-            self?.player?.pause()
-            self?.isPlaying = false
-            self?.updateNowPlayingInfo()
-            return .success
+        remoteCommandTargets.append((cc.playCommand, playTarget))
+
+        let pauseTarget = cc.pauseCommand.addTarget { [weak self] _ in
+            self?.pauseFromRemoteCommand() ?? .noActionableNowPlayingItem
         }
-        cc.togglePlayPauseCommand.addTarget { [weak self] _ in
-            self?.togglePlayPause()
-            return .success
+        remoteCommandTargets.append((cc.pauseCommand, pauseTarget))
+
+        let toggleTarget = cc.togglePlayPauseCommand.addTarget { [weak self] _ in
+            self?.togglePlayPauseFromRemoteCommand() ?? .noActionableNowPlayingItem
         }
-        cc.nextTrackCommand.addTarget { [weak self] _ in
+        remoteCommandTargets.append((cc.togglePlayPauseCommand, toggleTarget))
+
+        let nextTarget = cc.nextTrackCommand.addTarget { [weak self] _ in
             self?.skipForward()
             return .success
         }
-        cc.previousTrackCommand.addTarget { [weak self] _ in
+        remoteCommandTargets.append((cc.nextTrackCommand, nextTarget))
+
+        let previousTarget = cc.previousTrackCommand.addTarget { [weak self] _ in
             self?.skipBackward()
             return .success
         }
-        cc.changePlaybackPositionCommand.addTarget { [weak self] event in
+        remoteCommandTargets.append((cc.previousTrackCommand, previousTarget))
+
+        let positionTarget = cc.changePlaybackPositionCommand.addTarget { [weak self] event in
             if let e = event as? MPChangePlaybackPositionCommandEvent {
                 self?.seek(to: e.positionTime)
             }
             return .success
         }
+        remoteCommandTargets.append((cc.changePlaybackPositionCommand, positionTarget))
+
+        updateRemoteCommandAvailability()
+    }
+
+    private func resumeFromRemoteCommand() -> MPRemoteCommandHandlerStatus {
+        guard audioFile != nil else { return .noActionableNowPlayingItem }
+        if isPlaying {
+            updateNowPlayingInfo()
+            return .success
+        }
+        return resumePlayback() ? .success : .commandFailed
+    }
+
+    private func pauseFromRemoteCommand() -> MPRemoteCommandHandlerStatus {
+        guard audioFile != nil else { return .noActionableNowPlayingItem }
+        if isPlaying {
+            pausePlayback()
+        } else {
+            updateNowPlayingInfo()
+        }
+        return .success
+    }
+
+    private func togglePlayPauseFromRemoteCommand() -> MPRemoteCommandHandlerStatus {
+        guard audioFile != nil else { return .noActionableNowPlayingItem }
+        if isPlaying {
+            pausePlayback()
+            return .success
+        }
+        return resumePlayback() ? .success : .commandFailed
+    }
+
+    private func updateRemoteCommandAvailability() {
+        let cc = MPRemoteCommandCenter.shared()
+        let hasPlayableTrack = currentTrack != nil && audioFile != nil
+
+        cc.playCommand.isEnabled = hasPlayableTrack && !isPlaying
+        cc.pauseCommand.isEnabled = hasPlayableTrack && isPlaying
+        cc.togglePlayPauseCommand.isEnabled = hasPlayableTrack
+        cc.changePlaybackPositionCommand.isEnabled = hasPlayableTrack
+        cc.nextTrackCommand.isEnabled = currentTrack != nil
+        cc.previousTrackCommand.isEnabled = currentTrack != nil
+    }
+
+    private func clearNowPlayingInfo() {
+        let nowPlayingCenter = MPNowPlayingInfoCenter.default()
+        nowPlayingCenter.nowPlayingInfo = nil
+        nowPlayingCenter.playbackState = .stopped
+        updateRemoteCommandAvailability()
+    }
+
+    private func publishNowPlayingInfo(for track: Track, project: Project) {
+        let playbackRate = isPlaying ? 1.0 : 0.0
+        var info: [String: Any] = [
+            MPMediaItemPropertyTitle: track.title,
+            MPMediaItemPropertyArtist: project.name,
+            MPNowPlayingInfoPropertyMediaType: MPNowPlayingInfoMediaType.audio.rawValue,
+            MPNowPlayingInfoPropertyElapsedPlaybackTime: currentTime,
+            MPMediaItemPropertyPlaybackDuration: duration,
+            MPNowPlayingInfoPropertyPlaybackRate: playbackRate,
+            MPNowPlayingInfoPropertyDefaultPlaybackRate: 1.0,
+        ]
+        if let nowPlayingArtwork {
+            info[MPMediaItemPropertyArtwork] = nowPlayingArtwork
+        }
+
+        let nowPlayingCenter = MPNowPlayingInfoCenter.default()
+        nowPlayingCenter.nowPlayingInfo = info
+        nowPlayingCenter.playbackState = isPlaying ? .playing : .paused
+        updateRemoteCommandAvailability()
+    }
+
+    private func updateNowPlayingInfo() {
+        guard let track = currentTrack, let project = currentProject else {
+            clearNowPlayingInfo()
+            return
+        }
+        publishNowPlayingInfo(for: track, project: project)
     }
 
     private func refreshNowPlayingArtwork(for project: Project) {
@@ -680,21 +982,6 @@ final class AudioPlayer {
         }
         let size = image.size
         nowPlayingArtwork = MPMediaItemArtwork(boundsSize: size) { _ in image }
-    }
-
-    private func updateNowPlayingInfo() {
-        guard let track = currentTrack, let project = currentProject else { return }
-        var info: [String: Any] = [
-            MPMediaItemPropertyTitle: track.title,
-            MPMediaItemPropertyArtist: project.name,
-            MPNowPlayingInfoPropertyElapsedPlaybackTime: currentTime,
-            MPMediaItemPropertyPlaybackDuration: duration,
-            MPNowPlayingInfoPropertyPlaybackRate: isPlaying ? 1.0 : 0.0,
-        ]
-        if let nowPlayingArtwork {
-            info[MPMediaItemPropertyArtwork] = nowPlayingArtwork
-        }
-        MPNowPlayingInfoCenter.default().nowPlayingInfo = info
     }
 
     private func formatTime(_ seconds: TimeInterval) -> String {
