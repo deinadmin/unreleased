@@ -50,7 +50,9 @@ private struct ImportingOverlayModifier: ViewModifier {
     func body(content: Content) -> some View {
         content
             .overlay {
-                if isVisible {
+                // Present directly from the source value on the first update.
+                // `isVisible` keeps it around long enough during dismissal.
+                if isPresented || isVisible {
                     ImportingOverlay()
                 }
             }

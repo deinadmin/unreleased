@@ -11,7 +11,7 @@ enum WaveformAnalyzer {
 
     /// Analyze the file at `url` and return `targetBars` normalized amplitude values (0…1).
     /// Runs off the main actor so it never blocks the UI.
-    static func analyze(url: URL, targetBars: Int = 200) async -> [Float] {
+    nonisolated static func analyze(url: URL, targetBars: Int = 200) async -> [Float] {
         await Task.detached(priority: .userInitiated) {
             (try? Self.extractBars(url: url, targetBars: targetBars)) ?? []
         }.value
@@ -19,7 +19,7 @@ enum WaveformAnalyzer {
 
     // MARK: - Core extraction (runs on background thread)
 
-    private static func extractBars(url: URL, targetBars: Int) throws -> [Float] {
+    nonisolated static func extractBars(url: URL, targetBars: Int) throws -> [Float] {
         let file = try AVAudioFile(forReading: url)
         // processingFormat is always deinterleaved Float32 at the file's native
         // sample rate / channel count — samples are already in -1…1.

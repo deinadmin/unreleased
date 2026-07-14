@@ -39,6 +39,8 @@ final class ProjectStore {
     private var syncService: ProjectSyncService?
     private var planService: UserPlanService?
     private var storageService: StorageEnforcementService?
+    private var serverStorageAtCapacity = false
+    private var storageUploadWasRejected = false
     private var profileService: UserProfileService?
     private var sharedSyncService: SharedProjectSyncService?
     private var notificationsService: NotificationsService?
@@ -219,6 +221,8 @@ final class ProjectStore {
 
         storageService?.stop()
         storageService = nil
+        serverStorageAtCapacity = false
+        storageUploadWasRejected = false
 
         profileService?.stop()
         profileService = nil
@@ -250,6 +254,7 @@ final class ProjectStore {
         planService = plan
         plan.start(userID: userID) { [weak self] updated in
             self?.currentPlan = updated
+            self?.updateSyncStatus()
         }
 
         // Server-side quota enforcement backstop: surfaces an upsell when the
@@ -258,8 +263,19 @@ final class ProjectStore {
         storageService = storage
         storage.start(
             userID: userID,
-            onState: { _ in },
+            onState: { [weak self] state in
+                guard let self else { return }
+                self.serverStorageAtCapacity = state.overLimit
+                    || state.limitBytes.map { state.usedBytes >= $0 } == true
+
+                if !self.serverStorageAtCapacity, self.hasStorageCapacity {
+                    self.storageUploadWasRejected = false
+                }
+                self.updateSyncStatus()
+            },
             onRejection: { [weak self] in
+                self?.storageUploadWasRejected = true
+                self?.updateSyncStatus()
                 self?.presentStorageUpsell(.serverBlocked)
             }
         )
@@ -338,6 +354,21 @@ final class ProjectStore {
             syncStatus = .offline
             return
         }
+
+        if storageUploadWasRejected, !serverStorageAtCapacity, hasStorageCapacity {
+            storageUploadWasRejected = false
+        }
+
+        let hasPendingAudio = syncService!.pendingUploadTrackCount > 0
+        let pendingAudioIsBlocked = hasPendingAudio
+            && !syncService!.hasActiveAudioUploads
+            && (serverStorageAtCapacity || !hasStorageCapacity)
+
+        if storageUploadWasRejected || pendingAudioIsBlocked {
+            syncStatus = .error("Storage is full. Free up space to resume syncing.")
+            return
+        }
+
         syncStatus = syncService!.isActive ? .syncing : .synced
     }
 
@@ -657,57 +688,60 @@ final class ProjectStore {
     func importAudioFile(from sourceURL: URL) async throws -> Track {
         let ext = sourceURL.pathExtension.lowercased()
         let fileName = "\(UUID().uuidString).\(ext)"
-        // Compute destinations on the main actor, then perform the blocking
-        // file I/O off the main actor so the UI never hangs during import.
-        let destURL = audioFilesURL.appendingPathComponent(fileName)
-        let downloadsFolder = downloadsURL
+        let documentsFolder = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let audioFolder = documentsFolder.appendingPathComponent("AudioFiles", isDirectory: true)
+        let downloadsFolder = documentsFolder.appendingPathComponent("Downloads", isDirectory: true)
+        let destURL = audioFolder.appendingPathComponent(fileName)
         let downloadDestURL = downloadsFolder.appendingPathComponent(fileName)
-
-        // Copy the source into the app's audio store (heavy I/O — off main).
-        let fileSize: Int64 = try await Task.detached(priority: .userInitiated) {
-            let accessing = sourceURL.startAccessingSecurityScopedResource()
-            defer { if accessing { sourceURL.stopAccessingSecurityScopedResource() } }
-
-            try FileManager.default.copyItem(at: sourceURL, to: destURL)
-            let attrs = try FileManager.default.attributesOfItem(atPath: destURL.path)
-            return (attrs[.size] as? Int64) ?? 0
-        }.value
-
-        let asset = AVURLAsset(url: destURL)
-        let duration: TimeInterval
-        do {
-            let cmDuration = try await asset.load(.duration)
-            duration = CMTimeGetSeconds(cmDuration)
-        } catch {
-            duration = 0
-        }
-
         let rawTitle = sourceURL.deletingPathExtension().lastPathComponent
         let title = rawTitle.isEmpty ? "Untitled" : rawTitle
 
-        let waveform = await WaveformAnalyzer.analyze(url: destURL, targetBars: 200)
+        // Keep the complete import pipeline on a detached executor. In particular,
+        // waveform extraction decodes and visits every audio frame and must never
+        // inherit this target's default MainActor isolation.
+        let result: (fileSize: Int64, duration: TimeInterval, waveform: [Float], pinned: Bool) =
+        try await Task.detached(priority: .userInitiated) {
+            let accessing = sourceURL.startAccessingSecurityScopedResource()
+            defer { if accessing { sourceURL.stopAccessingSecurityScopedResource() } }
 
-        // Pin a copy into the offline Downloads folder (heavy I/O — off main).
-        let pinned = await Task.detached(priority: .userInitiated) { () -> Bool in
+            try FileManager.default.createDirectory(at: audioFolder, withIntermediateDirectories: true)
+            try FileManager.default.copyItem(at: sourceURL, to: destURL)
+            let attrs = try FileManager.default.attributesOfItem(atPath: destURL.path)
+            let fileSize = (attrs[.size] as? Int64) ?? 0
+
+            let asset = AVURLAsset(url: destURL)
+            let duration: TimeInterval
+            do {
+                let cmDuration = try await asset.load(.duration)
+                duration = CMTimeGetSeconds(cmDuration)
+            } catch {
+                duration = 0
+            }
+
+            let waveform = (try? WaveformAnalyzer.extractBars(url: destURL, targetBars: 200)) ?? []
+
+            let pinned: Bool
             do {
                 try FileManager.default.createDirectory(at: downloadsFolder, withIntermediateDirectories: true)
                 if FileManager.default.fileExists(atPath: downloadDestURL.path) {
                     try FileManager.default.removeItem(at: downloadDestURL)
                 }
                 try FileManager.default.copyItem(at: destURL, to: downloadDestURL)
-                return true
+                pinned = true
             } catch {
-                return false
+                pinned = false
             }
+
+            return (fileSize, duration, waveform, pinned)
         }.value
 
         return Track(
             title: title,
             fileName: fileName,
-            fileSize: fileSize,
-            duration: duration,
-            waveformData: waveform.isEmpty ? nil : waveform,
-            isDownloaded: pinned
+            fileSize: result.fileSize,
+            duration: result.duration,
+            waveformData: result.waveform.isEmpty ? nil : result.waveform,
+            isDownloaded: result.pinned
         )
     }
 
@@ -1069,22 +1103,6 @@ final class ProjectStore {
                 print("ProjectStore: save failed — \(error)")
             }
         }
-        mirrorProjectsToAppGroup()
-    }
-
-    private func mirrorProjectsToAppGroup() {
-        let mirrors = projects.map { project in
-            AudioImportBridge.ProjectMirror(
-                id: project.id,
-                name: project.name,
-                gradientColors: project.gradient.colors,
-                gradientStartX: project.gradient.startX,
-                gradientStartY: project.gradient.startY,
-                gradientEndX: project.gradient.endX,
-                gradientEndY: project.gradient.endY
-            )
-        }
-        AudioImportBridge.mirrorProjects(mirrors)
     }
 
     /// Wipes all locally persisted library data. Call on sign-out so the next
@@ -1093,7 +1111,6 @@ final class ProjectStore {
         projects = []
         let url = dataURL
         persistQueue.async { try? FileManager.default.removeItem(at: url) }
-        AudioImportBridge.mirrorProjects([])
     }
 
     private func load() {

@@ -120,7 +120,8 @@ struct ContentView: View {
                 }
             }
 
-            if let toast = toastCenter.toast, !searchState.isActive {
+            if let toast = toastCenter.toast,
+               !searchState.isActive || toast.icon == .spinner {
                 PlayerToastBanner(toast: toast)
                     .padding(.bottom, toastBottomInset)
                     .frame(maxWidth: .infinity)
@@ -169,20 +170,18 @@ struct ContentView: View {
                 handlePendingImport()
             }
         }
-        .sheet(isPresented: $showingSaveInSheet, onDismiss: { importManager.clearURL() }) {
-            if let audioURL = importManager.audioURL {
+        .sheet(isPresented: $showingSaveInSheet) {
+            if importManager.audioURL != nil {
                 SaveInSheet(
-                    audioURL: audioURL,
                     onBack: {
                         showingSaveInSheet = false
                         importManager.clearURL()
                     },
-                    onSaved: {
-                        showingSaveInSheet = false
+                    onSelectProject: { project in
+                        importPendingItems(into: project)
                     }
                 )
                 .environment(store)
-                .environment(toastCenter)
                 .presentationDetents([.medium, .large])
             }
         }
@@ -279,6 +278,7 @@ struct ContentView: View {
 
     private func silentlyImportAll(into projectID: UUID) {
         let items = importManager.pendingItems
+        let toastID = toastCenter.showImporting(fileCount: items.count)
         Task {
             do {
                 for item in items {
@@ -288,13 +288,52 @@ struct ContentView: View {
                     }
                     store.addTrack(track, to: projectID)
                 }
-                let name = store.projects.first(where: { $0.id == projectID })?.name ?? "project"
                 importManager.clearPending()
-                toastCenter.showTrackAdded(to: name)
+                toastCenter.finishImporting(id: toastID)
             } catch {
+                toastCenter.finishImporting(id: toastID)
                 importManager.clearDestination()
                 showingSaveInSheet = true
             }
+        }
+    }
+
+    private func importPendingItems(into project: Project) {
+        let items = importManager.pendingItems
+        guard !items.isEmpty else {
+            showingSaveInSheet = false
+            return
+        }
+
+        // Dismiss first so the app-level toast is the immediate feedback. The
+        // pending source files remain owned until all background imports finish.
+        showingSaveInSheet = false
+        let toastID = toastCenter.showImporting(fileCount: items.count)
+
+        Task {
+            var imported: [Track] = []
+            for item in items {
+                let fileSize = await store.fileSize(at: item.url)
+                if fileSize > 0, fileSize > store.freeStorageBytes {
+                    let name = item.url.deletingPathExtension().lastPathComponent
+                    store.presentStorageUpsell(.uploadTooLarge(fileName: name))
+                    continue
+                }
+
+                do {
+                    var track = try await store.importAudioFile(from: item.url)
+                    if let title = item.title, !title.isEmpty {
+                        track.title = title
+                    }
+                    imported.append(track)
+                } catch {
+                    print("ContentView: Failed to import audio file — \(error)")
+                }
+            }
+
+            store.addTracks(imported, to: project.id)
+            importManager.clearPending()
+            toastCenter.finishImporting(id: toastID)
         }
     }
 

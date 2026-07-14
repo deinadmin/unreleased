@@ -87,7 +87,6 @@ struct TrackInfoSheet: View {
         ScrollView {
             VStack(spacing: 16) {
                 infoCard
-                trackSharingRow
                 primaryActionsGroup
                 secondaryActionsGroup
             }
@@ -142,43 +141,6 @@ struct TrackInfoSheet: View {
         .overlay {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .strokeBorder(Color(.separator).opacity(0.6), lineWidth: 1)
-        }
-    }
-
-    // MARK: - Track sharing
-
-    @ViewBuilder
-    private var trackSharingRow: some View {
-        if !project.isShared {
-            Button {
-                // Track sharing settings — future
-            } label: {
-                HStack {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Track sharing")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundStyle(.primary)
-
-                        HStack(spacing: 4) {
-                            Image(systemName: "lock.fill")
-                                .font(.system(size: 11))
-                            Text("Private")
-                                .font(.system(size: 14))
-                        }
-                        .foregroundStyle(.secondary)
-                    }
-
-                    Spacer()
-
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(.tertiary)
-                }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 14)
-                .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-            }
-            .buttonStyle(.plain)
         }
     }
 

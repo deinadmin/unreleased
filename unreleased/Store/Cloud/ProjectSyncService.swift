@@ -68,6 +68,12 @@ final class ProjectSyncService {
             .count
     }
 
+    /// Distinguishes an upload that is actively making progress from local
+    /// audio that remains pending after cloud storage rejected it.
+    var hasActiveAudioUploads: Bool {
+        !uploadTasks.isEmpty
+    }
+
     private var hasPendingCloudWork: Bool {
         let projects = snapshotProvider().filter { !$0.isShared }
         for project in projects {
@@ -169,7 +175,6 @@ final class ProjectSyncService {
     func enqueueAudioUpload(projectID: UUID, track: Track) {
         guard track.storagePath == nil else { return }
         uploadTasks[track.id]?.cancel()
-        notifyActivityChanged()
         let trackID = track.id
         uploadTasks[trackID] = Task { [weak self] in
             defer {
@@ -178,6 +183,7 @@ final class ProjectSyncService {
             }
             await self?.uploadAudio(projectID: projectID, track: track)
         }
+        notifyActivityChanged()
     }
 
     func enqueueCoverUpload(projectID: UUID) {

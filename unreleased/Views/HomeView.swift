@@ -16,6 +16,7 @@ struct HomeView: View {
 
     @Environment(ProjectStore.self) private var store
     @Environment(AudioPlayer.self) private var player
+    @Environment(PlayerToastCenter.self) private var toastCenter
     @Environment(AppSearchState.self) private var searchState
     @Environment(AuthManager.self) private var auth
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
@@ -190,7 +191,6 @@ struct HomeView: View {
         } message: {
             Text(importError ?? "")
         }
-        .importingOverlay(isPresented: isImporting || isImportingToExisting)
     }
 
     // MARK: - Empty State
@@ -405,9 +405,8 @@ struct HomeView: View {
     private func importTracksToExisting(urls: [URL], into project: Project) {
         guard !urls.isEmpty else { return }
         isImportingToExisting = true
+        let toastID = toastCenter.showImporting(fileCount: urls.count)
         Task {
-            // Let the importing overlay paint before any work begins.
-            await Task.yield()
             var imported: [Track] = []
             for url in urls {
                 let fileSize = await store.fileSize(at: url)
@@ -424,15 +423,15 @@ struct HomeView: View {
             }
             store.addTracks(imported, to: project.id)
             isImportingToExisting = false
+            toastCenter.finishImporting(id: toastID)
         }
     }
 
     private func importAndCreateProject(urls: [URL]) {
         guard !urls.isEmpty else { return }
         isImporting = true
+        let toastID = toastCenter.showImporting(fileCount: urls.count)
         Task {
-            // Let the importing overlay paint before any work begins.
-            await Task.yield()
             var tracks: [Track] = []
             for url in urls {
                 let fileSize = await store.fileSize(at: url)
@@ -450,6 +449,7 @@ struct HomeView: View {
 
             guard !tracks.isEmpty else {
                 isImporting = false
+                toastCenter.finishImporting(id: toastID)
                 return
             }
 
@@ -461,6 +461,7 @@ struct HomeView: View {
             store.addProject(project)
 
             isImporting = false
+            toastCenter.finishImporting(id: toastID)
             navigationPath.append(project.id)
         }
     }

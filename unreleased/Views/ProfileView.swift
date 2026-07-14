@@ -462,7 +462,10 @@ struct ProfileView: View {
                 .font(.system(size: 17, weight: .semibold))
                 .frame(maxWidth: .infinity)
                 .frame(height: 52)
-                .background(Color(.secondarySystemBackground), in: Capsule())
+                .background(
+                    Color(.secondarySystemBackground),
+                    in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+                )
         }
         .buttonStyle(.scale)
         .padding(.bottom, 30)

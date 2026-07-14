@@ -9,11 +9,6 @@
 			<key>orderHint</key>
 			<integer>4</integer>
 		</dict>
-		<key>SaveInUnreleasedShareExtension.xcscheme_^#shared#^_</key>
-		<dict>
-			<key>orderHint</key>
-			<integer>0</integer>
-		</dict>
 		<key>unreleased.xcscheme_^#shared#^_</key>
 		<dict>
 			<key>orderHint</key>
@@ -22,11 +17,6 @@
 	</dict>
 	<key>SuppressBuildableAutocreation</key>
 	<dict>
-		<key>C3A100012FC4000100EB18FB</key>
-		<dict>
-			<key>primary</key>
-			<true/>
-		</dict>
 		<key>C3F168C62FBBBE7800EB18FB</key>
 		<dict>
 			<key>primary</key>

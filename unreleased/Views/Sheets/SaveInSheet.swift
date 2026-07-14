@@ -2,17 +2,13 @@ import SwiftUI
 
 struct SaveInSheet: View {
     @Environment(ProjectStore.self) private var store
-    @Environment(AudioFileImportManager.self) private var importManager
-    @Environment(PlayerToastCenter.self) private var toastCenter
     @Environment(AuthManager.self) private var auth
 
-    let audioURL: URL
     var onBack: () -> Void
-    var onSaved: () -> Void
+    var onSelectProject: (Project) -> Void
 
     @State private var searchText = ""
     @State private var isShowingCreate = false
-    @State private var isSaving = false
     @State private var storageUpsell: StorageUpsellContext?
 
     private var ownerLabel: String {
@@ -56,7 +52,7 @@ struct SaveInSheet: View {
         .background(Color(.systemGroupedBackground))
         .sheet(isPresented: $isShowingCreate) {
             CreateProjectSheet { project in
-                saveToProject(project)
+                selectProject(project)
             }
         }
         .sheet(item: $storageUpsell) { context in
@@ -145,7 +141,7 @@ struct SaveInSheet: View {
     @ViewBuilder
     private func projectRow(_ project: Project) -> some View {
         Button {
-            saveToProject(project)
+            selectProject(project)
         } label: {
             HStack(spacing: 14) {
                 ProjectCoverThumbnail(
@@ -173,56 +169,24 @@ struct SaveInSheet: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .disabled(isSaving)
     }
 
     // MARK: - Actions
 
-    private func saveToProject(_ project: Project) {
+    private func selectProject(_ project: Project) {
         guard store.hasStorageCapacity else {
             storageUpsell = StorageUpsellContext(reason: .uploadFull)
             return
         }
-
-        let accessing = audioURL.startAccessingSecurityScopedResource()
-        let fileSize = (try? FileManager.default.attributesOfItem(atPath: audioURL.path)[.size] as? Int64) ?? 0
-        if accessing { audioURL.stopAccessingSecurityScopedResource() }
-
-        if fileSize > 0, fileSize > store.freeStorageBytes {
-            let name = audioURL.deletingPathExtension().lastPathComponent
-            storageUpsell = StorageUpsellContext(reason: .uploadTooLarge(fileName: name))
-            return
-        }
-
-        isSaving = true
-        Task {
-            do {
-                let track = try await store.importAudioFile(from: audioURL)
-                store.addTrack(track, to: project.id)
-                importManager.clearURL()
-                onSaved()
-                DispatchQueue.main.async {
-                    toastCenter.showTrackAdded(to: project.name)
-                    isSaving = false
-                }
-            } catch {
-                print("SaveInSheet: Failed to import audio file — \(error)")
-                DispatchQueue.main.async {
-                    isSaving = false
-                }
-            }
-        }
+        onSelectProject(project)
     }
 }
 
 #Preview {
     SaveInSheet(
-        audioURL: URL(fileURLWithPath: "/tmp/test.mp3"),
         onBack: {},
-        onSaved: {}
+        onSelectProject: { _ in }
     )
     .environment(ProjectStore())
-    .environment(PlayerToastCenter())
     .environment(AuthManager())
-    .environment(AudioFileImportManager())
 }

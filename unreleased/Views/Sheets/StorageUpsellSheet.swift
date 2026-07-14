@@ -38,22 +38,36 @@ struct StorageUpsellSheet: View {
     private var reason: StorageUpsellContext.Reason { context.reason }
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: 24) {
-                hero
-                    .padding(.top, 12)
+        GeometryReader { geometry in
+            let bottomSafeArea = geometry.safeAreaInsets.bottom
+            let actionBottomInset = max(16, bottomSafeArea - 18)
+            let actionOverlayHeight = 132 + actionBottomInset
 
-                usageCard
+            ZStack(alignment: .bottom) {
+                VStack(spacing: 0) {
+                    hero
+                        .padding(.horizontal, 22)
+                        .padding(.bottom, 24)
 
-                plansCard
+                    ScrollView {
+                        VStack(spacing: 24) {
+                            usageCard
 
-                actions
-                    .padding(.top, 4)
+                            plansCard
+                        }
+                        .padding(.horizontal, 22)
+                        .padding(.bottom, actionOverlayHeight + 16)
+                    }
+                }
+
+                actions(
+                    bottomSafeArea: bottomSafeArea,
+                    bottomInset: actionBottomInset
+                )
             }
-            .padding(.horizontal, 22)
-            .padding(.bottom, 28)
+            .ignoresSafeArea(edges: .bottom)
         }
-        .background(Color(.systemGroupedBackground))
+        .background(Color(.systemGroupedBackground).ignoresSafeArea())
         .presentationDetents([.large])
         .presentationDragIndicator(.visible)
     }
@@ -78,6 +92,7 @@ struct StorageUpsellSheet: View {
                     .font(.system(size: 36, weight: .semibold))
                     .foregroundStyle(.white)
             }
+            .padding(.top, 36)
 
             VStack(spacing: 8) {
                 Text(title)
@@ -183,7 +198,7 @@ struct StorageUpsellSheet: View {
 
     // MARK: - Actions
 
-    private var actions: some View {
+    private func actions(bottomSafeArea: CGFloat, bottomInset: CGFloat) -> some View {
         VStack(spacing: 12) {
             Button {
                 dismiss()
@@ -209,10 +224,24 @@ struct StorageUpsellSheet: View {
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity)
                     .frame(height: 52)
-                    .background(Color(.secondarySystemGroupedBackground), in: Capsule())
+                    .background(
+                        Color(.secondarySystemGroupedBackground),
+                        in: notNowShape(bottomSafeArea: bottomSafeArea)
+                    )
             }
             .buttonStyle(.scale)
         }
+        .padding(.horizontal, 22)
+        .padding(.top, 16)
+        .padding(.bottom, bottomInset)
+        .background(Color(.systemGroupedBackground))
+    }
+
+    private func notNowShape(bottomSafeArea: CGFloat) -> ConcentricRectangle {
+        ConcentricRectangle(
+            uniformTopCorners: .fixed(26),
+            uniformBottomCorners: bottomSafeArea > 0 ? .concentric : .fixed(26)
+        )
     }
 
     // MARK: - Reason-driven copy

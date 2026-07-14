@@ -5,6 +5,7 @@ struct ProjectDetailView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(ProjectStore.self) private var store
     @Environment(AudioPlayer.self) private var player
+    @Environment(PlayerToastCenter.self) private var toastCenter
     @Environment(AppSearchState.self) private var searchState
     @Environment(AuthManager.self) private var auth
     @Environment(\.navigateToTrackNotes) private var navigateToTrackNotes
@@ -112,7 +113,6 @@ struct ProjectDetailView: View {
         } message: {
             Text(importError ?? "")
         }
-        .importingOverlay(isPresented: isImporting)
         .task(id: projectID) {
             await resolveOwnerLabel()
             await resolveLinkEnabled()
@@ -344,10 +344,10 @@ struct ProjectDetailView: View {
     // MARK: - Actions
 
     private func importTracks(urls: [URL], into project: Project) {
+        guard !urls.isEmpty else { return }
         isImporting = true
+        let toastID = toastCenter.showImporting(fileCount: urls.count)
         Task {
-            // Let the importing overlay paint before any work begins.
-            await Task.yield()
             var imported: [Track] = []
             for url in urls {
                 let fileSize = await store.fileSize(at: url)
@@ -367,6 +367,7 @@ struct ProjectDetailView: View {
             }
             store.addTracks(imported, to: project.id)
             isImporting = false
+            toastCenter.finishImporting(id: toastID)
         }
     }
 

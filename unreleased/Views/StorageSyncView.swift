@@ -153,7 +153,7 @@ struct StorageSyncView: View {
                 .font(.system(size: 18, weight: .medium))
                 .foregroundStyle(.green)
         case .error:
-            Image(systemName: "exclamationmark.icloud.fill")
+            Image(systemName: "xmark.icloud.fill")
                 .font(.system(size: 18, weight: .medium))
                 .foregroundStyle(.red)
         }
