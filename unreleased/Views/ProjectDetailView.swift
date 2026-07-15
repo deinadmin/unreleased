@@ -168,7 +168,7 @@ struct ProjectDetailView: View {
                 trackListSection(project: project)
                     .padding(.top, 24)
             }
-            .padding(.bottom, 100)
+            .bottomChromeAwarePadding(resting: 36)
         }
     }
 

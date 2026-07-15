@@ -157,6 +157,7 @@ struct ContentView: View {
         .environment(toastCenter)
         .environment(searchState)
         .environment(miniPlayerVisibility)
+        .environment(\.appBottomChromeIsVisible, showsBottomChrome)
         .environment(\.navigateToTrackNotes) { trackID, projectID in
             if searchState.isActive {
                 searchState.deactivate()

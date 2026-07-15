@@ -43,7 +43,7 @@ struct NotificationsView: View {
             }
             .padding(.horizontal, 20)
             .padding(.top, 12)
-            .padding(.bottom, 32)
+            .bottomChromeAwarePadding(resting: 32)
         }
     }
 

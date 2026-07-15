@@ -40,6 +40,12 @@ final class AudioPlayer {
             UserDefaults.standard.set(equalizerGains, forKey: Self.equalizerGainsKey)
         }
     }
+    private(set) var customEqualizerPresets: [CustomEqualizerPreset] {
+        didSet {
+            guard let data = try? JSONEncoder().encode(customEqualizerPresets) else { return }
+            UserDefaults.standard.set(data, forKey: Self.customEqualizerPresetsKey)
+        }
+    }
 
     private let store: ProjectStore
     /// Origin context (project + track position) for what plays after the queue empties.
@@ -58,6 +64,7 @@ final class AudioPlayer {
     private var scheduleGeneration = 0
     private var nowPlayingArtwork: MPMediaItemArtwork?
     private var loadTask: Task<Void, Never>?
+    private var audioSessionActivationTask: Task<Void, Never>?
     private var wasPlayingBeforeInterruption = false
     // Only mutated on MainActor; deinit is nonisolated and removes the global targets.
     nonisolated(unsafe) private var remoteCommandTargets: [(command: MPRemoteCommand, target: Any)] = []
@@ -65,6 +72,7 @@ final class AudioPlayer {
     private let trackRestartThreshold: TimeInterval = 1.5
     private static let equalizerEnabledKey = "audio.equalizer.enabled"
     private static let equalizerGainsKey = "audio.equalizer.gains"
+    private static let customEqualizerPresetsKey = "audio.equalizer.customPresets"
 
     init(store: ProjectStore) {
         self.store = store
@@ -74,6 +82,9 @@ final class AudioPlayer {
             ? savedGains!
             : EqualizerPreset.flat.gains
         self.isEqualizerEnabled = UserDefaults.standard.object(forKey: Self.equalizerEnabledKey) as? Bool ?? false
+        let savedCustomPresets = UserDefaults.standard.data(forKey: Self.customEqualizerPresetsKey)
+            .flatMap { try? JSONDecoder().decode([CustomEqualizerPreset].self, from: $0) }
+        self.customEqualizerPresets = savedCustomPresets ?? []
 
         audioEngine.attach(playerNode)
         audioEngine.attach(equalizer)
@@ -98,6 +109,14 @@ final class AudioPlayer {
         }
     }
 
+    var activeCustomEqualizerPreset: CustomEqualizerPreset? {
+        guard activeEqualizerPreset == nil else { return nil }
+        return customEqualizerPresets.first { preset in
+            preset.gains.count == equalizerGains.count
+                && zip(preset.gains, equalizerGains).allSatisfy { abs($0 - $1) < 0.05 }
+        }
+    }
+
     func setEqualizerEnabled(_ enabled: Bool) {
         isEqualizerEnabled = enabled
     }
@@ -110,6 +129,32 @@ final class AudioPlayer {
     func applyEqualizerPreset(_ preset: EqualizerPreset) {
         equalizerGains = preset.gains
         isEqualizerEnabled = true
+    }
+
+    func applyCustomEqualizerPreset(_ preset: CustomEqualizerPreset) {
+        guard preset.gains.count == EqualizerBand.all.count else { return }
+        equalizerGains = preset.gains
+        isEqualizerEnabled = true
+    }
+
+    func saveCustomEqualizerPreset(named title: String) {
+        let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedTitle.isEmpty else { return }
+        customEqualizerPresets.append(
+            CustomEqualizerPreset(title: trimmedTitle, gains: equalizerGains)
+        )
+    }
+
+    func renameCustomEqualizerPreset(id: CustomEqualizerPreset.ID, to title: String) {
+        let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedTitle.isEmpty,
+              let index = customEqualizerPresets.firstIndex(where: { $0.id == id })
+        else { return }
+        customEqualizerPresets[index].title = trimmedTitle
+    }
+
+    func deleteCustomEqualizerPreset(id: CustomEqualizerPreset.ID) {
+        customEqualizerPresets.removeAll { $0.id == id }
     }
 
     func resetEqualizer() {
@@ -223,9 +268,39 @@ final class AudioPlayer {
         currentTrack = track
         currentProject = project
         currentTime = 0
+        duration = track.duration
+        isPlaying = false
+        refreshNowPlayingArtwork(for: project)
+        updateNowPlayingInfo()
 
-        setupAudioSession()
+        let trackID = track.id
+        audioSessionActivationTask = Task { [weak self] in
+            let activationError = await Self.activateAudioSessionOffMain()
+            guard let self, !Task.isCancelled, self.currentTrack?.id == trackID else { return }
+            self.audioSessionActivationTask = nil
 
+            guard activationError == nil else {
+                self.isPlaying = false
+                print("AudioPlayer: session activation failed — \(activationError!)")
+                self.updateNowPlayingInfo()
+                return
+            }
+
+            self.finishStartingPlayback(
+                track: track,
+                in: project,
+                fileURL: fileURL,
+                fromQueue: fromQueue
+            )
+        }
+    }
+
+    private func finishStartingPlayback(
+        track: Track,
+        in project: Project,
+        fileURL: URL,
+        fromQueue: Bool
+    ) {
         var playbackStarted = false
         do {
             let file = try AVAudioFile(forReading: fileURL)
@@ -242,7 +317,6 @@ final class AudioPlayer {
             return
         }
 
-        refreshNowPlayingArtwork(for: project)
         // Only resync shuffle when this play is part of the active context — queued tracks
         // from foreign projects should not clobber the shuffleOrder of the context project.
         if isShuffleEnabled, !fromQueue {
@@ -668,6 +742,8 @@ final class AudioPlayer {
     }
 
     private func tearDownPlayer() {
+        audioSessionActivationTask?.cancel()
+        audioSessionActivationTask = nil
         scheduleGeneration += 1
         playbackTimer?.invalidate()
         playbackTimer = nil
@@ -702,7 +778,6 @@ final class AudioPlayer {
     @discardableResult
     private func startEngineIfNeeded() -> Bool {
         do {
-            try AVAudioSession.sharedInstance().setActive(true)
             if !audioEngine.isRunning {
                 audioEngine.prepare()
                 try audioEngine.start()
@@ -722,18 +797,37 @@ final class AudioPlayer {
             updateNowPlayingInfo()
             return false
         }
-        guard startEngineIfNeeded() else {
-            updateNowPlayingInfo()
-            return false
-        }
 
-        playerNode.play()
-        isPlaying = playerNode.isPlaying
-        updateNowPlayingInfo()
-        return isPlaying
+        let expectedGeneration = scheduleGeneration
+        audioSessionActivationTask?.cancel()
+        audioSessionActivationTask = Task { [weak self] in
+            let activationError = await Self.activateAudioSessionOffMain()
+            guard let self,
+                  !Task.isCancelled,
+                  self.scheduleGeneration == expectedGeneration,
+                  self.audioFile != nil
+            else { return }
+            self.audioSessionActivationTask = nil
+
+            guard activationError == nil, self.startEngineIfNeeded() else {
+                self.isPlaying = false
+                if let activationError {
+                    print("AudioPlayer: session activation failed — \(activationError)")
+                }
+                self.updateNowPlayingInfo()
+                return
+            }
+
+            self.playerNode.play()
+            self.isPlaying = self.playerNode.isPlaying
+            self.updateNowPlayingInfo()
+        }
+        return true
     }
 
     private func pausePlayback() {
+        audioSessionActivationTask?.cancel()
+        audioSessionActivationTask = nil
         updateCurrentTimeFromEngine()
         playerNode.pause()
 
@@ -765,19 +859,6 @@ final class AudioPlayer {
 
         let highestBoost = equalizerGains.max() ?? 0
         equalizer.globalGain = isEqualizerEnabled ? -min(max(highestBoost * 0.55, 0), 6) : 0
-    }
-
-    private func setupAudioSession() {
-        do {
-            try AVAudioSession.sharedInstance().setCategory(
-                .playback,
-                mode: .default,
-                options: []
-            )
-            try AVAudioSession.sharedInstance().setActive(true)
-        } catch {
-            print("AudioPlayer: session setup failed — \(error)")
-        }
     }
 
     private func configureAudioSessionCategory() {
@@ -940,7 +1021,6 @@ final class AudioPlayer {
     private func clearNowPlayingInfo() {
         let nowPlayingCenter = MPNowPlayingInfoCenter.default()
         nowPlayingCenter.nowPlayingInfo = nil
-        nowPlayingCenter.playbackState = .stopped
         updateRemoteCommandAvailability()
     }
 
@@ -961,8 +1041,18 @@ final class AudioPlayer {
 
         let nowPlayingCenter = MPNowPlayingInfoCenter.default()
         nowPlayingCenter.nowPlayingInfo = info
-        nowPlayingCenter.playbackState = isPlaying ? .playing : .paused
         updateRemoteCommandAvailability()
+    }
+
+    private nonisolated static func activateAudioSessionOffMain() async -> String? {
+        await Task.detached(priority: .userInitiated) {
+            do {
+                try AVAudioSession.sharedInstance().setActive(true)
+                return nil
+            } catch {
+                return error.localizedDescription
+            }
+        }.value
     }
 
     private func updateNowPlayingInfo() {

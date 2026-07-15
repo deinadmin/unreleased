@@ -57,7 +57,7 @@ struct GradientTheme: Codable, Hashable, Sendable {
         )
         renderer.scale = 2
         renderer.isOpaque = true
-        return renderer.uiImage
+        return renderer.uiImage?.opaqueArtworkCopy()
     }
 }
 
@@ -221,7 +221,22 @@ extension UIImage {
         )
         renderer.scale = 2
         renderer.isOpaque = true
-        return renderer.uiImage
+        return renderer.uiImage?.opaqueArtworkCopy()
+    }
+
+    /// MediaRemote rejects visually opaque artwork that still carries an alpha
+    /// channel and otherwise decodes it with roughly twice the memory.
+    @MainActor
+    fileprivate func opaqueArtworkCopy() -> UIImage {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = scale
+        format.opaque = true
+        let bounds = CGRect(origin: .zero, size: size)
+        return UIGraphicsImageRenderer(size: size, format: format).image { context in
+            context.cgContext.setFillColor(UIColor.black.cgColor)
+            context.cgContext.fill(bounds)
+            draw(in: bounds)
+        }
     }
 }
 

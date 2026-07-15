@@ -49,3 +49,15 @@ enum EqualizerPreset: String, CaseIterable, Identifiable, Sendable {
         }
     }
 }
+
+struct CustomEqualizerPreset: Codable, Equatable, Identifiable, Sendable {
+    let id: UUID
+    var title: String
+    var gains: [Float]
+
+    init(id: UUID = UUID(), title: String, gains: [Float]) {
+        self.id = id
+        self.title = title
+        self.gains = gains
+    }
+}

@@ -39,9 +39,9 @@ struct SquarePhotoPicker: UIViewControllerRepresentable {
             didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]
         ) {
             if let cropped = info[.editedImage] as? UIImage {
-                onImagePicked(cropped.normalizedOrientation())
+                onImagePicked(cropped.opaqueSquareCropped())
             } else if let original = info[.originalImage] as? UIImage {
-                onImagePicked(original.normalizedOrientation().squareCropped())
+                onImagePicked(original.opaqueSquareCropped())
             }
             dismiss()
         }
@@ -49,28 +49,25 @@ struct SquarePhotoPicker: UIViewControllerRepresentable {
 }
 
 private extension UIImage {
-    func normalizedOrientation() -> UIImage {
-        guard imageOrientation != .up else { return self }
-        let format = UIGraphicsImageRendererFormat()
-        format.scale = scale
-        format.opaque = false
-        return UIGraphicsImageRenderer(size: size, format: format).image { _ in
-            draw(in: CGRect(origin: .zero, size: size))
-        }
-    }
-
-    /// Center-crops to a square when the picker did not return an edited image.
-    func squareCropped() -> UIImage {
+    /// Center-crops, normalizes orientation, caps decode size, and removes alpha
+    /// before the image is cached, encoded as JPEG, or used as Now Playing art.
+    func opaqueSquareCropped(maxPixelDimension: CGFloat = 1_200) -> UIImage {
         let side = min(size.width, size.height)
+        let outputSide = min(side, maxPixelDimension)
+        let outputSize = CGSize(width: outputSide, height: outputSide)
+        let outputScale = outputSide / side
+        let scaledSize = CGSize(width: size.width * outputScale, height: size.height * outputScale)
         let format = UIGraphicsImageRendererFormat()
-        format.scale = scale
-        format.opaque = false
-        return UIGraphicsImageRenderer(size: CGSize(width: side, height: side), format: format).image { _ in
+        format.scale = 1
+        format.opaque = true
+        return UIGraphicsImageRenderer(size: outputSize, format: format).image { context in
+            context.cgContext.setFillColor(UIColor.black.cgColor)
+            context.cgContext.fill(CGRect(origin: .zero, size: outputSize))
             draw(in: CGRect(
-                x: -(size.width - side) / 2,
-                y: -(size.height - side) / 2,
-                width: size.width,
-                height: size.height
+                x: -(scaledSize.width - outputSide) / 2,
+                y: -(scaledSize.height - outputSide) / 2,
+                width: scaledSize.width,
+                height: scaledSize.height
             ))
         }
     }

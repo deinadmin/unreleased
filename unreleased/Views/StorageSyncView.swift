@@ -9,6 +9,7 @@ struct StorageSyncView: View {
             storageSection
             syncSection
         }
+        .bottomChromeAwareScrollMargin()
         .listStyle(.insetGrouped)
         .navigationTitle("Storage & Sync")
         .navigationBarTitleDisplayMode(.inline)

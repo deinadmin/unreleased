@@ -16,8 +16,8 @@ struct AboutView: View {
                 openSourceSection
                     .padding(.horizontal, 20)
                     .padding(.top, 24)
-                    .padding(.bottom, 40)
             }
+            .bottomChromeAwarePadding(resting: 40)
         }
         .navigationTitle("About")
         .navigationBarTitleDisplayMode(.inline)

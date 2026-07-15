@@ -2,6 +2,9 @@ import SwiftUI
 
 struct EqualizerView: View {
     @Environment(AudioPlayer.self) private var player
+    @State private var presetPrompt: PresetNamePrompt?
+    @State private var presetName = ""
+    @State private var hapticTrigger = 0
 
     var body: some View {
         ScrollView {
@@ -9,7 +12,8 @@ struct EqualizerView: View {
                 EqualizerEditor(
                     gains: player.equalizerGains,
                     isEnabled: player.isEqualizerEnabled,
-                    onGainChange: player.setEqualizerGain,
+                    onGainChange: setEqualizerGain,
+                    onActivate: { player.setEqualizerEnabled(true) },
                     onReset: player.resetEqualizer
                 )
 
@@ -18,11 +22,29 @@ struct EqualizerView: View {
             }
             .padding(.horizontal, 16)
             .padding(.top, 14)
-            .padding(.bottom, 36)
+            .bottomChromeAwarePadding(resting: 36)
         }
         .background(Color(.systemGroupedBackground))
         .navigationTitle("EQ")
         .navigationBarTitleDisplayMode(.inline)
+        .sensoryFeedback(.increase, trigger: hapticTrigger)
+        .alert(presetPromptTitle, isPresented: isShowingPresetPrompt) {
+            if case .delete = presetPrompt {
+                Button("Cancel", role: .cancel) {}
+                Button("Delete", role: .destructive) {
+                    completePresetPrompt()
+                }
+            } else {
+                TextField("Preset name", text: $presetName)
+                Button("Cancel", role: .cancel) {}
+                Button(presetPromptActionTitle) {
+                    completePresetPrompt()
+                }
+                .disabled(presetName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        } message: {
+            Text(presetPromptMessage)
+        }
     }
 
     private var enableSection: some View {
@@ -52,7 +74,7 @@ struct EqualizerView: View {
                 Text("Presets")
                     .font(.headline)
                 Spacer()
-                Text(player.activeEqualizerPreset?.title ?? "Custom")
+                Text(activePresetTitle)
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
             }
@@ -63,10 +85,41 @@ struct EqualizerView: View {
                     EqualizerPresetRow(
                         preset: preset,
                         isSelected: player.activeEqualizerPreset == preset,
-                        action: { player.applyEqualizerPreset(preset) }
+                        action: { applyPreset(preset) }
                     )
 
-                    if index < EqualizerPreset.allCases.count - 1 {
+                    if index < EqualizerPreset.allCases.count - 1 || !player.customEqualizerPresets.isEmpty {
+                        Divider()
+                            .padding(.leading, 16)
+                    }
+                }
+
+                ForEach(Array(player.customEqualizerPresets.enumerated()), id: \.element.id) { index, preset in
+                    CustomEqualizerPresetRow(
+                        preset: preset,
+                        isSelected: player.activeCustomEqualizerPreset?.id == preset.id,
+                        action: { applyPreset(preset) }
+                    )
+                    .contextMenu {
+                        Button {
+                            beginRenaming(preset)
+                        } label: {
+                            Label("Rename", systemImage: "pencil")
+                        }
+
+                        Button(role: .destructive) {
+                            presetPrompt = .delete(preset)
+                        } label: {
+                            Label {
+                                Text("Delete")
+                            } icon: {
+                                RedTrashMenuIcon()
+                            }
+                        }
+                        .tint(.red)
+                    }
+
+                    if index < player.customEqualizerPresets.count - 1 {
                         Divider()
                             .padding(.leading, 16)
                     }
@@ -76,6 +129,120 @@ struct EqualizerView: View {
                 Color(.secondarySystemGroupedBackground),
                 in: RoundedRectangle(cornerRadius: 16, style: .continuous)
             )
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+
+            Button {
+                presetName = ""
+                presetPrompt = .save
+            } label: {
+                Label("Save Current as New Preset", systemImage: "plus")
+                    .font(.subheadline.weight(.semibold))
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 48)
+                    .background(
+                        Color(.secondarySystemGroupedBackground),
+                        in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    )
+                    .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            }
+            .buttonStyle(.scale)
+            .disabled(!canSaveCurrentPreset)
+            .opacity(canSaveCurrentPreset ? 1 : 0.45)
+        }
+    }
+
+    private var canSaveCurrentPreset: Bool {
+        player.activeEqualizerPreset == nil && player.activeCustomEqualizerPreset == nil
+    }
+
+    private var isShowingPresetPrompt: Binding<Bool> {
+        Binding(
+            get: { presetPrompt != nil },
+            set: { isPresented in
+                if !isPresented {
+                    presetPrompt = nil
+                }
+            }
+        )
+    }
+
+    private var presetPromptTitle: String {
+        switch presetPrompt {
+        case .rename: "Rename EQ Preset"
+        case .delete: "Delete EQ Preset?"
+        case .save, .none: "Save EQ Preset"
+        }
+    }
+
+    private var presetPromptActionTitle: String {
+        if case .rename = presetPrompt { "Rename" } else { "Save" }
+    }
+
+    private var presetPromptMessage: String {
+        switch presetPrompt {
+        case let .delete(preset):
+            "Are you sure you want to delete “\(preset.title)”?"
+        case .rename:
+            "Enter a new name for this preset."
+        case .save, .none:
+            "Save the current curve as a new preset."
+        }
+    }
+
+    private func beginRenaming(_ preset: CustomEqualizerPreset) {
+        presetName = preset.title
+        presetPrompt = .rename(preset.id)
+    }
+
+    private func completePresetPrompt() {
+        switch presetPrompt {
+        case .save:
+            player.saveCustomEqualizerPreset(named: presetName)
+        case let .rename(id):
+            player.renameCustomEqualizerPreset(id: id, to: presetName)
+        case let .delete(preset):
+            player.deleteCustomEqualizerPreset(id: preset.id)
+        case .none:
+            break
+        }
+    }
+
+    private func setEqualizerGain(_ gain: Float, at index: Int) {
+        guard player.equalizerGains.indices.contains(index),
+              abs(player.equalizerGains[index] - gain) >= 0.05
+        else { return }
+        player.setEqualizerGain(gain, at: index)
+        hapticTrigger &+= 1
+    }
+
+    private func applyPreset(_ preset: EqualizerPreset) {
+        player.applyEqualizerPreset(preset)
+        hapticTrigger &+= 1
+    }
+
+    private func applyPreset(_ preset: CustomEqualizerPreset) {
+        player.applyCustomEqualizerPreset(preset)
+        hapticTrigger &+= 1
+    }
+
+    private var activePresetTitle: String {
+        player.activeEqualizerPreset?.title
+            ?? player.activeCustomEqualizerPreset?.title
+            ?? "Custom"
+    }
+}
+
+private enum PresetNamePrompt: Equatable {
+    case save
+    case rename(CustomEqualizerPreset.ID)
+    case delete(CustomEqualizerPreset)
+}
+
+private struct RedTrashMenuIcon: View {
+    var body: some View {
+        if let image = UIImage(systemName: "trash")?
+            .withTintColor(.systemRed, renderingMode: .alwaysOriginal) {
+            Image(uiImage: image)
         }
     }
 }
@@ -84,13 +251,14 @@ private struct EqualizerEditor: View {
     let gains: [Float]
     let isEnabled: Bool
     let onGainChange: (Float, Int) -> Void
+    let onActivate: () -> Void
     let onReset: () -> Void
 
     @State private var activeBandID: Int?
 
     private var displayedGains: [CGFloat] {
         EqualizerBand.all.indices.map { index in
-            guard isEnabled, gains.indices.contains(index) else { return 0 }
+            guard gains.indices.contains(index) else { return 0 }
             return CGFloat(gains[index])
         }
     }
@@ -101,7 +269,7 @@ private struct EqualizerEditor: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Shape your sound")
                         .font(.title2.weight(.bold))
-                    Text(isEnabled ? "Drag any point up or down." : "Turn on EQ to edit the curve.")
+                    Text("Drag any point up or down.")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                         .contentTransition(.interpolate)
@@ -120,7 +288,8 @@ private struct EqualizerEditor: View {
                 gains: displayedGains,
                 isEnabled: isEnabled,
                 activeBandID: $activeBandID,
-                onGainChange: onGainChange
+                onGainChange: onGainChange,
+                onActivate: onActivate
             )
             .frame(height: 300)
         }
@@ -129,10 +298,13 @@ private struct EqualizerEditor: View {
 }
 
 private struct InteractiveEqualizerChart: View {
+    @Environment(\.colorScheme) private var colorScheme
+
     let gains: [CGFloat]
     let isEnabled: Bool
     @Binding var activeBandID: Int?
     let onGainChange: (Float, Int) -> Void
+    let onActivate: () -> Void
 
     private let topInset: CGFloat = 34
     private let bottomInset: CGFloat = 48
@@ -180,7 +352,7 @@ private struct InteractiveEqualizerChart: View {
                 )
                     .fill(
                         LinearGradient(
-                            colors: [Color.accentColor.opacity(isEnabled ? 0.25 : 0.08), .clear],
+                            colors: [curveColor.opacity(isEnabled ? 0.25 : 0.1), .clear],
                             startPoint: .top,
                             endPoint: .bottom
                         )
@@ -194,7 +366,7 @@ private struct InteractiveEqualizerChart: View {
                     fillToBottom: false
                 )
                     .stroke(
-                        Color.accentColor.opacity(isEnabled ? 1 : 0.4),
+                        curveColor,
                         style: StrokeStyle(lineWidth: 3, lineCap: .round, lineJoin: .round)
                     )
                     .frame(width: extendedRect.width, height: extendedRect.height)
@@ -224,6 +396,12 @@ private struct InteractiveEqualizerChart: View {
                             color: Color.accentColor.opacity(activeBandID == band.id ? 0.35 : 0.12),
                             radius: activeBandID == band.id ? 7 : 3,
                             y: 2
+                        )
+                        .shadow(
+                            color: colorScheme == .dark
+                                ? Color.white.opacity(activeBandID == band.id ? 0.22 : 0.18)
+                                : .clear,
+                            radius: activeBandID == band.id ? 5 : 3
                         )
                         .position(point)
 
@@ -256,6 +434,7 @@ private struct InteractiveEqualizerChart: View {
                         band: band,
                         gain: Double(gains[band.id]),
                         isEnabled: isEnabled,
+                        onActivate: onActivate,
                         onChange: { onGainChange(Float($0), band.id) }
                     )
                     .frame(width: max(36, plotRect.width / CGFloat(EqualizerBand.all.count)), height: plotRect.height)
@@ -273,7 +452,9 @@ private struct InteractiveEqualizerChart: View {
     private func chartDragGesture(in plotRect: CGRect) -> some Gesture {
         DragGesture(minimumDistance: 0)
             .onChanged { value in
-                guard isEnabled else { return }
+                if !isEnabled {
+                    onActivate()
+                }
 
                 let bandID: Int
                 if let activeBandID {
@@ -292,6 +473,10 @@ private struct InteractiveEqualizerChart: View {
             .onEnded { _ in
                 activeBandID = nil
             }
+    }
+
+    private var curveColor: Color {
+        isEnabled ? Color.accentColor : Color.secondary.opacity(0.55)
     }
 
     private func chartPoints(in rect: CGRect) -> [CGPoint] {
@@ -455,6 +640,7 @@ private struct EqualizerAccessibleBandControl: View {
     let band: EqualizerBand
     let gain: Double
     let isEnabled: Bool
+    let onActivate: () -> Void
     let onChange: (Double) -> Void
 
     var body: some View {
@@ -462,9 +648,11 @@ private struct EqualizerAccessibleBandControl: View {
             .accessibilityElement()
             .accessibilityLabel("\(band.character), \(band.label) hertz")
             .accessibilityValue(isEnabled ? String(format: "%+.1f decibels", gain) : "EQ off")
-            .accessibilityHint(isEnabled ? "Swipe up or down to adjust" : "Turn on the equalizer to adjust")
+            .accessibilityHint(isEnabled ? "Swipe up or down to adjust" : "Adjusting turns on the equalizer")
             .accessibilityAdjustableAction { direction in
-                guard isEnabled else { return }
+                if !isEnabled {
+                    onActivate()
+                }
                 switch direction {
                 case .increment:
                     onChange(min(12, gain + 0.5))
@@ -510,6 +698,39 @@ private struct EqualizerPresetRow: View {
     }
 }
 
+private struct CustomEqualizerPresetRow: View {
+    let preset: CustomEqualizerPreset
+    let isSelected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(preset.title)
+                        .font(.body.weight(.medium))
+                        .foregroundStyle(.primary)
+                    Text("Custom preset")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+
+                Image(systemName: "checkmark")
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(Color.accentColor)
+                    .opacity(isSelected ? 1 : 0)
+            }
+            .padding(.horizontal, 16)
+            .frame(minHeight: 58)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+}
+
 private extension EqualizerPreset {
     var detail: String {
         switch self {
@@ -528,4 +749,5 @@ private extension EqualizerPreset {
         EqualizerView()
     }
     .environment(AudioPlayer(store: ProjectStore()))
+    .environment(MiniPlayerVisibility())
 }

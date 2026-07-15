@@ -44,8 +44,8 @@ struct ProfileView: View {
                     signOutButton
                         .padding(.horizontal, 20)
                         .padding(.top, 32)
-                        .padding(.bottom, 40)
                 }
+                .bottomChromeAwarePadding(resting: 40)
             }
             .blur(radius: 14 * avatarExpansionProgress * avatarDragBlurProgress)
             .allowsHitTesting(!isAvatarOverlayPresented)
@@ -491,7 +491,6 @@ struct ProfileView: View {
                 )
         }
         .buttonStyle(.scale)
-        .padding(.bottom, 30)
     }
 
     private func signOut() {

@@ -87,6 +87,7 @@ struct TrackNotesView: View {
             }
             .scrollClipDisabled()
             .scrollEdgeEffectStyle(.soft, for: .vertical)
+            .bottomChromeAwareScrollMargin(resting: 12)
         }
     }
 
@@ -102,6 +103,7 @@ struct TrackNotesView: View {
             .contentMargins(.vertical, 12, for: .scrollContent)
             .scrollClipDisabled()
             .scrollEdgeEffectStyle(.soft, for: .vertical)
+            .bottomChromeAwareScrollMargin(resting: 12)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 

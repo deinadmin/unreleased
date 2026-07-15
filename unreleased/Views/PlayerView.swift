@@ -1045,14 +1045,11 @@ private struct HeroCoverView: View {
     }
 
     var body: some View {
-        // Pause the timeline when not playing or when the user is scrubbing.
-        // Scrub rotation is driven by onChange(of: playbackProgress) instead,
-        // so there is no need for per-frame ticks during a scrub gesture.
-        TimelineView(.animation(minimumInterval: nil, paused: !isPlaying || isScrubbing)) { tl in
-            let degrees = rotationAt(tl.date)
-            ZStack {
-
-                // Cover artwork clipped to a circle.
+        ZStack {
+            // Keep only the rotating artwork in the per-frame subtree. Liquid
+            // Glass and controls must not be invalidated at display refresh rate.
+            TimelineView(.animation(minimumInterval: nil, paused: !isPlaying || isScrubbing)) { tl in
+                let degrees = rotationAt(tl.date)
                 coverArtwork(rotation: degrees)
                     .background {
                         Circle()
@@ -1064,26 +1061,26 @@ private struct HeroCoverView: View {
                                 y: showsShadow ? 10 : 0
                             )
                     }
-
-                // Mini-bar dim layer (fades out when the player expands).
-                Circle()
-                    .glassEffect(.clear)
-                    .opacity(showsMiniOverlay ? 1 : 0)
-
-                // Mini-bar play/pause icon (or loading indicator).
-                Group {
-                    if isLoadingAudio {
-                        TwoToneCircleSpinner(diameter: 18, lineWidth: 2)
-                            .environment(\.colorScheme, .dark)
-                    } else {
-                        Image(systemName: isPlaying ? "pause.fill" : "play.fill")
-                            .font(.system(size: 14, weight: .bold))
-                            .foregroundStyle(.white)
-                            .animation(nil, value: isPlaying)
-                    }
-                }
-                .opacity(showsMiniOverlay ? 1 : 0)
             }
+
+            // Mini-bar dim layer (fades out when the player expands).
+            Circle()
+                .glassEffect(.clear)
+                .opacity(showsMiniOverlay ? 1 : 0)
+
+            // Mini-bar play/pause icon (or loading indicator).
+            Group {
+                if isLoadingAudio {
+                    TwoToneCircleSpinner(diameter: 18, lineWidth: 2)
+                        .environment(\.colorScheme, .dark)
+                } else {
+                    Image(systemName: isPlaying ? "pause.fill" : "play.fill")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundStyle(.white)
+                        .animation(nil, value: isPlaying)
+                }
+            }
+            .opacity(showsMiniOverlay ? 1 : 0)
         }
         .aspectRatio(1, contentMode: .fit)
         .onAppear {

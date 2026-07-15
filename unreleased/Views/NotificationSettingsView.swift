@@ -27,7 +27,7 @@ struct NotificationSettingsView: View {
             }
             .padding(.horizontal, 20)
             .padding(.top, 24)
-            .padding(.bottom, 40)
+            .bottomChromeAwarePadding(resting: 40)
         }
         .navigationTitle("Notifications")
         .navigationBarTitleDisplayMode(.inline)

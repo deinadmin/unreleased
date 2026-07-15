@@ -52,15 +52,6 @@ struct HomeView: View {
         }
     }
 
-    private var showsBottomChrome: Bool {
-        searchState.isActive || (player.currentTrack != nil && !player.isShowingNowPlaying)
-    }
-
-    /// Extra scroll inset when the floating mini player or search bar is visible (matches project detail).
-    private var scrollBottomPadding: CGFloat {
-        showsBottomChrome ? 100 : 24
-    }
-
     private var filteredProjects: [Project] {
         let query = searchState.text.trimmingCharacters(in: .whitespaces)
         guard searchState.isActive, searchState.scope == .library, !query.isEmpty else {
@@ -122,6 +113,7 @@ struct HomeView: View {
             .navigationTransition(
                 .zoom(sourceID: ChromeZoom.notifications, in: chromeZoomNamespace)
             )
+            .environment(\.appBottomChromeIsVisible, false)
         }
         .sheet(isPresented: $isShowingProfile) {
             NavigationStack {
@@ -139,6 +131,7 @@ struct HomeView: View {
             .navigationTransition(
                 .zoom(sourceID: ChromeZoom.profile, in: chromeZoomNamespace)
             )
+            .environment(\.appBottomChromeIsVisible, false)
         }
         .sheet(item: $projectAddingTracks) { project in
             DocumentPicker(
@@ -286,18 +279,22 @@ struct HomeView: View {
 
                             Button(role: .destructive) {
                                 projectPendingDelete = project
-                            } label: {
-                                Label("Delete", systemImage: "trash")
+                                } label: {
+                                    Label {
+                                        Text("Delete")
+                                    } icon: {
+                                        RedProjectTrashMenuIcon()
+                                    }
+                                }
+                                .tint(.red)
                             }
-                        }
                     }
                 }
             }
             .padding(.horizontal, 20)
             .padding(.top, 8)
-            .padding(.bottom, scrollBottomPadding)
+            .bottomChromeAwarePadding(resting: 24)
         }
-        .animation(.smooth(duration: 0.35), value: scrollBottomPadding)
     }
 
     // MARK: - Toolbar
@@ -463,6 +460,15 @@ struct HomeView: View {
             isImporting = false
             toastCenter.finishImporting(id: toastID)
             navigationPath.append(project.id)
+        }
+    }
+}
+
+private struct RedProjectTrashMenuIcon: View {
+    var body: some View {
+        if let image = UIImage(systemName: "trash")?
+            .withTintColor(.systemRed, renderingMode: .alwaysOriginal) {
+            Image(uiImage: image)
         }
     }
 }

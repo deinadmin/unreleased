@@ -108,6 +108,7 @@ struct ScrollingMiniWaveformView: View {
     @State private var decelVelocity: Double = 0
     @State private var lastHapticBarIdx: Int = -1
     @State private var haptic = UIImpactFeedbackGenerator(style: .light)
+    @State private var decelerationTask: Task<Void, Never>?
 
     private let edgeRubberBandLimit: Double = 0.06
     private let decelFriction: Double = 5.2
@@ -178,6 +179,8 @@ struct ScrollingMiniWaveformView: View {
     private func finishScrub(at progress: Double) {
         guard isScrubbing || isDecelerating else { return }
         let final = min(1, max(0, progress))
+        decelerationTask?.cancel()
+        decelerationTask = nil
         isDecelerating = false
         displayProgress = final
         syncAnchor(to: final)
@@ -193,7 +196,7 @@ struct ScrollingMiniWaveformView: View {
         }
     }
 
-    private func stepDeceleration(at date: Date) {
+    private func stepDeceleration(at date: Date, totalBars: Int) {
         let elapsed = date.timeIntervalSince(decelStartDate)
         let velocity = decelVelocity * exp(-decelFriction * elapsed)
         let displacement = (decelVelocity / decelFriction) * (1 - exp(-decelFriction * elapsed))
@@ -205,7 +208,7 @@ struct ScrollingMiniWaveformView: View {
         reportScrubProgressIfNeeded()
 
         let clamped = min(1, max(0, raw))
-        let newIdx = Int(clamped * Double(max(1, effectiveBars.count - 1)))
+        let newIdx = Int(clamped * Double(max(1, totalBars - 1)))
         if newIdx != lastHapticBarIdx {
             haptic.impactOccurred(intensity: 0.35)
             haptic.prepare()
@@ -220,6 +223,17 @@ struct ScrollingMiniWaveformView: View {
 
         if abs(velocity) < decelStopVelocity || elapsed > 2.5 {
             finishScrub(at: clamped)
+        }
+    }
+
+    private func startDeceleration(totalBars: Int) {
+        decelerationTask?.cancel()
+        decelerationTask = Task { @MainActor in
+            while !Task.isCancelled, isDecelerating {
+                stepDeceleration(at: Date(), totalBars: totalBars)
+                guard isDecelerating else { break }
+                try? await Task.sleep(for: .milliseconds(16))
+            }
         }
     }
 
@@ -243,7 +257,10 @@ struct ScrollingMiniWaveformView: View {
             let barDrawW  = barWidth * 0.52
             let centerX   = w / 2
 
-            TimelineView(.animation) { tl in
+            TimelineView(.animation(
+                minimumInterval: nil,
+                paused: abs(progressRate) < 0.000_001
+            )) { tl in
                 // While scrubbing: show the drag position directly.
                 // While playing / paused: extrapolate from the last anchor so
                 // motion stays smooth at full display refresh rate (≤120 Hz)
@@ -295,6 +312,8 @@ struct ScrollingMiniWaveformView: View {
                     DragGesture(minimumDistance: 2)
                         .onChanged { value in
                             if isDecelerating {
+                                decelerationTask?.cancel()
+                                decelerationTask = nil
                                 isDecelerating = false
                                 dragStartProgress = min(1, max(0, displayProgress))
                             }
@@ -347,15 +366,9 @@ struct ScrollingMiniWaveformView: View {
                             decelStartDate = Date()
                             decelStartProgress = releaseProgress
                             decelVelocity = velocity
+                            startDeceleration(totalBars: totalBars)
                         }
                 )
-                .background {
-                    Color.clear
-                        .onChange(of: tl.date) { _, date in
-                            guard isDecelerating else { return }
-                            stepDeceleration(at: date)
-                        }
-                }
             }
         }
         // When the track changes while the view stays alive (e.g. next track
@@ -367,6 +380,8 @@ struct ScrollingMiniWaveformView: View {
             progressRate    = 0
             isScrubbing = false
             isDecelerating = false
+            decelerationTask?.cancel()
+            decelerationTask = nil
             onScrubOverlayChange?(false, progress)
         }
         .onChange(of: progress) { _, newValue in
@@ -384,6 +399,10 @@ struct ScrollingMiniWaveformView: View {
             }
             anchorProgress = newValue
             anchorDate = now
+        }
+        .onDisappear {
+            decelerationTask?.cancel()
+            decelerationTask = nil
         }
     }
 
