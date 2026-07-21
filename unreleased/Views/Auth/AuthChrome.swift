@@ -3,55 +3,31 @@ import SwiftUI
 // MARK: - Shared auth styling
 
 enum AuthChrome {
-    static let socialButtonHeight: CGFloat = 56
-    static let primaryButtonHeight: CGFloat = 56
-    static let horizontalPadding: CGFloat = 28
+    static let controlHeight: CGFloat = 52
+    static let controlCornerRadius: CGFloat = 14
+    static let horizontalPadding: CGFloat = 20
     static let pageBackground = Color(.systemBackground)
     static let elevatedFill = Color(.secondarySystemBackground)
     static let borderColor = Color.primary.opacity(0.06)
 
-    static let headlineFont = Font.system(size: 26, weight: .bold)
+    static let headlineFont = Font.system(size: 22, weight: .bold)
     static let bodyFont = Font.system(size: 15)
     static let legalFont = Font.system(size: 12)
 }
 
 struct AuthAppMark: View {
-    @Environment(\.colorScheme) private var colorScheme
-
     var size: CGFloat = 112
     var cornerRadius: CGFloat = 28
 
-    private let markGradient = GradientTheme(
-        colors: ["#FF6FD8", "#FFB347", "#FF6FD8"],
-        startX: 0.15,
-        startY: 0,
-        endX: 0.85,
-        endY: 1
-    )
-
     var body: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                .fill(AuthChrome.elevatedFill)
-                .shadow(
-                    color: .black.opacity(colorScheme == .dark ? 0.35 : 0.08),
-                    radius: 24,
-                    x: 0,
-                    y: 10
-                )
-                .overlay {
-                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                        .strokeBorder(AuthChrome.borderColor, lineWidth: 1)
-                }
-
-            ProjectCoverView(
-                gradient: markGradient,
-                size: size * 0.72,
-                cornerRadius: size * 0.18,
-                showVinyl: true
-            )
-        }
-        .frame(width: size, height: size)
+        Image("AppIconDisplay")
+            .resizable()
+            .interpolation(.high)
+            .scaledToFit()
+            .frame(width: size, height: size)
+            .clipShape(.rect(cornerRadius: cornerRadius))
+            .shadow(color: .black.opacity(0.16), radius: 12, y: 6)
+            .accessibilityLabel("unreleased app icon")
     }
 }
 
@@ -71,10 +47,13 @@ struct AuthSocialButton: View {
                     .foregroundStyle(.primary)
             }
             .frame(maxWidth: .infinity)
-            .frame(height: AuthChrome.socialButtonHeight)
-            .background(AuthChrome.elevatedFill, in: Capsule())
+            .frame(height: AuthChrome.controlHeight)
+            .background(
+                AuthChrome.elevatedFill,
+                in: RoundedRectangle(cornerRadius: AuthChrome.controlCornerRadius, style: .continuous)
+            )
             .overlay {
-                Capsule()
+                RoundedRectangle(cornerRadius: AuthChrome.controlCornerRadius, style: .continuous)
                     .strokeBorder(AuthChrome.borderColor, lineWidth: 1)
             }
         }
@@ -102,23 +81,16 @@ enum AuthSocialIcon {
 }
 
 struct AuthPrimaryButton: View {
-    @Environment(\.colorScheme) private var colorScheme
-
     let title: String
     var isEnabled: Bool = true
     var isLoading: Bool = false
     var action: () -> Void
 
     private var buttonFill: Color {
-        guard isEnabled else {
-            return colorScheme == .dark ? Color.white.opacity(0.35) : Color.black.opacity(0.35)
-        }
-        return colorScheme == .dark ? .white : .black
+        isEnabled ? Color("AccentColor") : Color("AccentColor").opacity(0.35)
     }
 
-    private var labelColor: Color {
-        colorScheme == .dark ? .black : .white
-    }
+    private let labelColor = Color.black
 
     var body: some View {
         Button(action: action) {
@@ -132,8 +104,11 @@ struct AuthPrimaryButton: View {
                 }
             }
             .frame(maxWidth: .infinity)
-            .frame(height: AuthChrome.primaryButtonHeight)
-            .background(buttonFill, in: Capsule())
+            .frame(height: AuthChrome.controlHeight)
+            .background(
+                buttonFill,
+                in: RoundedRectangle(cornerRadius: AuthChrome.controlCornerRadius, style: .continuous)
+            )
             .foregroundStyle(labelColor)
         }
         .buttonStyle(.scale)

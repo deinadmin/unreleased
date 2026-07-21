@@ -47,7 +47,6 @@ struct PlayerSearchBar: View {
             )
             .font(.system(size: 16))
             .foregroundStyle(primaryInk)
-            .tint(primaryInk)
             .textInputAutocapitalization(.never)
             .autocorrectionDisabled()
             .focused($isFocused)

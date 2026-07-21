@@ -65,6 +65,13 @@ final class AudioPlayer {
     private var nowPlayingArtwork: MPMediaItemArtwork?
     private var loadTask: Task<Void, Never>?
     private var audioSessionActivationTask: Task<Void, Never>?
+    /// AVAudioSession activation is synchronous and can wait on mediaserverd.
+    /// Keep every category/activation call serialized and away from MainActor so
+    /// rapid track changes cannot stack competing Core Audio operations or freeze UI.
+    private nonisolated static let audioSessionQueue = DispatchQueue(
+        label: "AudioPlayer.audioSession",
+        qos: .userInitiated
+    )
     private var wasPlayingBeforeInterruption = false
     // Only mutated on MainActor; deinit is nonisolated and removes the global targets.
     nonisolated(unsafe) private var remoteCommandTargets: [(command: MPRemoteCommand, target: Any)] = []
@@ -90,7 +97,6 @@ final class AudioPlayer {
         audioEngine.attach(equalizer)
         configureEqualizerBands()
         applyEqualizerSettings()
-        configureAudioSessionCategory()
         setupRemoteCommands()
         setupInterruptionHandling()
     }
@@ -861,18 +867,6 @@ final class AudioPlayer {
         equalizer.globalGain = isEqualizerEnabled ? -min(max(highestBoost * 0.55, 0), 6) : 0
     }
 
-    private func configureAudioSessionCategory() {
-        do {
-            try AVAudioSession.sharedInstance().setCategory(
-                .playback,
-                mode: .default,
-                options: []
-            )
-        } catch {
-            print("AudioPlayer: category setup failed — \(error)")
-        }
-    }
-
     private func setupInterruptionHandling() {
         NotificationCenter.default.addObserver(
             forName: AVAudioSession.interruptionNotification,
@@ -1045,14 +1039,20 @@ final class AudioPlayer {
     }
 
     private nonisolated static func activateAudioSessionOffMain() async -> String? {
-        await Task.detached(priority: .userInitiated) {
-            do {
-                try AVAudioSession.sharedInstance().setActive(true)
-                return nil
-            } catch {
-                return error.localizedDescription
+        await withCheckedContinuation { continuation in
+            audioSessionQueue.async {
+                do {
+                    let session = AVAudioSession.sharedInstance()
+                    if session.category != .playback || session.mode != .default {
+                        try session.setCategory(.playback, mode: .default, options: [])
+                    }
+                    try session.setActive(true)
+                    continuation.resume(returning: nil)
+                } catch {
+                    continuation.resume(returning: error.localizedDescription)
+                }
             }
-        }.value
+        }
     }
 
     private func updateNowPlayingInfo() {

@@ -1,0 +1,70 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <!-- Base black vinyl gradient for subtle depth -->
+    <radialGradient id="vinylBase" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#1c1c1e"/>
+      <stop offset="55%" stop-color="#101012"/>
+      <stop offset="100%" stop-color="#050506"/>
+    </radialGradient>
+
+    <!-- Sheen sweep across the disc -->
+    <linearGradient id="sheen" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%"  stop-color="#ffffff" stop-opacity="0.16"/>
+      <stop offset="35%" stop-color="#ffffff" stop-opacity="0"/>
+      <stop offset="65%" stop-color="#ffffff" stop-opacity="0"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0.10"/>
+    </linearGradient>
+
+    <!-- Center label gradient -->
+    <radialGradient id="label" cx="50%" cy="42%" r="60%">
+      <stop offset="0%" stop-color="#ff6a3d"/>
+      <stop offset="100%" stop-color="#e8461f"/>
+    </radialGradient>
+
+    <!-- Groove stroke gradient for depth -->
+    <radialGradient id="grooveTint" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#3a3a3d"/>
+      <stop offset="100%" stop-color="#2a2a2d"/>
+    </radialGradient>
+  </defs>
+
+  <!-- Vinyl disc -->
+  <circle cx="512" cy="512" r="480" fill="url(#vinylBase)"/>
+
+  <!-- Concentric grooves -->
+  <g fill="none" stroke="url(#grooveTint)" stroke-opacity="0.55" stroke-width="1.5">
+    <circle cx="512" cy="512" r="465"/>
+    <circle cx="512" cy="512" r="450"/>
+    <circle cx="512" cy="512" r="435"/>
+    <circle cx="512" cy="512" r="420"/>
+    <circle cx="512" cy="512" r="405"/>
+    <circle cx="512" cy="512" r="390"/>
+    <circle cx="512" cy="512" r="375"/>
+    <circle cx="512" cy="512" r="360"/>
+    <circle cx="512" cy="512" r="345"/>
+    <circle cx="512" cy="512" r="330"/>
+    <circle cx="512" cy="512" r="315"/>
+    <circle cx="512" cy="512" r="300"/>
+    <circle cx="512" cy="512" r="285"/>
+    <circle cx="512" cy="512" r="270"/>
+    <circle cx="512" cy="512" r="255"/>
+    <circle cx="512" cy="512" r="240"/>
+    <circle cx="512" cy="512" r="225"/>
+    <circle cx="512" cy="512" r="210"/>
+    <circle cx="512" cy="512" r="195"/>
+  </g>
+
+  <!-- Sheen overlay -->
+  <circle cx="512" cy="512" r="480" fill="url(#sheen)"/>
+
+  <!-- Center label -->
+  <circle cx="512" cy="512" r="170" fill="url(#label)"/>
+  <circle cx="512" cy="512" r="170" fill="none" stroke="#000000" stroke-opacity="0.15" stroke-width="2"/>
+
+  <!-- Label ring detail -->
+  <circle cx="512" cy="512" r="150" fill="none" stroke="#ffffff" stroke-opacity="0.25" stroke-width="2"/>
+
+  <!-- Spindle hole -->
+  <circle cx="512" cy="512" r="16" fill="#0a0a0b"/>
+  <circle cx="512" cy="512" r="16" fill="none" stroke="#000000" stroke-opacity="0.4" stroke-width="1.5"/>
+</svg>

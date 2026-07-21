@@ -124,6 +124,9 @@ struct HomeView: View {
                     .navigationDestination(for: NotificationSettingsRoute.self) { _ in
                         NotificationSettingsView()
                     }
+                    .navigationDestination(for: EqualizerRoute.self) { _ in
+                        EqualizerView()
+                    }
                     .navigationDestination(for: AboutRoute.self) { _ in
                         AboutView()
                     }
@@ -216,15 +219,15 @@ struct HomeView: View {
                 HStack {
                     if isImporting {
                         ProgressView()
-                            .tint(.white)
+                            .tint(.black)
                     } else {
                         Text("Add Audio")
                             .font(.system(size: 17, weight: .bold))
                     }
                 }
                 .frame(width: 200, height: 52)
-                .background(Color.black, in: Capsule())
-                .foregroundStyle(.white)
+                .background(Color("AccentColor"), in: Capsule())
+                .foregroundStyle(.black)
             }
             .padding(.top, 28)
             .disabled(isImporting)
@@ -248,48 +251,51 @@ struct HomeView: View {
                         ProjectCard(project: project, zoomNamespace: projectZoomNamespace)
                     }
                     .contextMenu {
-                        if project.isShared {
-                            Button(role: .destructive) {
-                                projectPendingLeave = project
-                            } label: {
-                                Label("Leave Project", systemImage: "person.fill.xmark")
-                            }
-                        } else {
-                            Button {
-                                if store.hasStorageCapacity {
-                                    projectAddingTracks = project
-                                } else {
-                                    store.presentStorageUpsell(.uploadFull)
-                                }
-                            } label: {
-                                Label("Add tracks", systemImage: "plus")
-                            }
-
-                            Button {
-                                editingProject = project
-                            } label: {
-                                Label("Edit", systemImage: "pencil")
-                            }
-
-                            Button {
-                                projectPendingShare = project
-                            } label: {
-                                Label("Share", systemImage: "square.and.arrow.up")
-                            }
-
-                            Button(role: .destructive) {
-                                projectPendingDelete = project
+                        Group {
+                            if project.isShared {
+                                Button(role: .destructive) {
+                                    projectPendingLeave = project
                                 } label: {
-                                    Label {
-                                        Text("Delete")
-                                    } icon: {
-                                        RedProjectTrashMenuIcon()
-                                    }
+                                    Label("Leave Project", systemImage: "person.fill.xmark")
                                 }
-                                .tint(.red)
+                            } else {
+                                Button {
+                                    if store.hasStorageCapacity {
+                                        projectAddingTracks = project
+                                    } else {
+                                        store.presentStorageUpsell(.uploadFull)
+                                    }
+                                } label: {
+                                    Label("Add tracks", systemImage: "plus")
+                                }
+
+                                Button {
+                                    editingProject = project
+                                } label: {
+                                    Label("Edit", systemImage: "pencil")
+                                }
+
+                                Button {
+                                    projectPendingShare = project
+                                } label: {
+                                    Label("Share", systemImage: "square.and.arrow.up")
+                                }
+
+                                Button(role: .destructive) {
+                                    projectPendingDelete = project
+                                    } label: {
+                                        Label {
+                                            Text("Delete")
+                                        } icon: {
+                                            RedProjectTrashMenuIcon()
+                                        }
+                                    }
+                                    .tint(.red)
+                                }
                             }
+                        }
+                        .tint(.primary)
                     }
-                }
             }
             .padding(.horizontal, 20)
             .padding(.top, 8)
@@ -308,6 +314,7 @@ struct HomeView: View {
                 } label: {
                     Image(systemName: "plus")
                         .font(.system(size: 14, weight: .semibold))
+                        .frame(width: 44, height: 44)
                         .contentShape(Circle())
                 }
                 .matchedTransitionSource(
@@ -392,9 +399,17 @@ struct HomeView: View {
     }
 
     /// Circular profile picture that fills its glass button edge-to-edge (no inner padding).
+    @ViewBuilder
     private var profileAvatar: some View {
-        ToolbarProfileAvatar(size: 42)
-            .glassEffect(.regular.interactive(), in: .circle)
+        // On iPad this view is a matched transition source for the profile sheet.
+        // Combining a live glass effect with that source makes SwiftUI repeatedly
+        // update the glass during push/pop transitions (and can stall the UI).
+        if isRegularWidth {
+            ToolbarProfileAvatar(size: 42)
+        } else {
+            ToolbarProfileAvatar(size: 42)
+                .glassEffect(.regular.interactive(), in: .circle)
+        }
     }
 
     // MARK: - Import helpers
@@ -513,7 +528,10 @@ private struct ProjectCard: View {
                         ZStack {
                             Image(systemName: showsPause ? "pause.fill" : "play.fill")
                                 .font(.system(size: 12, weight: .bold))
-                                .foregroundStyle(.white)
+                                .coverControlContrast(
+                                    for: coverImage,
+                                    fallbackGradient: project.gradient
+                                )
                                 .animation(nil, value: showsPause)
                         }
                         .frame(width: 32, height: 32)

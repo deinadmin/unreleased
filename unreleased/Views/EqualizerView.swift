@@ -57,13 +57,12 @@ struct EqualizerView: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text("Equalizer")
                     .font(.body.weight(.semibold))
-                Text(player.isEqualizerEnabled ? "Applied to all playback" : "Original mix")
+                Text(player.isEqualizerEnabled ? "Applied to all playback" : "Turned off")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .contentTransition(.interpolate)
             }
         }
-        .tint(Color(uiColor: .systemGray3))
         .padding(.vertical, 2)
         .animation(.smooth(duration: 0.25), value: player.isEqualizerEnabled)
     }

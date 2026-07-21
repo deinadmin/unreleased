@@ -30,12 +30,14 @@ struct CreateProjectSheet: View {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("Cancel") { dismiss() }
                         .buttonStyle(.borderless)
+                        .tint(.primary)
                         .fixedSize(horizontal: true, vertical: false)
                         .padding(8)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Create") { createProject() }
                         .buttonStyle(.borderless)
+                        .tint(.primary)
                         .fontWeight(.semibold)
                         .disabled(trimmedName.isEmpty)
                         .fixedSize(horizontal: true, vertical: false)

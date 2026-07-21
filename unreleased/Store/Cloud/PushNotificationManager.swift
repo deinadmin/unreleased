@@ -52,6 +52,19 @@ final class PushNotificationManager: NSObject {
         }
     }
 
+    /// Removes a badge left behind by an earlier push. The server uses a badge of
+    /// one as a generic "there is an update" signal, so it must be cleared once
+    /// the user opens the app rather than persisting across launches.
+    func clearApplicationBadge() {
+        Task {
+            do {
+                try await UNUserNotificationCenter.current().setBadgeCount(0)
+            } catch {
+                print("PushNotificationManager: couldn't clear badge — \(error)")
+            }
+        }
+    }
+
     /// Persists the current push token to the signed-in user's private doc so the
     /// Cloud Function can look it up. No-op until a token and a signed-in user exist.
     func uploadToken(_ token: String) {
@@ -157,6 +170,7 @@ final class PushAppDelegate: NSObject, UIApplicationDelegate {
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
         UNUserNotificationCenter.current().delegate = PushNotificationManager.shared
+        PushNotificationManager.shared.clearApplicationBadge()
         #if canImport(FirebaseMessaging)
         Messaging.messaging().delegate = PushNotificationManager.shared
         #endif

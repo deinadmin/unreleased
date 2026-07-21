@@ -176,7 +176,7 @@ struct UsernamePickerSheet: View {
             ZStack {
                 if isSaving {
                     ProgressView()
-                        .tint(Color(UIColor.systemBackground))
+                        .tint(.black)
                 } else {
                     Text("Continue")
                         .font(.system(size: 16, weight: .semibold))
@@ -185,10 +185,10 @@ struct UsernamePickerSheet: View {
             .frame(maxWidth: .infinity)
             .frame(height: 52)
             .background(
-                isReady ? Color.primary : Color(.tertiarySystemBackground),
+                isReady ? Color("AccentColor") : Color(.tertiarySystemBackground),
                 in: RoundedRectangle(cornerRadius: 14, style: .continuous)
             )
-            .foregroundStyle(isReady ? Color(UIColor.systemBackground) : Color(UIColor.tertiaryLabel))
+            .foregroundStyle(isReady ? Color.black : Color(UIColor.tertiaryLabel))
         }
         .disabled(!isReady)
         .animation(.easeInOut(duration: 0.2), value: isReady)

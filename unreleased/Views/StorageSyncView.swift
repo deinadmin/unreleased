@@ -5,12 +5,16 @@ struct StorageSyncView: View {
     @Environment(AuthManager.self) private var auth
 
     var body: some View {
-        List {
-            storageSection
-            syncSection
+        ScrollView {
+            VStack(spacing: 24) {
+                storageSection
+                syncSection
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 24)
+            .bottomChromeAwarePadding(resting: 40)
         }
-        .bottomChromeAwareScrollMargin()
-        .listStyle(.insetGrouped)
+        .background(Color(.systemBackground).ignoresSafeArea())
         .navigationTitle("Storage & Sync")
         .navigationBarTitleDisplayMode(.inline)
         .navigationDestination(for: DeleteTracksRoute.self) { _ in
@@ -21,7 +25,7 @@ struct StorageSyncView: View {
     // MARK: - Storage
 
     private var storageSection: some View {
-        Section {
+        settingsSection(title: "Storage") {
             VStack(alignment: .leading, spacing: 14) {
                 HStack(alignment: .firstTextBaseline) {
                     VStack(alignment: .leading, spacing: 2) {
@@ -65,76 +69,136 @@ struct StorageSyncView: View {
                     .font(.system(size: 13))
                 }
             }
-            .padding(.vertical, 6)
-        } header: {
-            Text("Storage")
+            .padding(16)
         }
     }
 
     // MARK: - Sync
 
     private var syncSection: some View {
-        Section {
-            HStack {
-                syncStatusIcon
-                    .frame(width: 28, alignment: .center)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(syncStatusTitle)
-                        .font(.system(size: 16))
-                    if let detail = syncStatusDetail {
-                        Text(detail)
-                            .font(.system(size: 13))
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                Spacer(minLength: 0)
-            }
-            .padding(.vertical, 2)
-
-            if auth.isSignedIn {
-                if let email = auth.accountLabel {
-                    settingsRow(icon: "person.circle", title: "Account", value: email)
-                }
-
-                settingsRow(
-                    icon: "music.note.list",
-                    title: "Projects",
-                    value: "\(store.projects.count)"
-                )
-
-                settingsRow(
-                    icon: "waveform",
-                    title: "Tracks",
-                    value: "\(totalTrackCount)"
-                )
-
-                NavigationLink(value: DeleteTracksRoute()) {
-                    Label("Delete tracks", systemImage: "trash")
-                        .font(.system(size: 16))
-                }
-
-                settingsRow(
-                    icon: "icloud.and.arrow.up",
-                    title: "Uploaded to cloud",
-                    value: "\(uploadedTrackCount) of \(totalTrackCount)"
-                )
-
-                settingsRow(
-                    icon: "arrow.down.circle",
-                    title: "Downloaded offline",
-                    value: "\(downloadedTrackCount) of \(totalTrackCount)"
-                )
-            }
-        } header: {
+        VStack(alignment: .leading, spacing: 12) {
             Text("Sync")
-        } footer: {
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .padding(.leading, 4)
+
+            VStack(spacing: 0) {
+                syncStatusRow
+
+                if auth.isSignedIn {
+                    cardDivider
+
+                    if let email = auth.accountLabel {
+                        settingsRow(icon: "person.circle", title: "Account", value: email)
+                        cardDivider
+                    }
+
+                    settingsRow(
+                        icon: "music.note.list",
+                        title: "Projects",
+                        value: "\(store.projects.count)"
+                    )
+                    cardDivider
+
+                    settingsRow(
+                        icon: "waveform",
+                        title: "Tracks",
+                        value: "\(totalTrackCount)"
+                    )
+                    cardDivider
+
+                    NavigationLink(value: DeleteTracksRoute()) {
+                        HStack(spacing: 12) {
+                            Image(systemName: "trash")
+                                .font(.system(size: 15, weight: .medium))
+                                .foregroundStyle(.red)
+                                .frame(width: 28)
+                            Text("Delete tracks")
+                                .font(.system(size: 16))
+                                .foregroundStyle(.red)
+                            Spacer(minLength: 8)
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(.tertiary)
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 14)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    cardDivider
+
+                    settingsRow(
+                        icon: "icloud.and.arrow.up",
+                        title: "Uploaded to cloud",
+                        value: "\(uploadedTrackCount) of \(totalTrackCount)"
+                    )
+                    cardDivider
+
+                    settingsRow(
+                        icon: "arrow.down.circle",
+                        title: "Downloaded offline",
+                        value: "\(downloadedTrackCount) of \(totalTrackCount)"
+                    )
+                }
+            }
+            .background(
+                Color(.secondarySystemBackground),
+                in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+            )
+
             if !auth.isSignedIn {
                 Text("Sign in to sync your library across devices.")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 4)
             }
         }
     }
 
+    private var syncStatusRow: some View {
+        HStack(spacing: 12) {
+            syncStatusIcon
+                .frame(width: 28, alignment: .center)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(syncStatusTitle)
+                    .font(.system(size: 16))
+                if let detail = syncStatusDetail {
+                    Text(detail)
+                        .font(.system(size: 13))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+    }
+
     // MARK: - Helpers
+
+    private func settingsSection<Content: View>(
+        title: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(title)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .padding(.leading, 4)
+            content()
+                .background(
+                    Color(.secondarySystemBackground),
+                    in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+                )
+        }
+    }
+
+    private var cardDivider: some View {
+        Divider()
+            .padding(.leading, 56)
+    }
 
     private var totalTrackCount: Int {
         store.projects.flatMap(\.tracks).count
@@ -193,14 +257,22 @@ struct StorageSyncView: View {
 
     @ViewBuilder
     private func settingsRow(icon: String, title: String, value: String) -> some View {
-        HStack {
-            Label(title, systemImage: icon)
+        HStack(spacing: 12) {
+            Image(systemName: icon)
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(.secondary)
+                .frame(width: 28)
+            Text(title)
                 .font(.system(size: 16))
-            Spacer(minLength: 0)
+            Spacer(minLength: 8)
             Text(value)
                 .font(.system(size: 15))
                 .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
         }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
     }
 }
 

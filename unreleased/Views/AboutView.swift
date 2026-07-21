@@ -27,14 +27,15 @@ struct AboutView: View {
 
     private var appHeader: some View {
         VStack(spacing: 6) {
-            if let icon = appIcon {
-                Image(uiImage: icon)
-                    .resizable()
-                    .frame(width: 80, height: 80)
-                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                    .shadow(color: .black.opacity(0.12), radius: 8, y: 4)
-                    .padding(.bottom, 6)
-            }
+            Image("AppIconDisplay")
+                .resizable()
+                .interpolation(.high)
+                .scaledToFit()
+                .frame(width: 80, height: 80)
+                .clipShape(.rect(cornerRadius: 18))
+                .shadow(color: .black.opacity(0.12), radius: 8, y: 4)
+                .padding(.bottom, 6)
+                .accessibilityLabel("unreleased app icon")
 
             Text("unreleased")
                 .font(.system(size: 22, weight: .bold))
@@ -44,15 +45,6 @@ struct AboutView: View {
                 .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity)
-    }
-
-    private var appIcon: UIImage? {
-        guard let icons = Bundle.main.infoDictionary?["CFBundleIcons"] as? [String: Any],
-              let primary = icons["CFBundlePrimaryIcon"] as? [String: Any],
-              let files = primary["CFBundleIconFiles"] as? [String],
-              let last = files.last
-        else { return nil }
-        return UIImage(named: last)
     }
 
     // MARK: - Developer section

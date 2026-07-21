@@ -528,15 +528,15 @@ private struct ProfilePhotoActionButton: View {
         Button(action: action) {
             GeometryReader { proxy in
                 ZStack(alignment: .leading) {
-                    shape.fill(Color.accentColor.opacity(0.12))
+                    shape.fill(Color.primary.opacity(0.12))
 
                     Rectangle()
-                        .fill(Color.accentColor)
+                        .fill(Color.primary)
                         .frame(width: proxy.size.width * clampedProgress)
                         .frame(maxHeight: .infinity)
 
                     buttonContent
-                        .foregroundStyle(Color.accentColor)
+                        .foregroundStyle(Color.primary)
 
                     buttonContent
                         .foregroundStyle(Color(uiColor: .systemBackground))

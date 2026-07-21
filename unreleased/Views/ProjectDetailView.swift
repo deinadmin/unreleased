@@ -28,6 +28,11 @@ struct ProjectDetailView: View {
         store.projects.first { $0.id == projectID }
     }
 
+    private var projectTint: Color {
+        guard let project else { return Color("AccentColor") }
+        return store.accentColor(for: project)
+    }
+
     private func filteredTracks(for project: Project) -> [Track] {
         let query = searchState.text.trimmingCharacters(in: .whitespaces)
         guard searchState.isActive,
@@ -122,6 +127,7 @@ struct ProjectDetailView: View {
                 Task { await resolveOwnerLabel() }
             }
         }
+        .tint(projectTint)
     }
 
     /// Refreshes linkEnabled from the owner's preview doc and persists it on the Project.
@@ -306,31 +312,40 @@ struct ProjectDetailView: View {
                 }
 
                 Menu {
-                    if !(project.isShared) {
-                        Button {
-                            if store.hasStorageCapacity {
-                                isShowingDocumentPicker = true
-                            } else {
-                                store.presentStorageUpsell(.uploadFull)
+                    Group {
+                        if !(project.isShared) {
+                            Button {
+                                if store.hasStorageCapacity {
+                                    isShowingDocumentPicker = true
+                                } else {
+                                    store.presentStorageUpsell(.uploadFull)
+                                }
+                            } label: {
+                                Label("Add tracks", systemImage: "plus")
                             }
-                        } label: {
-                            Label("Add tracks", systemImage: "plus")
+                            .disabled(isImporting)
+                            Button {
+                                isShowingEdit = true
+                            } label: {
+                                Label("Edit", systemImage: "pencil")
+                            }
                         }
-                        .disabled(isImporting)
-                        Button {
-                            isShowingEdit = true
+                        Button(role: .destructive) {
+                            showDeleteConfirm = true
                         } label: {
-                            Label("Edit", systemImage: "pencil")
+                            if project.isShared {
+                                Label("Leave Project", systemImage: "person.fill.xmark")
+                            } else {
+                                Label {
+                                    Text("Delete")
+                                } icon: {
+                                    RedProjectDetailTrashMenuIcon()
+                                }
+                            }
                         }
+                        .tint(project.isShared ? .primary : .red)
                     }
-                    Button(role: .destructive) {
-                        showDeleteConfirm = true
-                    } label: {
-                        Label(
-                            project.isShared ? "Leave Project" : "Delete",
-                            systemImage: project.isShared ? "person.fill.xmark" : "trash"
-                        )
-                    }
+                    .tint(.primary)
                 } label: {
                     Image(systemName: "ellipsis")
                         .font(.system(size: 14, weight: .medium))
@@ -338,6 +353,7 @@ struct ProjectDetailView: View {
                         .contentShape(Rectangle())
                 }
             }
+            .tint(.primary)
         }
     }
 
@@ -391,6 +407,15 @@ private struct ProjectHeaderDownloadState: Equatable {
     var isDownloading: Bool
     var isFullyDownloaded: Bool
     var hasPendingDownloads: Bool
+}
+
+private struct RedProjectDetailTrashMenuIcon: View {
+    var body: some View {
+        if let image = UIImage(systemName: "trash")?
+            .withTintColor(.systemRed, renderingMode: .alwaysOriginal) {
+            Image(uiImage: image)
+        }
+    }
 }
 
 private struct ProjectDetailHeaderSection: View, Equatable {
@@ -618,7 +643,6 @@ private struct ProjectDownloadButton: View {
 // MARK: - Play Button
 
 private struct PlayButton: View {
-    @Environment(\.colorScheme) private var colorScheme
     @Environment(AudioPlayer.self) private var player
     @Environment(ProjectStore.self) private var store
 
@@ -628,8 +652,8 @@ private struct PlayButton: View {
         player.currentProject?.id == project.id
     }
 
-    private var buttonFill: Color { colorScheme == .dark ? .white : .black }
-    private var iconColor: Color { colorScheme == .dark ? .black : .white }
+    private var buttonFill: Color { store.accentColor(for: project) }
+    private var coverImage: UIImage? { store.coverImage(for: project) }
 
     var body: some View {
         Button {
@@ -641,7 +665,10 @@ private struct PlayButton: View {
                     .frame(width: 56, height: 56)
                 Image(systemName: isActiveProject && player.isPlaying ? "pause.fill" : "play.fill")
                     .font(.system(size: 22, weight: .bold))
-                    .foregroundStyle(iconColor)
+                    .coverControlContrast(
+                        for: coverImage,
+                        fallbackGradient: project.gradient
+                    )
                     .animation(nil, value: player.isPlaying)
             }
         }

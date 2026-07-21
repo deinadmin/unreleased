@@ -193,7 +193,7 @@ struct ProjectInviteSheet: View {
                 ZStack {
                     if isAccepting {
                         ProgressView()
-                            .tint(Color(UIColor.systemBackground))
+                            .tint(.black)
                     } else {
                         Text("Accept")
                             .font(.body.weight(.semibold))
@@ -201,8 +201,8 @@ struct ProjectInviteSheet: View {
                 }
                 .frame(maxWidth: .infinity)
                 .frame(height: buttonHeight)
-                .background(Color.primary, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                .foregroundStyle(Color(UIColor.systemBackground))
+                .background(Color("AccentColor"), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .foregroundStyle(.black)
             }
             .buttonStyle(PressableButtonStyle())
             .disabled(isAccepting)

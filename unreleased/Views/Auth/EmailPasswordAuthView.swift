@@ -2,7 +2,6 @@ import SwiftUI
 
 struct EmailPasswordAuthView: View {
     @Environment(AuthManager.self) private var auth
-    @Environment(\.dismiss) private var dismiss
 
     @State private var email = ""
     @State private var password = ""
@@ -15,7 +14,8 @@ struct EmailPasswordAuthView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
             AuthAppMark(size: 88, cornerRadius: 22)
                 .frame(maxWidth: .infinity)
                 .padding(.top, 8)
@@ -84,31 +84,28 @@ struct EmailPasswordAuthView: View {
 
             Spacer(minLength: 24)
 
-            AuthPrimaryButton(
-                title: isCreatingAccount ? "Create account" : "Sign in",
-                isEnabled: canSubmit,
-                isLoading: auth.isLoading
-            ) {
-                Task { await submit() }
-            }
-        }
-        .padding(.horizontal, AuthChrome.horizontalPadding)
-        .padding(.top, 8)
-        .padding(.bottom, 12)
-        .background(AuthChrome.pageBackground.ignoresSafeArea())
-        .navigationBarBackButtonHidden(true)
-        .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
-                Button {
-                    dismiss()
-                } label: {
-                    Image(systemName: "chevron.left")
-                        .font(.system(size: 17, weight: .semibold))
-                        .foregroundStyle(.primary)
+                AuthPrimaryButton(
+                    title: isCreatingAccount ? "Create account" : "Sign in",
+                    isEnabled: canSubmit,
+                    isLoading: auth.isLoading
+                ) {
+                    Task { await submit() }
                 }
             }
+            .padding(.horizontal, AuthChrome.horizontalPadding)
+            .padding(.top, 8)
+            .padding(.bottom, 12)
+            .containerRelativeFrame(.vertical, alignment: .top)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                focusedField = nil
+            }
         }
-        .onAppear { focusedField = .email }
+        .scrollDismissesKeyboard(.interactively)
+        .background(AuthChrome.pageBackground.ignoresSafeArea())
+        .toolbarVisibility(.visible, for: .navigationBar)
+        .navigationBarTitleDisplayMode(.inline)
+        .defaultFocus($focusedField, .email)
         .alert("Sign In", isPresented: errorBinding) {
             Button("OK") { auth.clearError() }
         } message: {
@@ -152,10 +149,13 @@ struct EmailPasswordAuthView: View {
             }
         }
         .padding(.horizontal, 16)
-        .frame(height: 56)
-        .background(AuthChrome.elevatedFill, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .frame(height: AuthChrome.controlHeight)
+        .background(
+            AuthChrome.elevatedFill,
+            in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+        )
         .overlay {
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .strokeBorder(AuthChrome.borderColor, lineWidth: 1)
         }
     }

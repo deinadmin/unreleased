@@ -70,6 +70,7 @@ final class AuthManager {
         do {
             try Auth.auth().signOut()
             GIDSignIn.sharedInstance.signOut()
+            PushNotificationManager.shared.clearApplicationBadge()
             user = nil
         } catch {
             errorMessage = error.localizedDescription

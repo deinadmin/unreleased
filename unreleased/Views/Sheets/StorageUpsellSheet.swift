@@ -203,11 +203,11 @@ struct StorageUpsellSheet: View {
             } label: {
                 Text(primaryButtonTitle)
                     .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(.black)
                     .frame(maxWidth: .infinity)
                     .frame(height: 52)
                     .background(
-                        LinearGradient(colors: accentGradient, startPoint: .leading, endPoint: .trailing),
+                        Color("AccentColor"),
                         in: RoundedRectangle(cornerRadius: 14, style: .continuous)
                     )
             }

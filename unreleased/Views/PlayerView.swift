@@ -303,7 +303,7 @@ struct PlayerView: View {
                     coverSlot(size: compactCoverSize, isTapToPlay: true)
                     if !heroSettled {
                         HeroCoverView(
-                            gradient: project.gradient.gradient,
+                            gradient: project.gradient,
                             coverImage: store.coverImage(for: project),
                             isPlaying: player.isPlaying,
                             isLoadingAudio: player.isLoadingAudio,
@@ -381,7 +381,7 @@ struct PlayerView: View {
     @ViewBuilder
     private func heroCover(project: Project) -> some View {
         HeroCoverView(
-            gradient: project.gradient.gradient,
+            gradient: project.gradient,
             coverImage: store.coverImage(for: project),
             isPlaying: player.isPlaying,
             isLoadingAudio: player.isLoadingAudio,
@@ -983,7 +983,7 @@ private struct NowPlayingPulseIcon: View {
 // MARK: - Hero cover (the single visible circle that morphs across player states)
 
 private struct HeroCoverView: View {
-    let gradient: LinearGradient
+    let gradient: GradientTheme
     let coverImage: UIImage?
     let isPlaying: Bool
     let isLoadingAudio: Bool
@@ -1034,7 +1034,7 @@ private struct HeroCoverView: View {
                         .contentTransition(.identity)
                 }
             } else {
-                Circle().fill(gradient)
+                Circle().fill(gradient.gradient)
             }
         }
         .clipShape(Circle())
@@ -1072,14 +1072,13 @@ private struct HeroCoverView: View {
             Group {
                 if isLoadingAudio {
                     TwoToneCircleSpinner(diameter: 18, lineWidth: 2)
-                        .environment(\.colorScheme, .dark)
                 } else {
                     Image(systemName: isPlaying ? "pause.fill" : "play.fill")
                         .font(.system(size: 14, weight: .bold))
-                        .foregroundStyle(.white)
                         .animation(nil, value: isPlaying)
                 }
             }
+            .coverControlContrast(for: coverImage, fallbackGradient: gradient)
             .opacity(showsMiniOverlay ? 1 : 0)
         }
         .aspectRatio(1, contentMode: .fit)

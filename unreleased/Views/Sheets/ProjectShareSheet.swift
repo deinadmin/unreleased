@@ -292,7 +292,6 @@ struct ProjectShareSheet: View {
                 Text("Enable share link")
                     .font(.system(size: 15))
             }
-            .tint(Color(uiColor: .systemGreen))
             .disabled(!loadedLinkState || isUpdatingLink)
             .padding(.horizontal, 16)
             .padding(.vertical, 12)

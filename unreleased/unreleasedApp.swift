@@ -42,7 +42,7 @@ struct unreleasedApp: App {
     var body: some Scene {
         WindowGroup {
             AuthRootView()
-                .tint(.primary)
+                .tint(Color("AccentColor"))
                 .environment(authManager)
                 .environment(profileAvatarStore)
                 .buttonStyle(.scale)
@@ -53,10 +53,12 @@ struct unreleasedApp: App {
                 }
                 .onAppear {
                     importManager.loadPendingImportIfNeeded()
+                    PushNotificationManager.shared.clearApplicationBadge()
                 }
                 .onChange(of: scenePhase) { _, phase in
                     guard phase == .active else { return }
                     importManager.loadPendingImportIfNeeded()
+                    PushNotificationManager.shared.clearApplicationBadge()
                 }
         }
     }

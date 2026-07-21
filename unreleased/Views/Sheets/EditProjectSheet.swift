@@ -39,11 +39,13 @@ struct EditProjectSheet: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("Cancel") { dismiss() }
+                        .tint(.primary)
                         .fixedSize(horizontal: true, vertical: false)
                         .padding(8)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Save") { save() }
+                        .tint(.primary)
                         .fontWeight(.semibold)
                         .fixedSize(horizontal: true, vertical: false)
                         .padding(8)

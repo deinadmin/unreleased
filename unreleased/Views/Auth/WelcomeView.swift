@@ -19,14 +19,14 @@ struct WelcomeView: View {
             AuthAppMark(size: 120, cornerRadius: 30)
                 .padding(.bottom, 36)
 
-            Text("A sacred place for your\nwork-in-progress music")
+            Text("Give your work-in-progress music a proper home")
                 .font(AuthChrome.headlineFont)
                 .multilineTextAlignment(.center)
                 .lineSpacing(2)
                 .padding(.horizontal, AuthChrome.horizontalPadding)
                 .padding(.bottom, 40)
 
-            VStack(spacing: 12) {
+            VStack(spacing: 10) {
                 AuthSocialButton(title: "Continue with Apple", icon: .apple) {
                     performAppleSignIn()
                 }
@@ -36,16 +36,19 @@ struct WelcomeView: View {
                     Task { await auth.signInWithGoogle() }
                 }
                 .disabled(auth.isLoading)
+
+                NavigationLink(value: AuthRoute.email) {
+                    Text("Continue with email")
+                        .font(.system(size: 17, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .frame(minHeight: 44)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(auth.isLoading)
             }
             .padding(.horizontal, AuthChrome.horizontalPadding)
-
-            NavigationLink(value: AuthRoute.email) {
-                Text("Continue with email")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(.primary)
-                    .padding(.top, 28)
-            }
-            .buttonStyle(.plain)
 
             Spacer()
 
@@ -54,7 +57,7 @@ struct WelcomeView: View {
                 .padding(.bottom, 16)
         }
         .background(AuthChrome.pageBackground.ignoresSafeArea())
-        .navigationBarHidden(true)
+        .toolbarVisibility(.hidden, for: .navigationBar)
         .navigationDestination(for: AuthRoute.self) { route in
             switch route {
             case .email:
