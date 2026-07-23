@@ -195,7 +195,13 @@ struct HomeView: View {
         VStack(spacing: 0) {
             Spacer()
 
-            ProjectCoverView(gradient: GradientTheme.presets[0], size: 240, cornerRadius: 28, showVinyl: true)
+            Image("AppIconDisplay")
+                .resizable()
+                .interpolation(.high)
+                .scaledToFit()
+                .frame(width: 240, height: 240)
+                .clipShape(.rect(cornerRadius: 28))
+                .accessibilityLabel("unreleased app icon")
                 .padding(.bottom, 36)
 
             Text("Start your first project")
@@ -375,12 +381,14 @@ struct HomeView: View {
                 profileAvatar
             }
             .buttonStyle(.plain)
+            .glassEffect(.clear.interactive(), in: Circle())
             .matchedTransitionSource(id: ChromeZoom.profile, in: chromeZoomNamespace)
         } else {
             NavigationLink(value: ProfileRoute()) {
                 profileAvatar
             }
             .buttonStyle(.plain)
+            .glassEffect(.clear.interactive(), in: Circle())
         }
     }
 
@@ -398,18 +406,9 @@ struct HomeView: View {
             .contentShape(Rectangle())
     }
 
-    /// Circular profile picture that fills its glass button edge-to-edge (no inner padding).
-    @ViewBuilder
+    /// Circular profile picture that fills its toolbar button edge-to-edge.
     private var profileAvatar: some View {
-        // On iPad this view is a matched transition source for the profile sheet.
-        // Combining a live glass effect with that source makes SwiftUI repeatedly
-        // update the glass during push/pop transitions (and can stall the UI).
-        if isRegularWidth {
-            ToolbarProfileAvatar(size: 42)
-        } else {
-            ToolbarProfileAvatar(size: 42)
-                .glassEffect(.regular.interactive(), in: .circle)
-        }
+        ToolbarProfileAvatar(size: 42)
     }
 
     // MARK: - Import helpers

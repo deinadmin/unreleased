@@ -3,6 +3,7 @@ import SwiftUI
 /// Bottom bar shown in place of the mini player while search is active.
 struct PlayerSearchBar: View {
     @Environment(AppSearchState.self) private var searchState
+    @Environment(ProjectStore.self) private var store
     @Environment(\.colorScheme) private var colorScheme
     @FocusState private var isFocused: Bool
 
@@ -33,6 +34,13 @@ struct PlayerSearchBar: View {
         isDark ? Color.white.opacity(0.12) : Color.black.opacity(0.08)
     }
 
+    private var inputTint: Color {
+        guard case let .project(projectID) = searchState.scope,
+              let project = store.projects.first(where: { $0.id == projectID })
+        else { return Color("AccentColor") }
+        return store.accentColor(for: project)
+    }
+
     var body: some View {
         HStack(alignment: .center, spacing: 10) {
             Image(systemName: "magnifyingglass")
@@ -47,6 +55,7 @@ struct PlayerSearchBar: View {
             )
             .font(.system(size: 16))
             .foregroundStyle(primaryInk)
+            .tint(inputTint)
             .textInputAutocapitalization(.never)
             .autocorrectionDisabled()
             .focused($isFocused)
@@ -114,11 +123,13 @@ struct PlayerSearchBar: View {
 
 #Preview {
     @Previewable @State var searchState = AppSearchState()
+    @Previewable @State var store = ProjectStore()
     ZStack(alignment: .bottom) {
         Color(.systemGroupedBackground).ignoresSafeArea()
         PlayerSearchBar()
     }
     .environment(searchState)
+    .environment(store)
     .onAppear {
         searchState.activate(scope: .library, placeholder: "Search your library")
     }

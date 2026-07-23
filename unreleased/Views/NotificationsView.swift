@@ -84,9 +84,9 @@ struct NotificationsView: View {
         ToolbarItem(placement: .topBarTrailing) {
             NavigationLink(value: ProfileRoute()) {
                 ToolbarProfileAvatar(size: 42)
-                    .glassEffect(.regular.interactive(), in: .circle)
             }
             .buttonStyle(.plain)
+            .glassEffect(.clear.interactive(), in: Circle())
         }
         .sharedBackgroundVisibility(.hidden)
     }

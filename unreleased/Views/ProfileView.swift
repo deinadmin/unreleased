@@ -1,6 +1,10 @@
 import MessageUI
 import SwiftUI
 
+private enum ProfileCoordinateSpace {
+    static let name = "profile"
+}
+
 struct ProfileView: View {
     @Environment(AuthManager.self) private var auth
     @Environment(ProjectStore.self) private var store
@@ -55,6 +59,7 @@ struct ProfileView: View {
                     .zIndex(1)
             }
         }
+        .coordinateSpace(.named(ProfileCoordinateSpace.name))
         .sensoryFeedback(.increase, trigger: avatarTapHapticTrigger)
         .navigationTitle("Profile")
         .navigationBarTitleDisplayMode(.inline)
@@ -91,9 +96,11 @@ struct ProfileView: View {
                         transaction.disablesAnimations = true
                     }
                     .onGeometryChange(for: CGRect.self) { proxy in
-                        proxy.frame(in: .global)
+                        proxy.frame(in: .named(ProfileCoordinateSpace.name))
                     } action: { frame in
-                        avatarSourceFrame = frame
+                        if avatarSourceFrame != frame {
+                            avatarSourceFrame = frame
+                        }
                     }
             }
             .buttonStyle(.plain)
@@ -119,13 +126,14 @@ struct ProfileView: View {
     private var expandedAvatarOverlay: some View {
         GeometryReader { proxy in
             let targetSize = min(248, proxy.size.width - 80)
-            let overlayFrame = proxy.frame(in: .global)
+            let overlayFrame = proxy.frame(in: .named(ProfileCoordinateSpace.name))
+            let globalOverlayFrame = proxy.frame(in: .global)
             let sourceCenter = CGPoint(
                 x: avatarSourceFrame.midX - overlayFrame.minX,
                 y: avatarSourceFrame.midY - overlayFrame.minY
             )
-            let targetCenter = screenCenter(relativeTo: overlayFrame, fallbackSize: proxy.size)
-            let buttonCenter = bottomActionCenter(relativeTo: overlayFrame, fallbackSize: proxy.size)
+            let targetCenter = screenCenter(relativeTo: globalOverlayFrame, fallbackSize: proxy.size)
+            let buttonCenter = bottomActionCenter(relativeTo: globalOverlayFrame, fallbackSize: proxy.size)
             let currentSize = interpolate(from: avatarSourceFrame.width, to: targetSize)
             let currentScale = currentSize / targetSize
             let currentCenter = CGPoint(

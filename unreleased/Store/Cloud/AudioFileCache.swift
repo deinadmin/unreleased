@@ -63,7 +63,11 @@ actor AudioFileCache {
         activeDownloads[key] = task
         defer { activeDownloads[key] = nil }
 
-        return try await task.value
+        return try await withTaskCancellationHandler {
+            try await task.value
+        } onCancel: {
+            task.cancel()
+        }
     }
 
     func upload(
@@ -99,55 +103,46 @@ actor AudioFileCache {
 
 private extension StorageReference {
     func writeToFileAsync(_ url: URL, onProgress: (@Sendable (Double) -> Void)? = nil) async throws {
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            let task = write(toFile: url)
-            var finished = false
-            var progressHandle: String?
-            var successHandle: String?
-            var failureHandle: String?
+        let task = write(toFile: url)
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                var finished = false
 
-            func complete(_ result: Result<Void, Error>) {
-                guard !finished else { return }
-                finished = true
-                
-                if let progressHandle { 
-                    task.removeObserver(withHandle: progressHandle) 
-                }
-                if let successHandle { 
-                    task.removeObserver(withHandle: successHandle) 
-                }
-                if let failureHandle { 
-                    task.removeObserver(withHandle: failureHandle) 
-                }
-                
-                switch result {
-                case .success:
-                    onProgress?(1)
-                    continuation.resume()
-                case .failure(let error):
-                    continuation.resume(throwing: error)
-                }
-            }
+                func complete(_ result: Result<Void, Error>) {
+                    guard !finished else { return }
+                    finished = true
 
-            if let onProgress {
-                progressHandle = task.observe(.progress) { [weak task] snapshot in
+                    switch result {
+                    case .success:
+                        onProgress?(1)
+                        continuation.resume()
+                    case .failure(let error):
+                        continuation.resume(throwing: error)
+                    }
+                }
+
+                if let onProgress {
+                    task.observe(.progress) { [weak task] snapshot in
+                        guard task != nil else { return }
+                        let total = snapshot.progress?.totalUnitCount ?? 0
+                        let completed = snapshot.progress?.completedUnitCount ?? 0
+                        guard total > 0 else { return }
+                        onProgress(Double(completed) / Double(total))
+                    }
+                }
+
+                task.observe(.success) { [weak task] _ in
                     guard task != nil else { return }
-                    let total = snapshot.progress?.totalUnitCount ?? 0
-                    let completed = snapshot.progress?.completedUnitCount ?? 0
-                    guard total > 0 else { return }
-                    onProgress(Double(completed) / Double(total))
+                    complete(.success(()))
+                }
+
+                task.observe(.failure) { [weak task] snapshot in
+                    guard task != nil else { return }
+                    complete(.failure(snapshot.error ?? URLError(.badServerResponse)))
                 }
             }
-
-            successHandle = task.observe(.success) { [weak task] _ in
-                guard task != nil else { return }
-                complete(.success(()))
-            }
-
-            failureHandle = task.observe(.failure) { [weak task] snapshot in
-                guard task != nil else { return }
-                complete(.failure(snapshot.error ?? URLError(.badServerResponse)))
-            }
+        } onCancel: {
+            task.cancel()
         }
     }
 

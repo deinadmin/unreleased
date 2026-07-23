@@ -179,11 +179,13 @@ struct UsernamePickerSheet: View {
                         .tint(.black)
                 } else {
                     Text("Continue")
-                        .font(.system(size: 16, weight: .semibold))
+                        .font(.headline)
                 }
             }
             .frame(maxWidth: .infinity)
-            .frame(height: 52)
+            // Keep the standard touch target at default text sizes, while allowing
+            // the control to grow for larger Dynamic Type settings.
+            .frame(minHeight: 52)
             .background(
                 isReady ? Color("AccentColor") : Color(.tertiarySystemBackground),
                 in: RoundedRectangle(cornerRadius: 14, style: .continuous)

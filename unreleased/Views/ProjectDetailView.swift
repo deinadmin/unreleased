@@ -592,6 +592,7 @@ private struct ProjectDownloadButton: View {
     let downloadState: ProjectHeaderDownloadState
 
     @State private var showRemoveDownloadConfirm = false
+    @State private var showCancelDownloadConfirm = false
 
     private var isVisible: Bool {
         !project.tracks.isEmpty
@@ -612,8 +613,16 @@ private struct ProjectDownloadButton: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .disabled(downloadState.isDownloading)
             .accessibilityLabel(downloadAccessibilityLabel)
+            .accessibilityHint(downloadState.isDownloading ? "Shows a confirmation to cancel the download" : "")
+            .alert("Cancel Download?", isPresented: $showCancelDownloadConfirm) {
+                Button("Cancel Download", role: .destructive) {
+                    store.cancelProjectDownload(project.id)
+                }
+                Button("Keep Downloading", role: .cancel) {}
+            } message: {
+                Text("The download will stop and all downloaded tracks from this project will be removed from your device.")
+            }
             .alert("Remove Downloads?", isPresented: $showRemoveDownloadConfirm) {
                 Button("Remove", role: .destructive) {
                     store.removeProjectDownloads(project.id)
@@ -632,7 +641,9 @@ private struct ProjectDownloadButton: View {
     }
 
     private func tap() {
-        if downloadState.isFullyDownloaded {
+        if downloadState.isDownloading {
+            showCancelDownloadConfirm = true
+        } else if downloadState.isFullyDownloaded {
             showRemoveDownloadConfirm = true
         } else {
             store.downloadProject(project.id)

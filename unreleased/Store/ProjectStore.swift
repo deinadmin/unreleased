@@ -870,6 +870,21 @@ final class ProjectStore {
         }
     }
 
+    func cancelProjectDownload(_ projectID: UUID) {
+        guard let projectIndex = projects.firstIndex(where: { $0.id == projectID }) else { return }
+
+        for track in projects[projectIndex].tracks {
+            cancelDownload(trackID: track.id)
+            deleteDownloadedFile(fileName: track.fileName)
+        }
+
+        for trackIndex in projects[projectIndex].tracks.indices {
+            projects[projectIndex].tracks[trackIndex].isDownloaded = false
+        }
+        projects[projectIndex].updatedDate = Date()
+        save()
+    }
+
     func removeProjectDownloads(_ projectID: UUID) {
         guard let project = projects.first(where: { $0.id == projectID }) else { return }
         for track in project.tracks where isTrackDownloaded(track) {

@@ -40,7 +40,7 @@ struct WelcomeView: View {
                 NavigationLink(value: AuthRoute.email) {
                     Text("Continue with email")
                         .font(.system(size: 17, weight: .bold))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(.primary)
                         .frame(maxWidth: .infinity)
                         .frame(minHeight: 44)
                         .contentShape(Rectangle())
