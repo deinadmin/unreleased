@@ -4,6 +4,10 @@ import Observation
 import Foundation
 import UIKit
 
+nonisolated private final class RemoteCommandTargetStorage {
+    var registrations: [(command: MPRemoteCommand, target: Any)] = []
+}
+
 @Observable
 @MainActor
 final class AudioPlayer {
@@ -73,8 +77,9 @@ final class AudioPlayer {
         qos: .userInitiated
     )
     private var wasPlayingBeforeInterruption = false
-    // Only mutated on MainActor; deinit is nonisolated and removes the global targets.
-    nonisolated(unsafe) private var remoteCommandTargets: [(command: MPRemoteCommand, target: Any)] = []
+    // The reference is immutable, so deinit can read it without crossing
+    // MainActor isolation. Registrations are otherwise mutated on MainActor.
+    nonisolated private let remoteCommandTargetStorage = RemoteCommandTargetStorage()
 
     private let trackRestartThreshold: TimeInterval = 1.5
     private static let equalizerEnabledKey = "audio.equalizer.enabled"
@@ -102,7 +107,7 @@ final class AudioPlayer {
     }
 
     deinit {
-        for registration in remoteCommandTargets {
+        for registration in remoteCommandTargetStorage.registrations {
             registration.command.removeTarget(registration.target)
         }
     }
@@ -266,14 +271,89 @@ final class AudioPlayer {
         }
     }
 
-    private func startPlayback(track: Track, in project: Project, fileURL: URL, fromQueue: Bool = false) {
+    /// Replaces the currently loaded audio for the same logical track without
+    /// treating it as a play/pause tap. Used after selecting a different version.
+    func switchToVersion(
+        track: Track,
+        in project: Project,
+        startingAt time: TimeInterval,
+        shouldPlay: Bool
+    ) {
+        let hasLocal = store.hasCachedAudio(for: track) || store.hasDownloadedFile(for: track)
+        if !hasLocal, track.storagePath == nil {
+            uploadPendingTrackTitle = track.title
+            showUploadPendingAlert = true
+            return
+        }
+        if !hasLocal, store.isOverStorageLimit {
+            store.presentStorageUpsell(.overLimitPlayback)
+            return
+        }
+
+        cancelLoad()
+        tearDownPlayer()
+        contextProjectID = project.id
+        contextTrackID = track.id
+        currentTrack = track
+        currentProject = project
+        duration = track.duration
+        currentTime = min(max(time, 0), track.duration)
+        isPlaying = false
+        refreshNowPlayingArtwork(for: project)
+        updateNowPlayingInfo()
+
+        if store.hasCachedAudio(for: track) || store.hasDownloadedFile(for: track) {
+            startPlayback(
+                track: track,
+                in: project,
+                fileURL: store.localAudioURL(for: track),
+                startingAt: time,
+                shouldPlay: shouldPlay
+            )
+            return
+        }
+
+        isLoadingAudio = true
+        loadingProgress = 0
+        loadTask = Task {
+            let url = await store.playbackURL(for: track) { [weak self] progress in
+                Task { @MainActor in
+                    guard let self, self.isLoadingAudio, self.currentTrack?.id == track.id else { return }
+                    self.loadingProgress = progress
+                }
+            }
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                guard self.currentTrack?.id == track.id else { return }
+                self.isLoadingAudio = false
+                self.loadingProgress = 0
+                guard let url else { return }
+                self.startPlayback(
+                    track: track,
+                    in: project,
+                    fileURL: url,
+                    startingAt: time,
+                    shouldPlay: shouldPlay
+                )
+            }
+        }
+    }
+
+    private func startPlayback(
+        track: Track,
+        in project: Project,
+        fileURL: URL,
+        fromQueue: Bool = false,
+        startingAt: TimeInterval = 0,
+        shouldPlay: Bool = true
+    ) {
         tearDownPlayer()
 
         dequeueIfQueued(track.id)
 
         currentTrack = track
         currentProject = project
-        currentTime = 0
+        currentTime = min(max(startingAt, 0), track.duration)
         duration = track.duration
         isPlaying = false
         refreshNowPlayingArtwork(for: project)
@@ -296,7 +376,9 @@ final class AudioPlayer {
                 track: track,
                 in: project,
                 fileURL: fileURL,
-                fromQueue: fromQueue
+                fromQueue: fromQueue,
+                startingAt: startingAt,
+                shouldPlay: shouldPlay
             )
         }
     }
@@ -305,7 +387,9 @@ final class AudioPlayer {
         track: Track,
         in project: Project,
         fileURL: URL,
-        fromQueue: Bool
+        fromQueue: Bool,
+        startingAt: TimeInterval,
+        shouldPlay: Bool
     ) {
         var playbackStarted = false
         do {
@@ -313,7 +397,13 @@ final class AudioPlayer {
             audioFile = file
             duration = Double(file.length) / file.processingFormat.sampleRate
             try configureAudioGraph(for: file.processingFormat)
-            playbackStarted = scheduleAudio(from: 0, shouldPlay: true)
+            let clampedStart = min(max(startingAt, 0), duration)
+            let startFrame = AVAudioFramePosition(clampedStart * file.processingFormat.sampleRate)
+            currentTime = clampedStart
+            playbackStarted = scheduleAudio(from: startFrame, shouldPlay: shouldPlay)
+            if !shouldPlay, audioEngine.isRunning {
+                audioEngine.pause()
+            }
         } catch {
             audioFile = nil
             duration = track.duration
@@ -328,7 +418,7 @@ final class AudioPlayer {
         if isShuffleEnabled, !fromQueue {
             syncShuffleIndex(for: track.id)
         }
-        isPlaying = playbackStarted
+        isPlaying = shouldPlay && playbackStarted
         updateNowPlayingInfo()
     }
 
@@ -937,29 +1027,29 @@ final class AudioPlayer {
         let playTarget = cc.playCommand.addTarget { [weak self] _ in
             self?.resumeFromRemoteCommand() ?? .noActionableNowPlayingItem
         }
-        remoteCommandTargets.append((cc.playCommand, playTarget))
+        remoteCommandTargetStorage.registrations.append((cc.playCommand, playTarget))
 
         let pauseTarget = cc.pauseCommand.addTarget { [weak self] _ in
             self?.pauseFromRemoteCommand() ?? .noActionableNowPlayingItem
         }
-        remoteCommandTargets.append((cc.pauseCommand, pauseTarget))
+        remoteCommandTargetStorage.registrations.append((cc.pauseCommand, pauseTarget))
 
         let toggleTarget = cc.togglePlayPauseCommand.addTarget { [weak self] _ in
             self?.togglePlayPauseFromRemoteCommand() ?? .noActionableNowPlayingItem
         }
-        remoteCommandTargets.append((cc.togglePlayPauseCommand, toggleTarget))
+        remoteCommandTargetStorage.registrations.append((cc.togglePlayPauseCommand, toggleTarget))
 
         let nextTarget = cc.nextTrackCommand.addTarget { [weak self] _ in
             self?.skipForward()
             return .success
         }
-        remoteCommandTargets.append((cc.nextTrackCommand, nextTarget))
+        remoteCommandTargetStorage.registrations.append((cc.nextTrackCommand, nextTarget))
 
         let previousTarget = cc.previousTrackCommand.addTarget { [weak self] _ in
             self?.skipBackward()
             return .success
         }
-        remoteCommandTargets.append((cc.previousTrackCommand, previousTarget))
+        remoteCommandTargetStorage.registrations.append((cc.previousTrackCommand, previousTarget))
 
         let positionTarget = cc.changePlaybackPositionCommand.addTarget { [weak self] event in
             if let e = event as? MPChangePlaybackPositionCommandEvent {
@@ -967,7 +1057,7 @@ final class AudioPlayer {
             }
             return .success
         }
-        remoteCommandTargets.append((cc.changePlaybackPositionCommand, positionTarget))
+        remoteCommandTargetStorage.registrations.append((cc.changePlaybackPositionCommand, positionTarget))
 
         updateRemoteCommandAvailability()
     }

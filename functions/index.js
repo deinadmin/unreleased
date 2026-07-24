@@ -1,5 +1,6 @@
 import { onDocumentCreated } from "firebase-functions/v2/firestore";
 import { onObjectFinalized, onObjectDeleted } from "firebase-functions/v2/storage";
+import { onRequest } from "firebase-functions/v2/https";
 import { initializeApp } from "firebase-admin/app";
 import { getFirestore, FieldValue, Timestamp } from "firebase-admin/firestore";
 import { getStorage } from "firebase-admin/storage";
@@ -88,8 +89,10 @@ function buildMessage(data) {
 // ── Storage limit enforcement ────────────────────────────────────────────────
 //
 // The iOS client uploads audio directly to Cloud Storage at
-// `users/{uid}/audio/{trackId}.{ext}`. Storage security rules can only validate
-// ownership and per-object size — they cannot enforce a *cumulative* quota.
+// `users/{uid}/audio/{trackId}.{ext}` for legacy tracks and
+// `users/{uid}/audio/versions/{versionId}/audio.{ext}` for track versions.
+// Storage security rules can only validate ownership and per-object size —
+// they cannot enforce a *cumulative* quota.
 //
 // These triggers are the authoritative, tamper-proof enforcement: if an upload
 // pushes a user past their plan's storage limit, the offending object is deleted
@@ -105,7 +108,8 @@ const PLAN_STORAGE_LIMITS = {
   unlimited: null,
 };
 
-const AUDIO_PREFIX_RE = /^users\/([^/]+)\/audio\/([^/]+)$/;
+const AUDIO_PREFIX_RE =
+  /^users\/([^/]+)\/audio\/(?:versions\/([^/]+)\/)?([^/]+)$/;
 
 /** Returns the effective storage limit (bytes) for a user, honoring plan expiry. */
 async function effectiveStorageLimit(userId) {
@@ -153,7 +157,8 @@ export const enforceAudioStorageLimit = onObjectFinalized(
     if (!match) return; // Only audio objects count toward the limit.
 
     const userId = match[1];
-    const fileName = match[2];
+    const versionId = match[2];
+    const fileName = match[3];
     const bucket = getStorage().bucket(event.data.bucket);
 
     const { tier, limitBytes } = await effectiveStorageLimit(userId);
@@ -186,7 +191,7 @@ export const enforceAudioStorageLimit = onObjectFinalized(
       }
 
       // Track id is the object's filename without extension.
-      const trackId = fileName.replace(/\.[^.]+$/, "");
+      const trackId = versionId ?? fileName.replace(/\.[^.]+$/, "");
       await writeStorageState(userId, {
         tier,
         usedBytes: Math.max(0, usedBytes - objectSize),
@@ -226,6 +231,257 @@ export const refreshAudioStorageUsage = onObjectDeleted(
       usedBytes,
       limitBytes,
       overLimit: limitBytes !== null && usedBytes > limitBytes,
+    });
+  }
+);
+
+// ── Public project web listening ────────────────────────────────────────────
+//
+// Public links must not expose the owner's full Firestore project document:
+// tracks may contain private versions and notes. This endpoint checks the
+// owner-controlled preview flag, selects only public audio versions, and
+// streams only the exact cover/audio objects required by the browser player.
+
+const FIREBASE_UID_RE = /^[A-Za-z0-9:_-]{1,128}$/;
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function publicTimestamp(value) {
+  if (value && typeof value.toDate === "function") {
+    return value.toDate().toISOString();
+  }
+  return new Date(0).toISOString();
+}
+
+function publicStoragePath(path, ownerId, category) {
+  return (
+    typeof path === "string" &&
+    path.startsWith(`users/${ownerId}/${category}/`) &&
+    !path.includes("..")
+  );
+}
+
+function publicMediaURL(request, ownerId, projectId, media, trackId) {
+  const project = process.env.GCLOUD_PROJECT;
+  const canonicalEndpoint = project
+    ? `https://us-central1-${project}.cloudfunctions.net/getPublicProject`
+    : new URL(request.originalUrl, `${request.protocol}://${request.get("host")}`);
+  const url = new URL(canonicalEndpoint);
+  url.searchParams.set("ownerId", ownerId);
+  url.searchParams.set("projectId", projectId.toLowerCase());
+  url.searchParams.set("media", media);
+  if (trackId) url.searchParams.set("trackId", trackId);
+  return url.toString();
+}
+
+function selectedPublicAudio(track) {
+  let audio = track;
+  const versions = Array.isArray(track?.versions) ? track.versions : [];
+  if (versions.length > 0) {
+    const publicVersions = versions.filter((version) => version?.isPublic !== false);
+    audio =
+      publicVersions.find((version) => version.id === track.activeVersionID) ??
+      publicVersions[0];
+  }
+  return audio;
+}
+
+function sanitizePublicTrack(track, ownerId, audioUrl) {
+  if (!track || typeof track.id !== "string" || typeof track.title !== "string") {
+    return null;
+  }
+
+  const audio = selectedPublicAudio(track);
+  if (!audio) return null;
+  if (!publicStoragePath(audio.storagePath, ownerId, "audio")) return null;
+
+  return {
+    id: track.id,
+    title: track.title,
+    fileName: String(audio.fileName ?? track.fileName ?? "audio"),
+    fileSize: Number(audio.fileSize ?? track.fileSize ?? 0),
+    duration: Number(audio.duration ?? track.duration ?? 0),
+    addedDate: publicTimestamp(track.addedDate),
+    waveform:
+      typeof audio.waveform === "string"
+        ? audio.waveform
+        : typeof track.waveform === "string"
+          ? track.waveform
+          : undefined,
+    audioUrl,
+  };
+}
+
+async function streamPublicFile(request, response, storagePath) {
+  const file = getStorage().bucket().file(storagePath);
+  let metadata;
+  try {
+    [metadata] = await file.getMetadata();
+  } catch (error) {
+    logger.warn(`Public media is unavailable at ${storagePath}:`, error);
+    response.status(404).json({ error: "media-unavailable" });
+    return;
+  }
+
+  const size = Number(metadata.size ?? 0);
+  const range = request.get("range");
+  let start = 0;
+  let end = Math.max(0, size - 1);
+
+  if (range) {
+    const match = /^bytes=(\d+)-(\d*)$/.exec(range);
+    if (!match) {
+      response.status(416).set("Content-Range", `bytes */${size}`).end();
+      return;
+    }
+    start = Number(match[1]);
+    end = match[2] ? Number(match[2]) : end;
+    if (start >= size || end < start) {
+      response.status(416).set("Content-Range", `bytes */${size}`).end();
+      return;
+    }
+    end = Math.min(end, size - 1);
+    response.status(206);
+    response.set("Content-Range", `bytes ${start}-${end}/${size}`);
+  }
+
+  response.set({
+    "Accept-Ranges": "bytes",
+    "Content-Type": metadata.contentType ?? "application/octet-stream",
+    "Content-Length": String(Math.max(0, end - start + 1)),
+    "Cache-Control": "private, no-store, max-age=0",
+  });
+
+  if (request.method === "HEAD") {
+    response.end();
+    return;
+  }
+
+  await new Promise((resolve) => {
+    const stream = file.createReadStream({ start, end });
+    stream.on("error", (error) => {
+      logger.warn(`Could not stream public media at ${storagePath}:`, error);
+      if (!response.headersSent) {
+        response.status(500).json({ error: "media-unavailable" });
+      } else {
+        response.destroy(error);
+      }
+      resolve();
+    });
+    response.on("finish", resolve);
+    response.on("close", resolve);
+    stream.pipe(response);
+  });
+}
+
+export const getPublicProject = onRequest(
+  { region: "us-central1", cors: true, memory: "256MiB" },
+  async (request, response) => {
+    response.set("Cache-Control", "private, no-store, max-age=0");
+
+    if (request.method !== "GET" && request.method !== "HEAD") {
+      response.status(405).json({ error: "method-not-allowed" });
+      return;
+    }
+
+    const ownerId = String(request.query.ownerId ?? "");
+    const requestedProjectId = String(request.query.projectId ?? "");
+    if (!FIREBASE_UID_RE.test(ownerId) || !UUID_RE.test(requestedProjectId)) {
+      response.status(400).json({ error: "invalid-link" });
+      return;
+    }
+
+    // Swift stores UUID document IDs using uuidString (uppercase), while the
+    // public URL intentionally uses lowercase for readability.
+    const projectId = requestedProjectId.toUpperCase();
+    const firestore = getFirestore();
+    const previewReference = firestore.doc(
+      `users/${ownerId}/projectPreviews/${projectId}`
+    );
+    const projectReference = firestore.doc(
+      `users/${ownerId}/projects/${projectId}`
+    );
+
+    const [previewSnapshot, projectSnapshot] = await Promise.all([
+      previewReference.get(),
+      projectReference.get(),
+    ]);
+    const preview = previewSnapshot.data();
+    const project = projectSnapshot.data();
+
+    // Return the same response for missing and disabled links so the endpoint
+    // does not reveal whether a private project exists.
+    if (
+      !previewSnapshot.exists ||
+      preview?.linkEnabled === false ||
+      !projectSnapshot.exists ||
+      !project
+    ) {
+      response.status(404).json({ error: "share-unavailable" });
+      return;
+    }
+
+    const projectTracks = Array.isArray(project.tracks) ? project.tracks : [];
+    const media = String(request.query.media ?? "");
+    if (media === "cover") {
+      if (!publicStoragePath(project.coverStoragePath, ownerId, "covers")) {
+        response.status(404).json({ error: "media-unavailable" });
+        return;
+      }
+      await streamPublicFile(request, response, project.coverStoragePath);
+      return;
+    }
+    if (media === "track") {
+      const trackId = String(request.query.trackId ?? "");
+      const track = projectTracks.find((item) => item?.id === trackId);
+      const audio = selectedPublicAudio(track);
+      if (!audio || !publicStoragePath(audio.storagePath, ownerId, "audio")) {
+        response.status(404).json({ error: "media-unavailable" });
+        return;
+      }
+      await streamPublicFile(request, response, audio.storagePath);
+      return;
+    }
+
+    const tracks = projectTracks
+      .map((track) =>
+        sanitizePublicTrack(
+          track,
+          ownerId,
+          publicMediaURL(request, ownerId, projectId, "track", track?.id)
+        )
+      )
+      .filter(Boolean);
+
+    let coverUrl;
+    if (publicStoragePath(project.coverStoragePath, ownerId, "covers")) {
+      coverUrl = publicMediaURL(request, ownerId, projectId, "cover");
+    }
+
+    response.status(200).json({
+      id: String(project.id ?? projectId),
+      name: String(project.name ?? preview.name ?? "Untitled project"),
+      ownerUsername: String(
+        project.ownerUsername ?? preview.ownerUsername ?? "unknown"
+      ),
+      gradient: project.gradient ?? preview.gradient ?? {
+        colors: ["#667EEA", "#764BA2"],
+        startX: 0,
+        startY: 0,
+        endX: 1,
+        endY: 1,
+      },
+      accentColorHex:
+        typeof project.accentColorHex === "string"
+          ? project.accentColorHex
+          : preview.accentColorHex,
+      coverGradientColors: Array.isArray(project.coverGradientColors)
+        ? project.coverGradientColors
+        : undefined,
+      coverUrl,
+      createdDate: publicTimestamp(project.createdDate),
+      updatedDate: publicTimestamp(project.updatedDate),
+      tracks,
     });
   }
 );

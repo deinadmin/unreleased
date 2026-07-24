@@ -148,7 +148,7 @@ struct HomeView: View {
         .sheet(item: $projectPendingShare) { project in
             ProjectShareSheet(project: project)
         }
-        .alert(
+        .neutralAlert(
             "Delete Project?",
             isPresented: Binding(
                 get: { projectPendingDelete != nil },
@@ -162,10 +162,11 @@ struct HomeView: View {
                 projectPendingDelete = nil
             }
             Button("Cancel", role: .cancel) { projectPendingDelete = nil }
+                .tint(.primary)
         } message: { _ in
             Text("This will permanently delete the project and all of its tracks.")
         }
-        .alert(
+        .neutralAlert(
             "Leave Project?",
             isPresented: Binding(
                 get: { projectPendingLeave != nil },
@@ -179,11 +180,13 @@ struct HomeView: View {
                 projectPendingLeave = nil
             }
             Button("Cancel", role: .cancel) { projectPendingLeave = nil }
+                .tint(.primary)
         } message: { project in
             Text("You will lose access to \(project.name) and it will be removed from your library.")
         }
-        .alert("Import Error", isPresented: Binding(get: { importError != nil }, set: { if !$0 { importError = nil } })) {
+        .neutralAlert("Import Error", isPresented: Binding(get: { importError != nil }, set: { if !$0 { importError = nil } })) {
             Button("OK", role: .cancel) {}
+                .tint(.primary)
         } message: {
             Text(importError ?? "")
         }
@@ -320,9 +323,12 @@ struct HomeView: View {
                 } label: {
                     Image(systemName: "plus")
                         .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(.white)
                         .frame(width: 44, height: 44)
                         .contentShape(Circle())
                 }
+                .buttonStyle(.glassProminent)
+                .tint(.accentColor)
                 .matchedTransitionSource(
                     id: CreateProjectZoom.sourceID,
                     in: createProjectZoomNamespace
@@ -529,7 +535,15 @@ private struct ProjectCard: View {
                                 .font(.system(size: 12, weight: .bold))
                                 .coverControlContrast(
                                     for: coverImage,
-                                    fallbackGradient: project.gradient
+                                    fallbackGradient: project.gradient,
+                                    // The 32-point control is inset 10 points
+                                    // from the artwork's bottom-right corner.
+                                    sampleRect: CGRect(
+                                        x: 0.75,
+                                        y: 0.75,
+                                        width: 0.2,
+                                        height: 0.2
+                                    )
                                 )
                                 .animation(nil, value: showsPause)
                         }

@@ -8,6 +8,10 @@ import Foundation
 import GoogleSignIn
 import UIKit
 
+nonisolated private final class AuthListenerStorage {
+    var listener: AuthStateDidChangeListenerHandle?
+}
+
 @Observable
 @MainActor
 final class AuthManager {
@@ -43,13 +47,13 @@ final class AuthManager {
         user?.photoURL
     }
 
-    /// Listener handle is removed from `deinit` (nonisolated); storage must not be MainActor-only.
-    nonisolated(unsafe) private var authListener: AuthStateDidChangeListenerHandle?
+    /// The immutable storage is accessible from nonisolated deinit.
+    nonisolated private let authListenerStorage = AuthListenerStorage()
     private var currentNonce: String?
 
     init() {
         user = Auth.auth().currentUser
-        authListener = Auth.auth().addStateDidChangeListener { [weak self] _, user in
+        authListenerStorage.listener = Auth.auth().addStateDidChangeListener { [weak self] _, user in
             Task { @MainActor in
                 self?.user = user
             }
@@ -57,7 +61,7 @@ final class AuthManager {
     }
 
     deinit {
-        if let authListener {
+        if let authListener = authListenerStorage.listener {
             Auth.auth().removeStateDidChangeListener(authListener)
         }
     }

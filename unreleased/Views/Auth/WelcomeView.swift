@@ -64,8 +64,9 @@ struct WelcomeView: View {
                 EmailPasswordAuthView()
             }
         }
-        .alert("Sign In", isPresented: errorBinding) {
+        .neutralAlert("Sign In", isPresented: errorBinding) {
             Button("OK") { auth.clearError() }
+                .tint(.primary)
         } message: {
             Text(auth.errorMessage ?? "")
         }

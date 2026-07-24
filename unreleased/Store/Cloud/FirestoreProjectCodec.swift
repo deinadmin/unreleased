@@ -79,6 +79,12 @@ enum FirestoreProjectCodec {
         if !track.notes.isEmpty {
             payload["notes"] = track.notes
         }
+        if !track.versions.isEmpty {
+            payload["versions"] = track.versions.map(encodeVersion)
+            if let activeVersionID = track.activeVersionID {
+                payload["activeVersionID"] = activeVersionID.uuidString
+            }
+        }
         // Waveform is analyzed once at import time and stored inline as a
         // compressed base64 string so every device can render it without
         // re-analyzing the audio stream.
@@ -103,6 +109,8 @@ enum FirestoreProjectCodec {
         let isDownloaded = data["isDownloaded"] as? Bool ?? false
         let notes = data["notes"] as? String ?? ""
         let waveform = (data["waveform"] as? String).flatMap(WaveformCodec.decode)
+        let versions = (data["versions"] as? [[String: Any]] ?? []).compactMap(decodeVersion)
+        let activeVersionID = (data["activeVersionID"] as? String).flatMap(UUID.init(uuidString:))
 
         return Track(
             id: id,
@@ -114,7 +122,59 @@ enum FirestoreProjectCodec {
             waveformData: waveform,
             storagePath: storagePath,
             isDownloaded: isDownloaded,
-            notes: notes
+            notes: notes,
+            versions: versions,
+            activeVersionID: activeVersionID
+        )
+    }
+
+    private static func encodeVersion(_ version: TrackVersion) -> [String: Any] {
+        var payload: [String: Any] = [
+            "id": version.id.uuidString,
+            "fileName": version.fileName,
+            "fileSize": version.fileSize,
+            "duration": version.duration,
+            "addedDate": Timestamp(date: version.addedDate),
+            "isPublic": version.isPublic,
+        ]
+        if let name = version.name {
+            payload["name"] = name
+        }
+        if let storagePath = version.storagePath {
+            payload["storagePath"] = storagePath
+        }
+        if version.isDownloaded {
+            payload["isDownloaded"] = true
+        }
+        if let waveform = version.waveformData, !waveform.isEmpty,
+           let encoded = WaveformCodec.encode(waveform) {
+            payload["waveform"] = encoded
+        }
+        return payload
+    }
+
+    private static func decodeVersion(_ data: [String: Any]) -> TrackVersion? {
+        guard let idString = data["id"] as? String,
+              let id = UUID(uuidString: idString),
+              let fileName = data["fileName"] as? String
+        else { return nil }
+
+        let fileSize = data["fileSize"] as? Int64 ?? Int64(data["fileSize"] as? Int ?? 0)
+        let duration = data["duration"] as? TimeInterval ?? (data["duration"] as? Double ?? 0)
+        let addedDate = (data["addedDate"] as? Timestamp)?.dateValue() ?? Date()
+        let waveform = (data["waveform"] as? String).flatMap(WaveformCodec.decode)
+
+        return TrackVersion(
+            id: id,
+            name: data["name"] as? String,
+            fileName: fileName,
+            fileSize: fileSize,
+            duration: duration,
+            addedDate: addedDate,
+            waveformData: waveform,
+            storagePath: data["storagePath"] as? String,
+            isDownloaded: data["isDownloaded"] as? Bool ?? false,
+            isPublic: data["isPublic"] as? Bool ?? true
         )
     }
 

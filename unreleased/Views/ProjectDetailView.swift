@@ -97,7 +97,7 @@ struct ProjectDetailView: View {
                 )
             }
         }
-        .alert(
+        .neutralAlert(
             project?.isShared == true ? "Leave Project?" : "Delete Project?",
             isPresented: $showDeleteConfirm,
             presenting: project
@@ -106,6 +106,7 @@ struct ProjectDetailView: View {
                 confirmDeleteProject()
             }
             Button("Cancel", role: .cancel) {}
+                .tint(.primary)
         } message: { project in
             if project.isShared {
                 Text("This will remove the project from your library.")
@@ -113,8 +114,9 @@ struct ProjectDetailView: View {
                 Text("This will permanently delete the project and all of its tracks.")
             }
         }
-        .alert("Import Error", isPresented: Binding(get: { importError != nil }, set: { if !$0 { importError = nil } })) {
+        .neutralAlert("Import Error", isPresented: Binding(get: { importError != nil }, set: { if !$0 { importError = nil } })) {
             Button("OK", role: .cancel) {}
+                .tint(.primary)
         } message: {
             Text(importError ?? "")
         }
@@ -615,19 +617,21 @@ private struct ProjectDownloadButton: View {
             .buttonStyle(.plain)
             .accessibilityLabel(downloadAccessibilityLabel)
             .accessibilityHint(downloadState.isDownloading ? "Shows a confirmation to cancel the download" : "")
-            .alert("Cancel Download?", isPresented: $showCancelDownloadConfirm) {
+            .neutralAlert("Cancel Download?", isPresented: $showCancelDownloadConfirm) {
                 Button("Cancel Download", role: .destructive) {
                     store.cancelProjectDownload(project.id)
                 }
                 Button("Keep Downloading", role: .cancel) {}
+                    .tint(.primary)
             } message: {
                 Text("The download will stop and all downloaded tracks from this project will be removed from your device.")
             }
-            .alert("Remove Downloads?", isPresented: $showRemoveDownloadConfirm) {
+            .neutralAlert("Remove Downloads?", isPresented: $showRemoveDownloadConfirm) {
                 Button("Remove", role: .destructive) {
                     store.removeProjectDownloads(project.id)
                 }
                 Button("Cancel", role: .cancel) {}
+                    .tint(.primary)
             } message: {
                 Text("All offline copies for this project will be deleted from your device.")
             }
@@ -721,10 +725,17 @@ private struct TrackRow: View {
                         .frame(width: 28)
 
                     VStack(alignment: .leading, spacing: 3) {
-                        Text(track.title)
-                            .font(.system(size: 15, weight: .semibold))
-                            .foregroundStyle(isActive ? accentColor : .primary)
-                            .lineLimit(1)
+                        HStack(spacing: 6) {
+                            Text(track.title)
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundStyle(isActive ? accentColor : .primary)
+                                .lineLimit(1)
+
+                            if track.hasMultipleVersions,
+                               let versionNumber = track.activeVersionNumber {
+                                VersionBadge(number: versionNumber)
+                            }
+                        }
 
                         HStack(spacing: 4) {
                             TrackDownloadStatusView(track: track)

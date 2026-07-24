@@ -71,7 +71,7 @@ struct ProjectShareSheet: View {
             .navigationSubtitle(project.name)
             .navigationBarTitleDisplayMode(.inline)
         }
-        .alert("Remove Listener", isPresented: Binding(
+        .neutralAlert("Remove Listener", isPresented: Binding(
             get: { inviteeToRemove != nil },
             set: { if !$0 { inviteeToRemove = nil } }
         )) {
@@ -81,12 +81,13 @@ struct ProjectShareSheet: View {
                 }
             }
             Button("Cancel", role: .cancel) { inviteeToRemove = nil }
+                .tint(.primary)
         } message: {
             if let invitee = inviteeToRemove {
                 Text("@\(invitee.username) will no longer have access to this project.")
             }
         }
-        .alert("Cancel Invite", isPresented: Binding(
+        .neutralAlert("Cancel Invite", isPresented: Binding(
             get: { pendingToCancel != nil },
             set: { if !$0 { pendingToCancel = nil } }
         )) {
@@ -96,6 +97,7 @@ struct ProjectShareSheet: View {
                 }
             }
             Button("Keep Invite", role: .cancel) { pendingToCancel = nil }
+                .tint(.primary)
         } message: {
             if let pending = pendingToCancel {
                 Text("The invite sent to @\(pending.username) will be withdrawn.")

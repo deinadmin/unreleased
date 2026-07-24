@@ -84,6 +84,8 @@ struct ScrollingMiniWaveformView: View {
     var onScrubProgress: ((Double) -> Void)?
     /// How many bars are visible in the sliding window at once.
     var visibleBars: Int
+    var barColor: Color = .white
+    var playheadColor: Color = Color(hex: "#FFD000")
     var onSeek: ((Double) -> Void)?
 
     // Extrapolation anchor — always kept up to date by onChange, even while
@@ -121,6 +123,8 @@ struct ScrollingMiniWaveformView: View {
          showsScrubTimeOverlay: Bool = false,
          onScrubOverlayChange: ((Bool, Double) -> Void)? = nil,
          visibleBars: Int = 38,
+         barColor: Color = .white,
+         playheadColor: Color = Color(hex: "#FFD000"),
          onScrubProgress: ((Double) -> Void)? = nil,
          onSeek: ((Double) -> Void)? = nil) {
         self.trackID = trackID
@@ -131,6 +135,8 @@ struct ScrollingMiniWaveformView: View {
         self.onScrubOverlayChange = onScrubOverlayChange
         self.onScrubProgress = onScrubProgress
         self.visibleBars = visibleBars
+        self.barColor = barColor
+        self.playheadColor = playheadColor
         self.onSeek = onSeek
         // Seed the anchor from the live progress value so the very first
         // TimelineView tick renders the correct position, even when the player
@@ -297,14 +303,14 @@ struct ScrollingMiniWaveformView: View {
                                                      y: (h - barH) / 2,
                                                      width: barDrawW, height: barH),
                                  cornerRadius: barDrawW / 2),
-                            with: .color(.white.opacity(opacity))
+                            with: .color(barColor.opacity(opacity))
                         )
                     }
                     // Yellow playhead — full waveform height
                     context.fill(
                         Path(roundedRect: CGRect(x: centerX - 1.5, y: 0, width: 3, height: size.height),
                              cornerRadius: 1.5),
-                        with: .color(Color(hex: "#FFD000"))
+                        with: .color(playheadColor)
                     )
                 }
                 .contentShape(Rectangle())

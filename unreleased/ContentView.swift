@@ -194,7 +194,7 @@ struct ContentView: View {
                 .presentationDetents([.medium, .large])
             }
         }
-        .alert(
+        .neutralAlert(
             "Still uploading",
             isPresented: Binding(
                 get: { player.showUploadPendingAlert },
@@ -202,6 +202,7 @@ struct ContentView: View {
             )
         ) {
             Button("OK", role: .cancel) {}
+                .tint(.primary)
         } message: {
             Text("“\(player.uploadPendingTrackTitle)” hasn’t finished uploading yet. It’ll be playable on this device once the upload completes.")
         }

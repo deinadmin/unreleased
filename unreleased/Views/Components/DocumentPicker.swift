@@ -5,11 +5,12 @@ import UniformTypeIdentifiers
 struct DocumentPicker: UIViewControllerRepresentable {
     var onPick: ([URL]) -> Void
     var onCancel: (() -> Void)? = nil
+    var allowsMultipleSelection = true
 
     func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
         let types: [UTType] = [.audio, .mpeg4Audio]
         let picker = UIDocumentPickerViewController(forOpeningContentTypes: types, asCopy: false)
-        picker.allowsMultipleSelection = true
+        picker.allowsMultipleSelection = allowsMultipleSelection
         picker.delegate = context.coordinator
         return picker
     }

@@ -1,6 +1,19 @@
 import SwiftUI
 import UIKit
 
+private struct VersionsSheetDetent: CustomPresentationDetent {
+    static func height(in context: Context) -> CGFloat? {
+        let preferredHeight = context.maxDetentValue * 0.72
+        return min(context.maxDetentValue, min(max(preferredHeight, 600), 680))
+    }
+}
+
+private enum TrackInfoDetentMode {
+    case standard
+    case transitioning
+    case versions
+}
+
 struct TrackInfoSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(ProjectStore.self) private var store
@@ -13,7 +26,10 @@ struct TrackInfoSheet: View {
 
     @State private var selectedDetent: PresentationDetent = .medium
     @State private var detentBeforeMove: PresentationDetent = .medium
+    @State private var detentBeforeVersions: PresentationDetent = .medium
+    @State private var detentMode = TrackInfoDetentMode.standard
     @State private var isShowingMove = false
+    @State private var isShowingVersions = false
     @State private var showDeleteConfirm = false
     @State private var showRemoveDownloadConfirm = false
     @State private var showRenameAlert = false
@@ -27,12 +43,24 @@ struct TrackInfoSheet: View {
     }
 
     private static let sheetFade = Animation.easeInOut(duration: 0.28)
+    private static let versionsDetent = PresentationDetent.custom(VersionsSheetDetent.self)
+
+    private var sheetDetents: Set<PresentationDetent> {
+        switch detentMode {
+        case .standard:
+            [.medium, .large]
+        case .transitioning:
+            [.medium, Self.versionsDetent, .large]
+        case .versions:
+            [Self.versionsDetent]
+        }
+    }
 
     var body: some View {
         ZStack {
             trackInfoContent
-                .opacity(isShowingMove ? 0 : 1)
-                .allowsHitTesting(!isShowingMove)
+                .opacity(isShowingMove || isShowingVersions ? 0 : 1)
+                .allowsHitTesting(!isShowingMove && !isShowingVersions)
 
             if isShowingMove {
                 MoveTrackView(
@@ -43,10 +71,22 @@ struct TrackInfoSheet: View {
                 )
                 .transition(.opacity)
             }
+
+            if isShowingVersions {
+                VersionsView(
+                    track: track,
+                    project: project,
+                    onBack: closeVersions
+                )
+                .transition(.opacity)
+            }
         }
         .animation(Self.sheetFade, value: isShowingMove)
-        .presentationDetents([.medium, .large], selection: $selectedDetent)
-        .presentationContentInteraction(isMediumDetent && !isShowingMove ? .resizes : .scrolls)
+        .animation(Self.sheetFade, value: isShowingVersions)
+        .presentationDetents(sheetDetents, selection: $selectedDetent)
+        .presentationContentInteraction(
+            isMediumDetent && !isShowingMove && !isShowingVersions ? .resizes : .scrolls
+        )
         .presentationDragIndicator(.visible)
         .presentationBackground(Color(.systemGroupedBackground))
         .onChange(of: isShowingMove) { _, showing in
@@ -57,26 +97,30 @@ struct TrackInfoSheet: View {
                 selectedDetent = detentBeforeMove
             }
         }
-        .alert("Rename", isPresented: $showRenameAlert) {
+        .neutralAlert("Rename", isPresented: $showRenameAlert) {
             TextField("Track name", text: $renameText)
             Button("Save") {
                 confirmRename()
             }
+            .tint(.primary)
             Button("Cancel", role: .cancel) {}
+                .tint(.primary)
         }
-        .alert("Delete Track?", isPresented: $showDeleteConfirm) {
+        .neutralAlert("Delete Track?", isPresented: $showDeleteConfirm) {
             Button("Delete", role: .destructive) {
                 confirmDelete()
             }
             Button("Cancel", role: .cancel) {}
+                .tint(.primary)
         } message: {
             Text("This will remove the track from the project.")
         }
-        .alert("Remove Download?", isPresented: $showRemoveDownloadConfirm) {
+        .neutralAlert("Remove Download?", isPresented: $showRemoveDownloadConfirm) {
             Button("Remove", role: .destructive) {
                 store.removeDownload(liveTrack, in: project.id)
             }
             Button("Cancel", role: .cancel) {}
+                .tint(.primary)
         } message: {
             Text("The offline copy of this track will be deleted from your device.")
         }
@@ -157,6 +201,10 @@ struct TrackInfoSheet: View {
             actions.append(TrackInfoAction(title: "Replace audio", systemImage: "waveform.badge.plus"))
         }
 
+        actions.append(TrackInfoAction(title: "Versions", systemImage: "square.stack.3d.up") {
+            openVersions()
+        })
+
         actions.append(TrackInfoAction(
             title: project.isShared ? "View notes" : "Edit notes",
             systemImage: "doc.text"
@@ -215,6 +263,43 @@ struct TrackInfoSheet: View {
     @ViewBuilder
     private var secondaryActionsGroup: some View {
         TrackInfoActionGroup(actions: secondaryActions)
+    }
+
+    private func openVersions() {
+        guard detentMode == .standard else { return }
+        detentBeforeVersions = selectedDetent
+        detentMode = .transitioning
+
+        Task { @MainActor in
+            await Task.yield()
+            guard detentMode == .transitioning, !isShowingVersions else { return }
+
+            withAnimation(Self.sheetFade, completionCriteria: .logicallyComplete) {
+                selectedDetent = Self.versionsDetent
+                isShowingVersions = true
+            } completion: {
+                guard isShowingVersions, selectedDetent == Self.versionsDetent else { return }
+                detentMode = .versions
+            }
+        }
+    }
+
+    private func closeVersions() {
+        guard detentMode == .versions else { return }
+        detentMode = .transitioning
+
+        Task { @MainActor in
+            await Task.yield()
+            guard detentMode == .transitioning, isShowingVersions else { return }
+
+            withAnimation(Self.sheetFade, completionCriteria: .logicallyComplete) {
+                selectedDetent = detentBeforeVersions
+                isShowingVersions = false
+            } completion: {
+                guard !isShowingVersions, selectedDetent != Self.versionsDetent else { return }
+                detentMode = .standard
+            }
+        }
     }
 
     // MARK: - Rename
@@ -293,7 +378,9 @@ struct TrackInfoSheet: View {
 // MARK: - Action list
 
 private struct TrackInfoAction: Identifiable {
-    let id = UUID()
+    /// Stable across view refreshes so an in-progress button tap is not
+    /// cancelled when the player publishes a playback update.
+    var id: String { "\(title)|\(systemImage)" }
     let title: String
     let systemImage: String
     var isDestructive = false

@@ -63,6 +63,58 @@ struct GradientTheme: Codable, Hashable, Sendable {
 
 // MARK: - Track
 
+struct TrackVersion: Identifiable, Codable, Sendable, Equatable {
+    var id: UUID
+    var name: String?
+    var fileName: String
+    var fileSize: Int64
+    var duration: TimeInterval
+    var addedDate: Date
+    var waveformData: [Float]?
+    var storagePath: String?
+    var isDownloaded: Bool
+    var isPublic: Bool
+
+    init(
+        id: UUID = UUID(),
+        name: String? = nil,
+        fileName: String,
+        fileSize: Int64 = 0,
+        duration: TimeInterval = 0,
+        addedDate: Date = Date(),
+        waveformData: [Float]? = nil,
+        storagePath: String? = nil,
+        isDownloaded: Bool = false,
+        isPublic: Bool = true
+    ) {
+        self.id = id
+        self.name = name
+        self.fileName = fileName
+        self.fileSize = fileSize
+        self.duration = duration
+        self.addedDate = addedDate
+        self.waveformData = waveformData
+        self.storagePath = storagePath
+        self.isDownloaded = isDownloaded
+        self.isPublic = isPublic
+    }
+
+    var fileExtension: String {
+        let ext = (fileName as NSString).pathExtension.lowercased()
+        return ext.isEmpty ? "m4a" : ext
+    }
+
+    var formattedDuration: String {
+        guard duration > 0 else { return "--:--" }
+        let total = Int(duration)
+        return String(format: "%d:%02d", total / 60, total % 60)
+    }
+
+    var formattedFileSize: String {
+        ByteCountFormatter.string(fromByteCount: fileSize, countStyle: .file)
+    }
+}
+
 struct Track: Identifiable, Codable, Sendable {
     var id: UUID
     var title: String
@@ -78,6 +130,10 @@ struct Track: Identifiable, Codable, Sendable {
     /// User-pinned offline copy in Downloads (distinct from playback cache).
     var isDownloaded: Bool
     var notes: String
+    /// Newest/highest-numbered version is stored first. Empty represents a
+    /// legacy single-file track and is surfaced as an implicit v1.
+    var versions: [TrackVersion]
+    var activeVersionID: UUID?
 
     init(
         id: UUID = UUID(),
@@ -89,7 +145,9 @@ struct Track: Identifiable, Codable, Sendable {
         waveformData: [Float]? = nil,
         storagePath: String? = nil,
         isDownloaded: Bool = false,
-        notes: String = ""
+        notes: String = "",
+        versions: [TrackVersion] = [],
+        activeVersionID: UUID? = nil
     ) {
         self.id = id
         self.title = title
@@ -101,6 +159,153 @@ struct Track: Identifiable, Codable, Sendable {
         self.storagePath = storagePath
         self.isDownloaded = isDownloaded
         self.notes = notes
+        self.versions = versions
+        self.activeVersionID = activeVersionID
+        if !versions.isEmpty {
+            applyActiveVersionMetadata()
+        }
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, title, fileName, fileSize, duration, addedDate, waveformData
+        case storagePath, isDownloaded, notes, versions, activeVersionID
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            id: try container.decode(UUID.self, forKey: .id),
+            title: try container.decode(String.self, forKey: .title),
+            fileName: try container.decode(String.self, forKey: .fileName),
+            fileSize: try container.decodeIfPresent(Int64.self, forKey: .fileSize) ?? 0,
+            duration: try container.decodeIfPresent(TimeInterval.self, forKey: .duration) ?? 0,
+            addedDate: try container.decodeIfPresent(Date.self, forKey: .addedDate) ?? Date(),
+            waveformData: try container.decodeIfPresent([Float].self, forKey: .waveformData),
+            storagePath: try container.decodeIfPresent(String.self, forKey: .storagePath),
+            isDownloaded: try container.decodeIfPresent(Bool.self, forKey: .isDownloaded) ?? false,
+            notes: try container.decodeIfPresent(String.self, forKey: .notes) ?? "",
+            versions: try container.decodeIfPresent([TrackVersion].self, forKey: .versions) ?? [],
+            activeVersionID: try container.decodeIfPresent(UUID.self, forKey: .activeVersionID)
+        )
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(title, forKey: .title)
+        try container.encode(fileName, forKey: .fileName)
+        try container.encode(fileSize, forKey: .fileSize)
+        try container.encode(duration, forKey: .duration)
+        try container.encode(addedDate, forKey: .addedDate)
+        try container.encodeIfPresent(waveformData, forKey: .waveformData)
+        try container.encodeIfPresent(storagePath, forKey: .storagePath)
+        try container.encode(isDownloaded, forKey: .isDownloaded)
+        try container.encode(notes, forKey: .notes)
+        if !versions.isEmpty {
+            try container.encode(versions, forKey: .versions)
+            try container.encodeIfPresent(activeVersionID, forKey: .activeVersionID)
+        }
+    }
+
+    var displayedVersions: [TrackVersion] {
+        guard !versions.isEmpty else {
+            return [
+                TrackVersion(
+                    id: id,
+                    name: title,
+                    fileName: fileName,
+                    fileSize: fileSize,
+                    duration: duration,
+                    addedDate: addedDate,
+                    waveformData: waveformData,
+                    storagePath: storagePath,
+                    isDownloaded: isDownloaded
+                ),
+            ]
+        }
+        return versions
+    }
+
+    var resolvedActiveVersionID: UUID {
+        activeVersionID ?? displayedVersions.first?.id ?? id
+    }
+
+    var hasMultipleVersions: Bool { displayedVersions.count > 1 }
+
+    var activeVersionNumber: Int? {
+        versionNumber(for: resolvedActiveVersionID)
+    }
+
+    func versionNumber(for versionID: UUID) -> Int? {
+        guard let index = displayedVersions.firstIndex(where: { $0.id == versionID }) else {
+            return nil
+        }
+        return displayedVersions.count - index
+    }
+
+    func visibleVersions(isShared: Bool) -> [TrackVersion] {
+        guard isShared else { return displayedVersions }
+        return displayedVersions.filter(\.isPublic)
+    }
+
+    func versionDisplayName(for version: TrackVersion) -> String {
+        let storedName = version.name?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let storedName, !storedName.isEmpty {
+            return storedName
+        }
+        if displayedVersions.last?.id == version.id {
+            return title
+        }
+        let fileTitle = (version.fileName as NSString).deletingPathExtension
+        return fileTitle.isEmpty ? "Untitled Version" : fileTitle
+    }
+
+    mutating func ensureVersionHistory() {
+        guard versions.isEmpty else {
+            if activeVersionID == nil {
+                activeVersionID = versions.first?.id
+            }
+            return
+        }
+        var original = displayedVersions[0]
+        original.name = title
+        versions = [original]
+        activeVersionID = original.id
+    }
+
+    mutating func selectVersion(id versionID: UUID) {
+        ensureVersionHistory()
+        guard versions.contains(where: { $0.id == versionID }) else { return }
+        activeVersionID = versionID
+        applyActiveVersionMetadata()
+    }
+
+    mutating func applyActiveVersionMetadata() {
+        guard !versions.isEmpty else { return }
+        if activeVersionID == nil || !versions.contains(where: { $0.id == activeVersionID }) {
+            activeVersionID = versions.first?.id
+        }
+        guard let activeVersionID,
+              let version = versions.first(where: { $0.id == activeVersionID })
+        else { return }
+        fileName = version.fileName
+        fileSize = version.fileSize
+        duration = version.duration
+        waveformData = version.waveformData
+        storagePath = version.storagePath
+        isDownloaded = version.isDownloaded
+    }
+
+    mutating func updateActiveVersionFromLegacyMetadata() {
+        guard let activeVersionID,
+              let index = versions.firstIndex(where: { $0.id == activeVersionID })
+        else { return }
+        versions[index].fileName = fileName
+        versions[index].fileSize = fileSize
+        versions[index].duration = duration
+        versions[index].waveformData = waveformData
+        versions[index].storagePath = storagePath
+        versions[index].isDownloaded = isDownloaded
     }
 
     var fileExtension: String {

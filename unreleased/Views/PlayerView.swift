@@ -16,6 +16,8 @@ struct PlayerView: View {
     @State private var isShowingTrackInfo = false
     @State private var isShowingQueue = false
     @State private var isShowingNotes = false
+    @State private var isShowingVersionPicker = false
+    @State private var versionPickerTapHapticTrigger = 0
     @State private var bottomAccessoryHapticTrigger = 0
     /// Flips to true once the insertion-spring has settled so the matched-
     /// geometry hero cover can take over from the static placeholder cover.
@@ -60,7 +62,10 @@ struct PlayerView: View {
     }
 
     private var screenCornerRadius: CGFloat {
-        (UIScreen.main.value(forKey: "_displayCornerRadius") as? CGFloat) ?? 44
+        let screen = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .first?.keyWindow?.windowScene?.screen
+        return (screen?.value(forKey: "_displayCornerRadius") as? CGFloat) ?? 44
     }
 
     private var bottomCardRadius: CGFloat {
@@ -115,13 +120,18 @@ struct PlayerView: View {
                     // preventing the matched-geometry resolution from jittering.
                     .geometryGroup()
                     // Press-scale for the mini-player play/pause tap target.
-                    .scaleEffect((!isExpanded || isShowingQueue || isShowingNotes) && isCoverPressed ? 0.88 : 1.0)
+                    .scaleEffect(
+                        isShowingVersionPicker
+                            ? 0.94
+                            : ((!isExpanded || isShowingQueue || isShowingNotes) && isCoverPressed ? 0.88 : 1.0)
+                    )
                     .animation(
                         .spring(response: 0.22, dampingFraction: 0.65),
                         value: isCoverPressed
                     )
-                    .opacity(heroSettled ? 1 : 0)
+                    .opacity(heroSettled && !isShowingVersionPicker ? 1 : 0)
                     .animation(.none, value: heroSettled)
+                    .animation(.easeInOut(duration: 0.22), value: isShowingVersionPicker)
             }
             .frame(maxWidth: cardMaxWidth)
             // Always apply drag offset — gating on isExpanded caused instant snap on dismiss/snap-back.
@@ -130,7 +140,12 @@ struct PlayerView: View {
                 if isDragging { transaction.disablesAnimations = true }
             }
             .scaleEffect(isExpanded && offset > 0 ? max(0.93, 1 - offset / 1400) : 1, anchor: .bottom)
-            .gesture(isExpanded ? dismissGesture : nil)
+            .gesture(
+                isExpanded && !isShowingTrackInfo && !isShowingVersionPicker
+                    ? dismissGesture
+                    : nil
+            )
+            .sensoryFeedback(.increase, trigger: versionPickerTapHapticTrigger)
             .onAppear {
                 offset = 0
                 lastDragTranslation = 0
@@ -163,7 +178,11 @@ struct PlayerView: View {
                 } else {
                     isShowingQueue = false
                     isShowingNotes = false
+                    isShowingVersionPicker = false
                 }
+            }
+            .onChange(of: track.id) { _, _ in
+                isShowingVersionPicker = false
             }
             .sheet(isPresented: $isShowingTrackInfo) {
                 if let track = liveTrack, let project = liveProject {
@@ -327,10 +346,17 @@ struct PlayerView: View {
                 .padding(.leading, compactCoverInset)
 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(track.title)
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .lineLimit(1)
+                    HStack(spacing: 5) {
+                        Text(track.title)
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .lineLimit(1)
+
+                        if track.hasMultipleVersions,
+                           let versionNumber = track.activeVersionNumber {
+                            VersionBadge(number: versionNumber, style: .player)
+                        }
+                    }
                     Text(project.name)
                         .font(.system(size: 11))
                         .foregroundStyle(.white.opacity(0.55))
@@ -367,7 +393,6 @@ struct PlayerView: View {
                 // scale-down effect while the button is being held.
                 .buttonStyle(CoverPressButtonStyle(isPressed: $isCoverPressed))
                 .disabled(player.isLoadingAudio)
-                .sensoryFeedback(.impact(weight: .medium), trigger: player.isPlaying)
             } else {
                 Color.clear
             }
@@ -458,14 +483,39 @@ struct PlayerView: View {
     @ViewBuilder
     private func expandedTitle(track: Track, project: Project) -> some View {
         VStack(spacing: 4) {
-            Text(track.title)
-                .font(.system(size: 21, weight: .bold))
-                .foregroundStyle(.white)
-                .multilineTextAlignment(.center)
-                .lineLimit(2)
+            HStack(spacing: 7) {
+                Text(track.title)
+                    .font(.system(size: 21, weight: .bold))
+                    .foregroundStyle(.white)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
+
+                if track.hasMultipleVersions,
+                   let versionNumber = track.activeVersionNumber {
+                    Button {
+                        withAnimation(.spring(response: 0.40, dampingFraction: 0.86)) {
+                            isShowingVersionPicker.toggle()
+                        }
+                    } label: {
+                        VersionBadge(number: versionNumber, style: .player)
+                            .scaleEffect(1.16)
+                            .frame(width: 30, height: 27)
+                            .frame(width: 40, height: 34)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.scale)
+                    .accessibilityLabel(
+                        isShowingVersionPicker ? "Close version picker" : "Choose version"
+                    )
+                }
+            }
+            .frame(minHeight: 34)
+
             Text(project.name)
                 .font(.system(size: 13))
                 .foregroundStyle(.white.opacity(0.52))
+                .lineLimit(1)
+                .frame(height: 16)
         }
         .frame(maxWidth: .infinity)
     }
@@ -524,7 +574,6 @@ struct PlayerView: View {
                 }
             }
             .disabled(player.isLoadingAudio)
-            .sensoryFeedback(.impact(weight: .medium), trigger: player.isPlaying)
 
             Spacer()
 
@@ -554,8 +603,39 @@ struct PlayerView: View {
                 .padding(.top, 16)
                 .padding(.horizontal, 24)
 
-            coverSlot(size: 200, isTapToPlay: false)
-                .padding(.top, 18)
+            ZStack {
+                coverSlot(size: 200, isTapToPlay: false)
+
+                if isShowingVersionPicker {
+                    PlayerVersionPicker(
+                        versions: track.visibleVersions(isShared: project.isShared),
+                        selectedVersionID: track.resolvedActiveVersionID,
+                        versionNumber: { track.versionNumber(for: $0.id) ?? 1 },
+                        versionName: { track.versionDisplayName(for: $0) },
+                        onSelect: { version, wasTapped in
+                            if wasTapped {
+                                versionPickerTapHapticTrigger += 1
+                            }
+
+                            if version.id == track.resolvedActiveVersionID {
+                                if wasTapped {
+                                    withAnimation(.spring(response: 0.40, dampingFraction: 0.86)) {
+                                        isShowingVersionPicker = false
+                                    }
+                                }
+                            } else {
+                                selectVersion(version, track: track, project: project)
+                            }
+                        }
+                    )
+                    .transition(
+                        .scale(scale: 0.94)
+                            .combined(with: .opacity)
+                    )
+                }
+            }
+            .frame(height: 200)
+            .padding(.top, 18)
 
             waveformSection(track: track)
                 .padding(.horizontal, 24)
@@ -753,6 +833,7 @@ struct PlayerView: View {
             bottomAccessoryButton(icon: "doc.text", label: "notes", isActive: isShowingNotes) {
                 bottomAccessoryHapticTrigger += 1
                 withAnimation(.spring(response: 0.34, dampingFraction: 0.84)) {
+                    isShowingVersionPicker = false
                     isShowingNotes.toggle()
                     if isShowingNotes { isShowingQueue = false }
                 }
@@ -764,11 +845,15 @@ struct PlayerView: View {
             ) {
                 bottomAccessoryHapticTrigger += 1
                 withAnimation(.spring(response: 0.34, dampingFraction: 0.84)) {
+                    isShowingVersionPicker = false
                     isShowingQueue.toggle()
                     if isShowingQueue { isShowingNotes = false }
                 }
             }
             bottomAccessoryButton(icon: "ellipsis", label: "options") {
+                withAnimation(.spring(response: 0.34, dampingFraction: 0.84)) {
+                    isShowingVersionPicker = false
+                }
                 isShowingTrackInfo = true
             }
         }
@@ -956,6 +1041,25 @@ struct PlayerView: View {
         return "\(project.id.uuidString)-\(project.coverImageFileName ?? "none")-\(gradientKey)"
     }
 
+    private func selectVersion(_ version: TrackVersion, track: Track, project: Project) {
+        guard track.resolvedActiveVersionID != version.id else { return }
+
+        let resumeTime = player.currentTime
+        let shouldPlay = player.isPlaying
+        store.selectVersion(version.id, for: track.id, in: project.id)
+
+        guard let updatedProject = store.projects.first(where: { $0.id == project.id }),
+              let updatedTrack = updatedProject.tracks.first(where: { $0.id == track.id })
+        else { return }
+
+        player.switchToVersion(
+            track: updatedTrack,
+            in: updatedProject,
+            startingAt: min(resumeTime, updatedTrack.duration),
+            shouldPlay: shouldPlay
+        )
+    }
+
     private func openTrackNotes() {
         guard let track = liveTrack, let project = liveProject else { return }
         let trackID = track.id
@@ -964,6 +1068,227 @@ struct PlayerView: View {
         DispatchQueue.main.async {
             navigateToTrackNotes(trackID, projectID)
         }
+    }
+}
+
+// MARK: - Player version picker
+
+private struct PlayerVersionPicker: View {
+    let versions: [TrackVersion]
+    let selectedVersionID: UUID
+    let versionNumber: (TrackVersion) -> Int
+    let versionName: (TrackVersion) -> String
+    let onSelect: (TrackVersion, Bool) -> Void
+
+    @State private var selectedIndex = 0
+    @State private var dragStartIndex = 0
+    @State private var dragOffset: CGFloat = 0
+    @State private var isDragging = false
+    @State private var feedbackTrigger = 0
+
+    private let rowSpacing: CGFloat = 49
+    private let selectionHeight: CGFloat = 44
+    private let selectionColor = Color(red: 1.0, green: 0.80, blue: 0.17)
+
+    var body: some View {
+        ZStack {
+            selectionPlate
+
+            ForEach(Array(versions.enumerated()), id: \.element.id) { index, version in
+                versionRow(version, at: index)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: 200)
+        .padding(.horizontal, 22)
+        .contentShape(Rectangle())
+        .highPriorityGesture(carouselGesture)
+        .mask {
+            LinearGradient(
+                stops: [
+                    .init(color: .clear, location: 0),
+                    .init(color: .black.opacity(0.72), location: 0.13),
+                    .init(color: .black, location: 0.28),
+                    .init(color: .black, location: 0.72),
+                    .init(color: .black.opacity(0.72), location: 0.87),
+                    .init(color: .clear, location: 1),
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+        }
+        .sensoryFeedback(.increase, trigger: feedbackTrigger)
+        .onAppear {
+            synchronizeSelection()
+        }
+        .onChange(of: selectedVersionID) { _, _ in
+            synchronizeSelection()
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Version picker")
+        .accessibilityValue(accessibilityValue)
+        .accessibilityAdjustableAction { direction in
+            switch direction {
+            case .increment:
+                choose(index: min(selectedIndex + 1, versions.count - 1))
+            case .decrement:
+                choose(index: max(selectedIndex - 1, 0))
+            @unknown default:
+                break
+            }
+        }
+    }
+
+    private var selectionPlate: some View {
+        RoundedRectangle(cornerRadius: 11, style: .continuous)
+            .fill(selectionColor)
+            .frame(height: selectionHeight)
+            .overlay {
+                RoundedRectangle(cornerRadius: 11, style: .continuous)
+                    .strokeBorder(.white.opacity(0.24), lineWidth: 0.75)
+            }
+            .shadow(color: selectionColor.opacity(0.20), radius: 16, y: 4)
+            .padding(.horizontal, 8)
+    }
+
+    private func versionRow(_ version: TrackVersion, at index: Int) -> some View {
+        let referenceIndex = isDragging ? dragStartIndex : selectedIndex
+        let position = CGFloat(index - referenceIndex) * rowSpacing + dragOffset
+        let distance = abs(position / rowSpacing)
+        let isSelected = index == selectedIndex
+
+        return Button {
+            choose(index: index)
+        } label: {
+            HStack(spacing: 10) {
+                Text("v\(versionNumber(version))")
+                    .font(.system(size: isSelected ? 11 : 10, weight: .bold, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundStyle(isSelected ? .black.opacity(0.72) : .white.opacity(0.44))
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 4)
+                    .background(
+                        isSelected ? .black.opacity(0.08) : .white.opacity(0.07),
+                        in: Capsule()
+                    )
+
+                Text(versionName(version))
+                    .font(.system(size: isSelected ? 15 : 14, weight: isSelected ? .semibold : .medium))
+                    .foregroundStyle(isSelected ? .black.opacity(0.88) : .white)
+                    .lineLimit(1)
+
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 18)
+            .frame(height: selectionHeight)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .scaleEffect(max(0.76, 1 - distance * 0.085))
+        .opacity(isSelected ? 1 : max(0.12, 0.72 - distance * 0.20))
+        .blur(radius: max(0, distance - 1.65) * 0.55)
+        .offset(y: position)
+        .zIndex(isSelected ? 2 : 1)
+        .accessibilityHidden(true)
+    }
+
+    private var carouselGesture: some Gesture {
+        DragGesture(minimumDistance: 3)
+            .onChanged { value in
+                if !isDragging {
+                    isDragging = true
+                    dragStartIndex = selectedIndex
+                }
+
+                let projectedIndex = clampedIndex(
+                    Int(
+                        (
+                            CGFloat(dragStartIndex)
+                                - value.translation.height / rowSpacing
+                        ).rounded()
+                    )
+                )
+
+                if projectedIndex != selectedIndex {
+                    selectedIndex += projectedIndex > selectedIndex ? 1 : -1
+                    feedbackTrigger += 1
+                }
+
+                dragOffset = resistedTranslation(value.translation.height)
+            }
+            .onEnded { value in
+                let targetIndex = clampedIndex(
+                    Int(
+                        (
+                            CGFloat(dragStartIndex)
+                                - value.predictedEndTranslation.height / rowSpacing
+                        ).rounded()
+                    )
+                )
+
+                if targetIndex != selectedIndex {
+                    selectedIndex = targetIndex
+                    feedbackTrigger += 1
+                }
+
+                let snappedOffset = -CGFloat(targetIndex - dragStartIndex) * rowSpacing
+                withAnimation(.spring(response: 0.34, dampingFraction: 0.80)) {
+                    dragOffset = snappedOffset
+                } completion: {
+                    isDragging = false
+                    dragStartIndex = targetIndex
+                    dragOffset = 0
+                    onSelect(versions[targetIndex], false)
+                }
+            }
+    }
+
+    private var accessibilityValue: String {
+        guard versions.indices.contains(selectedIndex) else { return "" }
+        let version = versions[selectedIndex]
+        return "Version \(versionNumber(version)), \(versionName(version))"
+    }
+
+    private func choose(index: Int) {
+        let targetIndex = clampedIndex(index)
+        guard versions.indices.contains(targetIndex) else { return }
+
+        withAnimation(.spring(response: 0.34, dampingFraction: 0.82)) {
+            selectedIndex = targetIndex
+            dragOffset = 0
+        }
+        onSelect(versions[targetIndex], true)
+    }
+
+    private func synchronizeSelection() {
+        guard let index = versions.firstIndex(where: { $0.id == selectedVersionID }) else {
+            selectedIndex = 0
+            return
+        }
+        selectedIndex = index
+        dragStartIndex = index
+        dragOffset = 0
+    }
+
+    private func clampedIndex(_ index: Int) -> Int {
+        min(max(index, 0), max(versions.count - 1, 0))
+    }
+
+    private func resistedTranslation(_ translation: CGFloat) -> CGFloat {
+        let maximum = CGFloat(dragStartIndex) * rowSpacing
+        let minimum = -CGFloat(max(versions.count - 1 - dragStartIndex, 0)) * rowSpacing
+
+        if translation > maximum {
+            return maximum + rubberBand(translation - maximum)
+        }
+        if translation < minimum {
+            return minimum + rubberBand(translation - minimum)
+        }
+        return translation
+    }
+
+    private func rubberBand(_ excess: CGFloat) -> CGFloat {
+        (1 - 1 / (abs(excess) / 42 + 1)) * 28 * (excess < 0 ? -1 : 1)
     }
 }
 
@@ -1046,27 +1371,33 @@ private struct HeroCoverView: View {
 
     var body: some View {
         ZStack {
-            // Keep only the rotating artwork in the per-frame subtree. Liquid
-            // Glass and controls must not be invalidated at display refresh rate.
+            // Both artwork layers use the same timeline angle. The Gaussian
+            // blur is applied before rotation, allowing SwiftUI to transform
+            // the blurred result instead of changing the blur itself.
             TimelineView(.animation(minimumInterval: nil, paused: !isPlaying || isScrubbing)) { tl in
                 let degrees = rotationAt(tl.date)
-                coverArtwork(rotation: degrees)
-                    .background {
-                        Circle()
-                            .fill(.black.opacity(0.001))
-                            .shadow(
-                                color: .black.opacity(showsShadow ? 0.4 : 0),
-                                radius: showsShadow ? 26 : 0,
-                                x: 0,
-                                y: showsShadow ? 10 : 0
-                            )
-                    }
-            }
 
-            // Mini-bar dim layer (fades out when the player expands).
-            Circle()
-                .glassEffect(.clear)
-                .opacity(showsMiniOverlay ? 1 : 0)
+                ZStack {
+                    coverArtwork(rotation: degrees)
+                        .background {
+                            Circle()
+                                .fill(.black.opacity(0.001))
+                                .shadow(
+                                    color: .black.opacity(showsShadow ? 0.4 : 0),
+                                    radius: showsShadow ? 26 : 0,
+                                    x: 0,
+                                    y: showsShadow ? 10 : 0
+                                )
+                        }
+
+                    CoverArtworkBlurOverlay(
+                        gradient: gradient,
+                        coverImage: coverImage
+                    )
+                    .rotationEffect(.degrees(degrees))
+                    .opacity(showsMiniOverlay ? 1 : 0)
+                }
+            }
 
             // Mini-bar play/pause icon (or loading indicator).
             Group {
@@ -1078,7 +1409,9 @@ private struct HeroCoverView: View {
                         .animation(nil, value: isPlaying)
                 }
             }
-            .coverControlContrast(for: coverImage, fallbackGradient: gradient)
+            .foregroundStyle(.white)
+            .environment(\.colorScheme, .dark)
+            .shadow(color: .black.opacity(0.42), radius: 4, y: 2)
             .opacity(showsMiniOverlay ? 1 : 0)
         }
         .aspectRatio(1, contentMode: .fit)
@@ -1118,6 +1451,34 @@ private struct HeroCoverView: View {
             accumulatedDegrees += delta * effectiveDuration * degreesPerSecond
             lastScrubProgress = newProgress
         }
+    }
+}
+
+/// A classic Gaussian blur made from the cover itself. The oversized source
+/// prevents transparent blur edges, while the dark wash guarantees a stable
+/// backdrop for the white transport control without using a Material.
+private struct CoverArtworkBlurOverlay: View {
+    let gradient: GradientTheme
+    let coverImage: UIImage?
+
+    var body: some View {
+        ZStack {
+            Color(white: 0.12)
+
+            if let coverImage {
+                Image(uiImage: coverImage)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                Rectangle()
+                    .fill(gradient.gradient)
+            }
+        }
+        .scaleEffect(1.18)
+        .blur(radius: 6, opaque: true)
+        .overlay(Color.black.opacity(0.34))
+        .clipShape(Circle())
+        .allowsHitTesting(false)
     }
 }
 

@@ -28,18 +28,21 @@ struct EqualizerView: View {
         .navigationTitle("EQ")
         .navigationBarTitleDisplayMode(.inline)
         .sensoryFeedback(.increase, trigger: hapticTrigger)
-        .alert(presetPromptTitle, isPresented: isShowingPresetPrompt) {
+        .neutralAlert(presetPromptTitle, isPresented: isShowingPresetPrompt) {
             if case .delete = presetPrompt {
                 Button("Cancel", role: .cancel) {}
+                    .tint(.primary)
                 Button("Delete", role: .destructive) {
                     completePresetPrompt()
                 }
             } else {
                 TextField("Preset name", text: $presetName)
                 Button("Cancel", role: .cancel) {}
+                    .tint(.primary)
                 Button(presetPromptActionTitle) {
                     completePresetPrompt()
                 }
+                .tint(.primary)
                 .disabled(presetName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         } message: {

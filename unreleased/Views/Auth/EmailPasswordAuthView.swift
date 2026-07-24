@@ -106,13 +106,15 @@ struct EmailPasswordAuthView: View {
         .toolbarVisibility(.visible, for: .navigationBar)
         .navigationBarTitleDisplayMode(.inline)
         .defaultFocus($focusedField, .email)
-        .alert("Sign In", isPresented: errorBinding) {
+        .neutralAlert("Sign In", isPresented: errorBinding) {
             Button("OK") { auth.clearError() }
+                .tint(.primary)
         } message: {
             Text(auth.errorMessage ?? "")
         }
-        .alert("Check your inbox", isPresented: $didSendResetEmail) {
+        .neutralAlert("Check your inbox", isPresented: $didSendResetEmail) {
             Button("OK", role: .cancel) {}
+                .tint(.primary)
         } message: {
             Text("We sent a password reset link to \(email).")
         }

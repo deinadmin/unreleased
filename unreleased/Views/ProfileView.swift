@@ -63,17 +63,19 @@ struct ProfileView: View {
         .sensoryFeedback(.increase, trigger: avatarTapHapticTrigger)
         .navigationTitle("Profile")
         .navigationBarTitleDisplayMode(.inline)
-        .alert("Sign Out?", isPresented: $showSignOutConfirm) {
+        .neutralAlert("Sign Out?", isPresented: $showSignOutConfirm) {
             Button("Sign Out", role: .destructive, action: signOut)
             Button("Cancel", role: .cancel) {}
+                .tint(.primary)
         } message: {
             Text("You’ll need to sign in again to access your library.")
         }
         .sheet(isPresented: $showPhotoPicker) {
             SquarePhotoPicker(onImagePicked: uploadAvatar)
         }
-        .alert("Couldn’t Update Photo", isPresented: avatarErrorBinding) {
+        .neutralAlert("Couldn’t Update Photo", isPresented: avatarErrorBinding) {
             Button("OK", role: .cancel) {}
+                .tint(.primary)
         } message: {
             Text(avatarErrorMessage ?? "Please try again.")
         }

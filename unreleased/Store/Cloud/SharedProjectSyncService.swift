@@ -46,6 +46,7 @@ final class SharedProjectSyncService {
                 }
                 if let snapshot, snapshot.exists, var project = FirestoreProjectCodec.decode(snapshot) {
                     project.ownerID = ownerID
+                    project.selectPublicVersionsForSharedPlayback()
                     self.projectUpdater(project)
                 } else if error == nil {
                     // Document removed — owner deleted the project.
@@ -77,10 +78,24 @@ final class SharedProjectSyncService {
             let snapshot = try await doc.getDocument()
             guard snapshot.exists, var project = FirestoreProjectCodec.decode(snapshot) else { return nil }
             project.ownerID = ownerID
+            project.selectPublicVersionsForSharedPlayback()
             return project
         } catch {
             print("SharedProjectSyncService: fetch failed for \(projectID) — \(error)")
             return nil
+        }
+    }
+}
+
+private extension Project {
+    mutating func selectPublicVersionsForSharedPlayback() {
+        for index in tracks.indices where !tracks[index].versions.isEmpty {
+            let activeIsPublic = tracks[index].versions.contains {
+                $0.id == tracks[index].activeVersionID && $0.isPublic
+            }
+            if !activeIsPublic, let publicVersion = tracks[index].versions.first(where: \.isPublic) {
+                tracks[index].selectVersion(id: publicVersion.id)
+            }
         }
     }
 }

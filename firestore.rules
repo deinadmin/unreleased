@@ -43,12 +43,24 @@ service cloud.firestore {
         allow write: if false;
       }
 
+      // Owner-maintained visibility index used by Cloud Storage rules for
+      // version audio. Collaborators never need direct document access.
+      match /versionAccess/{versionId} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
+
       // ── Notifications ──────────────────────────────────────────────────────
-      // The recipient reads/updates (mark read)/deletes their own notifications.
+      // The recipient reads/updates/deletes their own notifications. The sender
+      // may delete an invite notification when withdrawing a pending invite.
       // Any authenticated user may create a notification addressed to this user,
       // as long as they stamp themselves as the sender.
       match /notifications/{notificationId} {
-        allow read, update, delete: if request.auth != null && request.auth.uid == userId;
+        allow read, update: if request.auth != null && request.auth.uid == userId;
+        allow delete: if request.auth != null
+          && (
+            request.auth.uid == userId
+            || resource.data.fromUID == request.auth.uid
+          );
         allow create: if request.auth != null
           && request.resource.data.fromUID == request.auth.uid;
       }

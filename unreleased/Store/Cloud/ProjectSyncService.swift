@@ -60,12 +60,13 @@ final class ProjectSyncService {
         snapshotProvider()
             .filter { !$0.isShared }
             .flatMap(\.tracks)
-            .filter { track in
-                guard track.storagePath == nil else { return false }
-                let localURL = audioDirectory.appendingPathComponent(track.fileName)
-                return FileManager.default.fileExists(atPath: localURL.path)
+            .reduce(0) { count, track in
+                count + uploadCandidates(in: track).lazy.filter { version in
+                    let localURL = self.audioDirectory.appendingPathComponent(version.fileName)
+                    return version.storagePath == nil
+                        && FileManager.default.fileExists(atPath: localURL.path)
+                }.count
             }
-            .count
     }
 
     /// Distinguishes an upload that is actively making progress from local
@@ -82,9 +83,13 @@ final class ProjectSyncService {
                 return true
             }
 
-            for track in project.tracks where track.storagePath == nil {
-                let localURL = audioDirectory.appendingPathComponent(track.fileName)
-                if FileManager.default.fileExists(atPath: localURL.path) {
+            for track in project.tracks {
+                let hasPendingVersion = uploadCandidates(in: track).contains { version in
+                    let localURL = audioDirectory.appendingPathComponent(version.fileName)
+                    return version.storagePath == nil
+                        && FileManager.default.fileExists(atPath: localURL.path)
+                }
+                if hasPendingVersion {
                     return true
                 }
             }
@@ -173,8 +178,9 @@ final class ProjectSyncService {
     }
 
     func enqueueAudioUpload(projectID: UUID, track: Track) {
-        guard track.storagePath == nil else { return }
-        uploadTasks[track.id]?.cancel()
+        guard uploadCandidates(in: track).contains(where: { $0.storagePath == nil }),
+              uploadTasks[track.id] == nil
+        else { return }
         let trackID = track.id
         uploadTasks[trackID] = Task { [weak self] in
             defer {
@@ -209,9 +215,7 @@ final class ProjectSyncService {
     func deleteFromCloud(project: Project) async {
         let doc = CloudPaths.projectDocument(userID: userID, projectID: project.id)
         for track in project.tracks {
-            if let path = track.storagePath {
-                await AudioFileCache.shared.delete(storagePath: path)
-            }
+            await deleteTrackFromCloud(track)
         }
         if let coverPath = project.coverStoragePath {
             await AudioFileCache.shared.delete(storagePath: coverPath)
@@ -225,8 +229,49 @@ final class ProjectSyncService {
     }
 
     func deleteTrackFromCloud(_ track: Track) async {
-        if let path = track.storagePath {
+        let uploadTask = uploadTasks[track.id]
+        uploadTask?.cancel()
+        await uploadTask?.value
+        uploadTasks[track.id] = nil
+        let paths = Set(track.displayedVersions.map { version in
+            version.storagePath ?? expectedStoragePath(for: version, in: track)
+        })
+        for path in paths {
             await AudioFileCache.shared.delete(storagePath: path)
+        }
+        for version in track.versions {
+            try? await CloudPaths.versionAccessDocument(
+                userID: userID,
+                versionID: version.id
+            ).delete()
+        }
+    }
+
+    func deleteVersionFromCloud(_ version: TrackVersion, trackID: UUID) async {
+        let uploadTask = uploadTasks[trackID]
+        uploadTask?.cancel()
+        await uploadTask?.value
+        uploadTasks[trackID] = nil
+        let path = version.storagePath ?? CloudPaths.versionAudioStoragePath(
+            userID: userID,
+            versionID: version.id,
+            fileExtension: version.fileExtension
+        )
+        await AudioFileCache.shared.delete(storagePath: path)
+        try? await CloudPaths.versionAccessDocument(
+            userID: userID,
+            versionID: version.id
+        ).delete()
+    }
+
+    func updateVersionAccess(
+        projectID: UUID,
+        version: TrackVersion
+    ) async {
+        do {
+            try await writeVersionAccess(projectID: projectID, version: version)
+        } catch {
+            print("ProjectSyncService: version visibility update failed — \(error)")
         }
     }
 
@@ -283,9 +328,15 @@ final class ProjectSyncService {
                 let doc = CloudPaths.projectDocument(userID: userID, projectID: project.id)
                 let username = usernameProvider?()
                 try await doc.setData(FirestoreProjectCodec.encode(project, ownerUsername: username), merge: true)
+                for track in project.tracks {
+                    for version in track.versions {
+                        try await writeVersionAccess(projectID: project.id, version: version)
+                    }
+                }
                 lastSyncedUpdated[project.id] = project.updatedDate
 
-                for track in project.tracks where track.storagePath == nil {
+                for track in project.tracks
+                where uploadCandidates(in: track).contains(where: { $0.storagePath == nil }) {
                     enqueueAudioUpload(projectID: project.id, track: track)
                 }
 
@@ -305,34 +356,99 @@ final class ProjectSyncService {
         // anyway. They resume automatically once the user frees up space.
         if let canUploadAudioProvider, !canUploadAudioProvider() { return }
 
-        let localURL = audioDirectory.appendingPathComponent(track.fileName)
-        guard FileManager.default.fileExists(atPath: localURL.path) else { return }
+        var synced = track
+        if synced.versions.isEmpty {
+            guard synced.storagePath == nil else { return }
+            let localURL = audioDirectory.appendingPathComponent(synced.fileName)
+            guard FileManager.default.fileExists(atPath: localURL.path) else { return }
+            let storagePath = CloudPaths.audioStoragePath(
+                userID: userID,
+                trackID: synced.id,
+                fileExtension: synced.fileExtension
+            )
+            do {
+                let uploadedSize = try await AudioFileCache.shared.upload(
+                    localURL: localURL,
+                    to: storagePath,
+                    contentType: mimeType(for: synced.fileExtension)
+                )
+                synced.storagePath = storagePath
+                if uploadedSize > 0 { synced.fileSize = uploadedSize }
+                trackUpdater(projectID, synced, true)
+                schedulePush()
+            } catch {
+                print("ProjectSyncService: audio upload failed for \(track.id) — \(error)")
+            }
+            return
+        }
 
-        let storagePath = CloudPaths.audioStoragePath(
-            userID: userID,
-            trackID: track.id,
-            fileExtension: track.fileExtension
-        )
-
-        do {
-            let contentType = mimeType(for: track.fileExtension)
-            let uploadedSize = try await AudioFileCache.shared.upload(
-                localURL: localURL,
-                to: storagePath,
-                contentType: contentType
+        for index in synced.versions.indices where synced.versions[index].storagePath == nil {
+            guard !Task.isCancelled else { return }
+            let version = synced.versions[index]
+            let localURL = audioDirectory.appendingPathComponent(version.fileName)
+            guard FileManager.default.fileExists(atPath: localURL.path) else { continue }
+            let storagePath = CloudPaths.versionAudioStoragePath(
+                userID: userID,
+                versionID: version.id,
+                fileExtension: version.fileExtension
             )
 
-            var synced = track
-            synced.storagePath = storagePath
-            if uploadedSize > 0 {
-                synced.fileSize = uploadedSize
+            do {
+                try await writeVersionAccess(projectID: projectID, version: version)
+                let uploadedSize = try await AudioFileCache.shared.upload(
+                    localURL: localURL,
+                    to: storagePath,
+                    contentType: mimeType(for: version.fileExtension)
+                )
+                synced.versions[index].storagePath = storagePath
+                if uploadedSize > 0 {
+                    synced.versions[index].fileSize = uploadedSize
+                }
+                synced.applyActiveVersionMetadata()
+                trackUpdater(projectID, synced, true)
+                schedulePush()
+            } catch {
+                print(
+                    "ProjectSyncService: audio upload failed for version "
+                    + "\(version.id) — \(error)"
+                )
             }
-
-            trackUpdater(projectID, synced, true)
-            schedulePush()
-        } catch {
-            print("ProjectSyncService: audio upload failed for \(track.id) — \(error)")
         }
+    }
+
+    private func uploadCandidates(in track: Track) -> [TrackVersion] {
+        track.displayedVersions
+    }
+
+    private func expectedStoragePath(for version: TrackVersion, in track: Track) -> String {
+        if track.versions.isEmpty {
+            return CloudPaths.audioStoragePath(
+                userID: userID,
+                trackID: track.id,
+                fileExtension: version.fileExtension
+            )
+        }
+        return CloudPaths.versionAudioStoragePath(
+            userID: userID,
+            versionID: version.id,
+            fileExtension: version.fileExtension
+        )
+    }
+
+    private func writeVersionAccess(
+        projectID: UUID,
+        version: TrackVersion
+    ) async throws {
+        try await CloudPaths.versionAccessDocument(
+            userID: userID,
+            versionID: version.id
+        ).setData(
+            [
+                "projectID": projectID.uuidString,
+                "isPublic": version.isPublic,
+            ],
+            merge: true
+        )
     }
 
     // MARK: - Cover upload / download

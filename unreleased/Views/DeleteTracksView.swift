@@ -83,9 +83,10 @@ struct DeleteTracksView: View {
                 }
             }
         }
-        .alert(deleteConfirmationTitle, isPresented: $showDeleteConfirmation) {
+        .neutralAlert(deleteConfirmationTitle, isPresented: $showDeleteConfirmation) {
             Button("Delete", role: .destructive, action: deleteSelectedTracks)
             Button("Cancel", role: .cancel) {}
+                .tint(.primary)
         } message: {
             Text("The selected tracks will be permanently deleted from this device and the cloud. This can’t be undone.")
         }

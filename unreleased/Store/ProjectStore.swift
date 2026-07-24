@@ -163,7 +163,11 @@ final class ProjectStore {
         projects
             .filter { !$0.isShared }
             .flatMap(\.tracks)
-            .reduce(0) { $0 + $1.fileSize }
+            .reduce(0) { total, track in
+                total + (track.versions.isEmpty
+                    ? track.fileSize
+                    : track.versions.reduce(0) { $0 + $1.fileSize })
+            }
     }
 
     var freeStorageBytes: Int64 {
@@ -398,10 +402,12 @@ final class ProjectStore {
             removeSharedProject(project.id)
             return
         }
-        project.tracks.forEach {
-            cancelDownload(trackID: $0.id)
-            deleteAudioFile(fileName: $0.fileName)
-            deleteDownloadedFile(fileName: $0.fileName)
+        project.tracks.forEach { track in
+            cancelDownload(trackID: track.id)
+            for version in track.displayedVersions {
+                deleteAudioFile(fileName: version.fileName)
+                deleteDownloadedFile(fileName: version.fileName)
+            }
         }
         deleteCoverImage(fileName: project.coverImageFileName)
         deleteCoverFromCloud(storagePath: project.coverStoragePath)
@@ -466,9 +472,11 @@ final class ProjectStore {
             }
         }
 
-        project.tracks.forEach {
-            cancelDownload(trackID: $0.id)
-            deleteDownloadedFile(fileName: $0.fileName)
+        project.tracks.forEach { track in
+            cancelDownload(trackID: track.id)
+            for version in track.displayedVersions {
+                deleteDownloadedFile(fileName: version.fileName)
+            }
         }
         deleteCoverImage(fileName: project.coverImageFileName)
         projects.removeAll { $0.id == projectID }
@@ -484,6 +492,13 @@ final class ProjectStore {
             if let localTrack = local.tracks.first(where: { $0.id == updated.tracks[tIdx].id }),
                updated.tracks[tIdx].waveformData == nil {
                 updated.tracks[tIdx].waveformData = localTrack.waveformData
+            }
+            if let localTrack = local.tracks.first(where: { $0.id == updated.tracks[tIdx].id }),
+               let locallySelectedID = localTrack.activeVersionID,
+               updated.tracks[tIdx].versions.contains(where: {
+                   $0.id == locallySelectedID && $0.isPublic
+               }) {
+                updated.tracks[tIdx].selectVersion(id: locallySelectedID)
             }
         }
         // linkEnabled lives in the preview doc, not the project doc — keep the cached value.
@@ -546,8 +561,10 @@ final class ProjectStore {
         projects[index].tracks.removeAll { $0.id == track.id }
         projects[index].updatedDate = Date()
         cancelDownload(trackID: track.id)
-        deleteAudioFile(fileName: track.fileName)
-        deleteDownloadedFile(fileName: track.fileName)
+        for version in track.displayedVersions {
+            deleteAudioFile(fileName: version.fileName)
+            deleteDownloadedFile(fileName: version.fileName)
+        }
         save()
 
         let service = syncService
@@ -584,8 +601,10 @@ final class ProjectStore {
 
         for track in deletedTracks {
             cancelDownload(trackID: track.id)
-            deleteAudioFile(fileName: track.fileName)
-            deleteDownloadedFile(fileName: track.fileName)
+            for version in track.displayedVersions {
+                deleteAudioFile(fileName: version.fileName)
+                deleteDownloadedFile(fileName: version.fileName)
+            }
         }
 
         save()
@@ -618,6 +637,156 @@ final class ProjectStore {
         projects[destIdx].tracks.append(track)
         projects[destIdx].updatedDate = Date()
         save()
+    }
+
+    // MARK: - Track versions
+
+    func addVersion(_ importedTrack: Track, to trackID: UUID, in projectID: UUID) {
+        guard let pIdx = projects.firstIndex(where: { $0.id == projectID && !$0.isShared }),
+              let tIdx = projects[pIdx].tracks.firstIndex(where: { $0.id == trackID })
+        else { return }
+
+        var track = projects[pIdx].tracks[tIdx]
+        track.ensureVersionHistory()
+        let newVersion = TrackVersion(
+            name: importedTrack.title,
+            fileName: importedTrack.fileName,
+            fileSize: importedTrack.fileSize,
+            duration: importedTrack.duration,
+            addedDate: importedTrack.addedDate,
+            waveformData: importedTrack.waveformData,
+            storagePath: importedTrack.storagePath,
+            isDownloaded: importedTrack.isDownloaded,
+            isPublic: true
+        )
+        track.versions.insert(newVersion, at: 0)
+        track.activeVersionID = newVersion.id
+        track.applyActiveVersionMetadata()
+        projects[pIdx].tracks[tIdx] = track
+        projects[pIdx].updatedDate = Date()
+        save()
+        syncService?.enqueueAudioUpload(projectID: projectID, track: track)
+        audioPlayer?.syncCurrentItemFromStore()
+    }
+
+    func renameVersion(
+        _ versionID: UUID,
+        to name: String,
+        for trackID: UUID,
+        in projectID: UUID
+    ) {
+        guard let pIdx = projects.firstIndex(where: { $0.id == projectID && !$0.isShared }),
+              let tIdx = projects[pIdx].tracks.firstIndex(where: { $0.id == trackID })
+        else { return }
+
+        projects[pIdx].tracks[tIdx].ensureVersionHistory()
+        guard let vIdx = projects[pIdx].tracks[tIdx].versions.firstIndex(where: {
+            $0.id == versionID
+        }) else { return }
+
+        projects[pIdx].tracks[tIdx].versions[vIdx].name = name
+        projects[pIdx].updatedDate = Date()
+        save()
+    }
+
+    func selectVersion(_ versionID: UUID, for trackID: UUID, in projectID: UUID) {
+        guard let pIdx = projects.firstIndex(where: { $0.id == projectID }),
+              let tIdx = projects[pIdx].tracks.firstIndex(where: { $0.id == trackID })
+        else { return }
+
+        var track = projects[pIdx].tracks[tIdx]
+        guard track.displayedVersions.contains(where: {
+            $0.id == versionID && (!projects[pIdx].isShared || $0.isPublic)
+        }) else { return }
+
+        track.selectVersion(id: versionID)
+        projects[pIdx].tracks[tIdx] = track
+        if projects[pIdx].isShared {
+            persistLocalOnly()
+        } else {
+            projects[pIdx].updatedDate = Date()
+            save()
+        }
+        audioPlayer?.syncCurrentItemFromStore()
+    }
+
+    func moveVersion(
+        for trackID: UUID,
+        in projectID: UUID,
+        from source: IndexSet,
+        to destination: Int
+    ) {
+        guard let pIdx = projects.firstIndex(where: { $0.id == projectID && !$0.isShared }),
+              let tIdx = projects[pIdx].tracks.firstIndex(where: { $0.id == trackID })
+        else { return }
+
+        projects[pIdx].tracks[tIdx].ensureVersionHistory()
+        projects[pIdx].tracks[tIdx].versions.move(fromOffsets: source, toOffset: destination)
+        projects[pIdx].tracks[tIdx].applyActiveVersionMetadata()
+        projects[pIdx].updatedDate = Date()
+        save()
+    }
+
+    func setVersionPublic(
+        _ isPublic: Bool,
+        versionID: UUID,
+        trackID: UUID,
+        projectID: UUID
+    ) {
+        guard let pIdx = projects.firstIndex(where: { $0.id == projectID && !$0.isShared }),
+              let tIdx = projects[pIdx].tracks.firstIndex(where: { $0.id == trackID })
+        else { return }
+
+        projects[pIdx].tracks[tIdx].ensureVersionHistory()
+        guard let vIdx = projects[pIdx].tracks[tIdx].versions.firstIndex(where: {
+            $0.id == versionID
+        }) else { return }
+
+        if !isPublic {
+            let publicCount = projects[pIdx].tracks[tIdx].versions.lazy.filter(\.isPublic).count
+            guard publicCount > 1 else { return }
+        }
+        projects[pIdx].tracks[tIdx].versions[vIdx].isPublic = isPublic
+        projects[pIdx].updatedDate = Date()
+        let updatedVersion = projects[pIdx].tracks[tIdx].versions[vIdx]
+        save()
+        let service = syncService
+        Task {
+            await service?.updateVersionAccess(
+                projectID: projectID,
+                version: updatedVersion
+            )
+        }
+    }
+
+    func deleteVersion(_ versionID: UUID, from trackID: UUID, in projectID: UUID) {
+        guard let pIdx = projects.firstIndex(where: { $0.id == projectID && !$0.isShared }),
+              let tIdx = projects[pIdx].tracks.firstIndex(where: { $0.id == trackID })
+        else { return }
+
+        projects[pIdx].tracks[tIdx].ensureVersionHistory()
+        guard projects[pIdx].tracks[tIdx].versions.count > 1,
+              let vIdx = projects[pIdx].tracks[tIdx].versions.firstIndex(where: {
+                  $0.id == versionID
+              })
+        else { return }
+
+        let deleted = projects[pIdx].tracks[tIdx].versions.remove(at: vIdx)
+        if projects[pIdx].tracks[tIdx].activeVersionID == deleted.id {
+            projects[pIdx].tracks[tIdx].activeVersionID = projects[pIdx].tracks[tIdx].versions.first?.id
+        }
+        projects[pIdx].tracks[tIdx].applyActiveVersionMetadata()
+        projects[pIdx].updatedDate = Date()
+
+        deleteAudioFile(fileName: deleted.fileName)
+        deleteDownloadedFile(fileName: deleted.fileName)
+        save()
+
+        let service = syncService
+        Task {
+            await service?.deleteVersionFromCloud(deleted, trackID: trackID)
+        }
+        audioPlayer?.syncCurrentItemFromStore()
     }
 
     // MARK: - Cover images
@@ -937,6 +1106,50 @@ final class ProjectStore {
         return true
     }
 
+    func hasCachedAudio(for version: TrackVersion) -> Bool {
+        let url = audioFilesURL.appendingPathComponent(version.fileName)
+        guard FileManager.default.fileExists(atPath: url.path),
+              let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
+              let size = attrs[.size] as? Int64,
+              size > 0
+        else { return false }
+        return version.fileSize <= 0 || size == version.fileSize
+    }
+
+    func playbackURL(for version: TrackVersion) async -> URL? {
+        let localURL = audioFilesURL.appendingPathComponent(version.fileName)
+        if hasCachedAudio(for: version) {
+            return localURL
+        }
+
+        let downloadedURL = downloadsURL.appendingPathComponent(version.fileName)
+        if FileManager.default.fileExists(atPath: downloadedURL.path) {
+            return downloadedURL
+        }
+
+        guard let storagePath = version.storagePath else { return nil }
+        let cacheTrack = Track(
+            id: version.id,
+            title: "",
+            fileName: version.fileName,
+            fileSize: version.fileSize,
+            duration: version.duration,
+            addedDate: version.addedDate,
+            waveformData: version.waveformData,
+            storagePath: storagePath
+        )
+        do {
+            return try await AudioFileCache.shared.ensureLocalFile(
+                for: cacheTrack,
+                storagePath: storagePath,
+                in: audioFilesURL
+            )
+        } catch {
+            print("ProjectStore: version audio cache failed — \(error)")
+            return nil
+        }
+    }
+
     /// Prefers user download, then cache; otherwise streams once into the cache directory.
     func playbackURL(
         for track: Track,
@@ -1030,10 +1243,28 @@ final class ProjectStore {
         else { return }
 
         suppressSync = true
-        // Fall back to the local waveform if a remote update arrives without one.
-        var updatedTrack = track
-        if updatedTrack.waveformData == nil {
-            updatedTrack.waveformData = projects[pIdx].tracks[tIdx].waveformData
+        let localTrack = projects[pIdx].tracks[tIdx]
+        var updatedTrack: Track
+        if !localTrack.versions.isEmpty, !track.versions.isEmpty {
+            // Audio uploads complete independently of UI edits. Merge their
+            // returned paths into the current local order/visibility/selection
+            // instead of replacing those newer user changes with the upload snapshot.
+            updatedTrack = localTrack
+            for uploadedVersion in track.versions {
+                guard let localVersionIndex = updatedTrack.versions.firstIndex(where: {
+                    $0.id == uploadedVersion.id
+                }) else { continue }
+                if let storagePath = uploadedVersion.storagePath {
+                    updatedTrack.versions[localVersionIndex].storagePath = storagePath
+                    updatedTrack.versions[localVersionIndex].fileSize = uploadedVersion.fileSize
+                }
+            }
+            updatedTrack.applyActiveVersionMetadata()
+        } else {
+            updatedTrack = track
+            if updatedTrack.waveformData == nil {
+                updatedTrack.waveformData = localTrack.waveformData
+            }
         }
         projects[pIdx].tracks[tIdx] = updatedTrack
         projects[pIdx].updatedDate = Date()
@@ -1076,6 +1307,7 @@ final class ProjectStore {
               let tIdx = projects[pIdx].tracks.firstIndex(where: { $0.id == trackID })
         else { return }
         projects[pIdx].tracks[tIdx].isDownloaded = downloaded
+        projects[pIdx].tracks[tIdx].updateActiveVersionFromLegacyMetadata()
         projects[pIdx].updatedDate = Date()
         save()
     }
@@ -1121,6 +1353,7 @@ final class ProjectStore {
         }
         try FileManager.default.copyItem(at: source, to: destination)
         track.isDownloaded = true
+        track.updateActiveVersionFromLegacyMetadata()
     }
 
     private func reconcileDownloadsOnLoad() {
@@ -1131,11 +1364,13 @@ final class ProjectStore {
                 if hasDownloadedFile(for: track) {
                     if !track.isDownloaded {
                         track.isDownloaded = true
+                        track.updateActiveVersionFromLegacyMetadata()
                         projects[pIdx].tracks[tIdx] = track
                         changed = true
                     }
                 } else if track.isDownloaded {
                     track.isDownloaded = false
+                    track.updateActiveVersionFromLegacyMetadata()
                     projects[pIdx].tracks[tIdx] = track
                     changed = true
                 } else if track.storagePath == nil, hasCachedAudio(for: track) {

@@ -60,6 +60,12 @@ enum CloudPaths {
         projectsCollection(userID: userID).document(projectID.uuidString)
     }
 
+    static func versionAccessDocument(userID: String, versionID: UUID) -> DocumentReference {
+        userDocument(userID: userID)
+            .collection("versionAccess")
+            .document(versionID.uuidString)
+    }
+
     // MARK: - Invite previews
 
     /// Small publicly-readable preview used to show invite prompts before acceptance.
@@ -99,6 +105,14 @@ enum CloudPaths {
 
     static func audioStoragePath(userID: String, trackID: UUID, fileExtension: String) -> String {
         "users/\(userID)/audio/\(trackID.uuidString.lowercased()).\(fileExtension)"
+    }
+
+    static func versionAudioStoragePath(
+        userID: String,
+        versionID: UUID,
+        fileExtension: String
+    ) -> String {
+        "users/\(userID)/audio/versions/\(versionID.uuidString)/audio.\(fileExtension)"
     }
 
     static func coverStoragePath(userID: String, fileName: String) -> String {
