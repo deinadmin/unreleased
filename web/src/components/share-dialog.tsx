@@ -159,7 +159,7 @@ export function ShareDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[85vh] gap-0 overflow-y-auto overflow-x-hidden rounded-3xl p-6 sm:max-w-md">
+      <DialogContent className="max-h-[85vh] gap-0 overflow-y-auto overflow-x-hidden rounded-3xl p-6 sm:max-w-md [--dialog-close-inset:calc(var(--radius-3xl)-0.875rem)]">
         <DialogHeader className="min-w-0 pb-5">
           <DialogTitle>Share Project</DialogTitle>
           <DialogDescription className="truncate">{project.name}</DialogDescription>

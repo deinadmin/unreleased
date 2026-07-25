@@ -71,7 +71,9 @@ function DialogContent({
           <DialogPrimitive.Close data-slot="dialog-close" asChild>
             <Button
               variant="ghost"
-              className="absolute top-2 right-2"
+              // Rounded-full so dialogs can place the circle concentric to
+              // their corner radius via --dialog-close-inset (radius - 14px).
+              className="absolute top-[var(--dialog-close-inset,0.5rem)] right-[var(--dialog-close-inset,0.5rem)] rounded-full"
               size="icon-sm"
             >
               <XIcon

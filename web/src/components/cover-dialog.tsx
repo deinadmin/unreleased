@@ -23,7 +23,6 @@ export function CoverDialog({
   onOpenChange: (open: boolean) => void
 }) {
   const { user } = useAuth()
-  const inputRef = useRef<HTMLInputElement>(null)
   const [uploading, setUploading] = useState(false)
   const coverUrl = useStorageUrl(project.coverStoragePath)
 
@@ -64,51 +63,86 @@ export function CoverDialog({
           <DialogTitle>Cover</DialogTitle>
         </DialogHeader>
 
-        <div className="grid grid-cols-[repeat(auto-fill,minmax(60px,1fr))] gap-3">
-          {/* Photo swatch (first cell, like iOS). */}
-          <Swatch
-            selected={usesCoverImage}
-            aria-label="Choose cover photo"
-            onClick={() => inputRef.current?.click()}
-            className="bg-foreground/8"
-          >
-            {coverUrl && (
-              <img src={coverUrl} alt="" className="absolute inset-0 h-full w-full object-cover" />
-            )}
-            {!coverUrl && !uploading && (
-              <ImagePlus className="size-5.5 text-muted-foreground" />
-            )}
-            {uploading && (
-              <span className="absolute inset-0 flex items-center justify-center bg-black/30">
-                <Loader2 className="size-5 animate-spin text-white" />
-              </span>
-            )}
-          </Swatch>
-
-          {GRADIENT_PRESETS.map((theme) => (
-            <Swatch
-              key={theme.colors.join()}
-              selected={isSelected(theme)}
-              aria-label={`Gradient ${theme.colors.join(" to ")}`}
-              onClick={() => void chooseGradient(theme)}
-              style={{ background: gradientCSS(theme) }}
-            />
-          ))}
-        </div>
-
-        <input
-          ref={inputRef}
-          type="file"
-          accept="image/*"
-          className="hidden"
-          onChange={(event) => {
-            const file = event.target.files?.[0]
-            event.target.value = ""
-            if (file) void chooseImage(file)
-          }}
+        <CoverPickerGrid
+          imageUrl={coverUrl}
+          usesImage={usesCoverImage}
+          uploading={uploading}
+          isThemeSelected={isSelected}
+          onPickGradient={(theme) => void chooseGradient(theme)}
+          onPickImage={(file) => void chooseImage(file)}
         />
       </DialogContent>
     </Dialog>
+  )
+}
+
+/**
+ * The picker itself (photo swatch + preset gradient grid), shared between the
+ * cover editor above and the new-project dialog.
+ */
+export function CoverPickerGrid({
+  imageUrl,
+  usesImage,
+  uploading = false,
+  isThemeSelected,
+  onPickGradient,
+  onPickImage,
+}: {
+  imageUrl?: string | null
+  usesImage: boolean
+  uploading?: boolean
+  isThemeSelected: (theme: GradientTheme) => boolean
+  onPickGradient: (theme: GradientTheme) => void
+  onPickImage: (file: File) => void
+}) {
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  return (
+    <>
+      <div className="grid grid-cols-[repeat(auto-fill,minmax(60px,1fr))] gap-3">
+        {/* Photo swatch (first cell, like iOS). */}
+        <Swatch
+          selected={usesImage}
+          aria-label="Choose cover photo"
+          onClick={() => inputRef.current?.click()}
+          className="bg-foreground/8"
+        >
+          {imageUrl && (
+            <img src={imageUrl} alt="" className="absolute inset-0 h-full w-full object-cover" />
+          )}
+          {!imageUrl && !uploading && (
+            <ImagePlus className="size-5.5 text-muted-foreground" />
+          )}
+          {uploading && (
+            <span className="absolute inset-0 flex items-center justify-center bg-black/30">
+              <Loader2 className="size-5 animate-spin text-white" />
+            </span>
+          )}
+        </Swatch>
+
+        {GRADIENT_PRESETS.map((theme) => (
+          <Swatch
+            key={theme.colors.join()}
+            selected={isThemeSelected(theme)}
+            aria-label={`Gradient ${theme.colors.join(" to ")}`}
+            onClick={() => onPickGradient(theme)}
+            style={{ background: gradientCSS(theme) }}
+          />
+        ))}
+      </div>
+
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={(event) => {
+          const file = event.target.files?.[0]
+          event.target.value = ""
+          if (file) onPickImage(file)
+        }}
+      />
+    </>
   )
 }
 

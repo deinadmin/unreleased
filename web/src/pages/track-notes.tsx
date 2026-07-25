@@ -14,6 +14,13 @@ import { updateTrackNotes } from "@/lib/project-edits"
  * after typing stops (plus a flush on leave).
  */
 export function TrackNotesPage() {
+  // Remount the editor whenever the target track changes so draft state (and
+  // the pending auto-save) from a previous track can never leak into another.
+  const { projectId, trackId } = useParams()
+  return <TrackNotesEditor key={`${projectId}/${trackId}`} />
+}
+
+function TrackNotesEditor() {
   const { projectId, trackId } = useParams()
   const { loading } = useProjects()
   const project = useProject(projectId)
@@ -96,11 +103,11 @@ export function TrackNotesPage() {
   const value = draft ?? track.notes
 
   return (
-    <div className="min-h-dvh">
+    <div className="flex h-dvh flex-col">
       <AppHeader />
 
-      <main className="mx-auto flex w-full max-w-2xl flex-col px-4 pb-40 sm:px-6">
-        <div className="flex h-12 items-center">
+      <main className="mx-auto flex w-full max-w-2xl min-h-0 flex-1 flex-col px-4 sm:px-6">
+        <div className="flex h-12 shrink-0 items-center">
           <Link
             to={`/project/${project.id}`}
             className="-ml-2 flex items-center gap-0.5 rounded-lg px-2 py-1.5 text-[15px] font-medium text-muted-foreground transition hover:text-foreground"
@@ -110,7 +117,7 @@ export function TrackNotesPage() {
           </Link>
         </div>
 
-        <section className="rise-in pt-4">
+        <section className="rise-in flex min-h-0 flex-1 flex-col pt-4">
           <h1 className="text-[22px] font-bold">Notes</h1>
           <p className="pt-1 text-[13px] text-muted-foreground">{track.title}</p>
 
@@ -119,7 +126,7 @@ export function TrackNotesPage() {
             value={value}
             placeholder="Start to type…"
             onChange={(event) => setDraft(event.target.value)}
-            className="mt-8 min-h-[55vh] w-full resize-none border-none bg-transparent p-0 text-[15px] leading-7 outline-none placeholder:text-muted-foreground/60"
+            className="mt-8 w-full min-h-0 flex-1 resize-none border-none bg-transparent p-0 pb-[max(1.5rem,env(safe-area-inset-bottom))] text-[15px] leading-7 outline-none placeholder:text-muted-foreground/60"
           />
         </section>
       </main>

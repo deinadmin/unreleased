@@ -1,7 +1,9 @@
 import { Plus } from "lucide-react"
+import { useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { AppHeader } from "@/components/app-header"
 import { AppMark } from "@/components/app-mark"
+import { NewProjectDialog } from "@/components/new-project-dialog"
 import { ProjectCard } from "@/components/project-card"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useProjects } from "@/hooks/use-projects"
@@ -11,6 +13,7 @@ import { useUploads } from "@/uploads/uploads-provider"
 export function LibraryPage() {
   const { projects, loading } = useProjects()
   const { importFiles, isImporting } = useUploads()
+  const [newProjectOpen, setNewProjectOpen] = useState(false)
   const navigate = useNavigate()
 
   const createProjectFromFiles = async (files: File[]) => {
@@ -38,9 +41,8 @@ export function LibraryPage() {
                   <h1 className="text-[22px] font-bold">Library</h1>
                   <button
                     type="button"
-                    disabled={isImporting}
-                    onClick={openPicker}
-                    className="flex h-9 items-center gap-1.5 rounded-full bg-secondary px-4 text-[13px] font-semibold transition hover:bg-secondary/70 active:scale-[0.98] disabled:opacity-50"
+                    onClick={() => setNewProjectOpen(true)}
+                    className="flex h-9 items-center gap-1.5 rounded-full bg-brand px-4 text-[13px] font-semibold text-white transition hover:bg-brand/85 active:scale-[0.98]"
                   >
                     <Plus className="size-3.5" />
                     New project
@@ -61,6 +63,12 @@ export function LibraryPage() {
               </>
             )}
           </main>
+
+          <NewProjectDialog
+            open={newProjectOpen}
+            onOpenChange={setNewProjectOpen}
+            onCreated={(projectID) => navigate(`/project/${projectID}`)}
+          />
         </div>
       )}
     </AudioDropzone>

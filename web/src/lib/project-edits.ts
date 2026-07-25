@@ -1,13 +1,32 @@
-import { Timestamp, deleteField, doc, updateDoc } from "firebase/firestore"
+import { Timestamp, deleteField, doc, setDoc, updateDoc } from "firebase/firestore"
 import { deleteObject, ref as storageRef, uploadBytes } from "firebase/storage"
 import { accentHexFromGradient, accentHexFromImage, gradientHexPairFromImage } from "./accent-color"
-import { encodeGradient, encodeTrack } from "./codec"
+import { encodeGradient, encodeProject, encodeTrack } from "./codec"
 import { db, storage } from "./firebase"
 import type { GradientTheme, Project } from "./types"
 
 /** Firestore edits for the user's own projects, mirroring the iOS `EditProjectSheet.save()`. */
 
 const projectDoc = (uid: string, projectID: string) => doc(db, "users", uid, "projects", projectID)
+
+/** Creates an empty project with a title and preset gradient cover. */
+export async function createProject(
+  uid: string,
+  rawName: string,
+  gradient: GradientTheme,
+): Promise<Project> {
+  const project: Project = {
+    id: crypto.randomUUID().toUpperCase(),
+    name: rawName.trim() || "untitled project",
+    gradient,
+    accentColorHex: accentHexFromGradient(gradient),
+    tracks: [],
+    createdDate: new Date(),
+    updatedDate: new Date(),
+  }
+  await setDoc(projectDoc(uid, project.id), await encodeProject(project))
+  return project
+}
 
 export async function updateProjectName(uid: string, project: Project, rawName: string): Promise<void> {
   const trimmed = rawName.trim()

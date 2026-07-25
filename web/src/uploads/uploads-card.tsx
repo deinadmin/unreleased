@@ -7,7 +7,7 @@ export function UploadsCard() {
   if (uploads.length === 0) return null
 
   return (
-    <div className="fixed bottom-24 right-4 z-40 w-72 rounded-2xl border border-border/60 bg-background/95 p-3 shadow-xl backdrop-blur-xl">
+    <div className="fixed bottom-24 left-4 z-40 w-72 rounded-2xl border border-border/60 bg-background/95 p-3 shadow-xl backdrop-blur-xl">
       <p className="px-1 pb-2 text-[13px] font-semibold text-muted-foreground">
         Importing {uploads.length === 1 ? "1 track" : `${uploads.length} tracks`}
       </p>

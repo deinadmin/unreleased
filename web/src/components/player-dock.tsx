@@ -271,14 +271,16 @@ function NotesPreview({
         onEdit && "cursor-pointer outline-none transition-colors hover:text-white/85 focus:outline-none focus:ring-0",
         className,
       )}
-      style={
-        faded
-          ? {
-              WebkitMaskImage: "linear-gradient(to bottom, black 45%, transparent 100%)",
-              maskImage: "linear-gradient(to bottom, black 45%, transparent 100%)",
-            }
-          : undefined
-      }
+      style={{
+        // The mask is always applied; only the registered --notes-fade-alpha
+        // custom property animates, fading the bottom fade in and out.
+        "--notes-fade-alpha": faded ? 0 : 1,
+        WebkitMaskImage:
+          "linear-gradient(to bottom, black 45%, rgb(0 0 0 / var(--notes-fade-alpha)) 100%)",
+        maskImage:
+          "linear-gradient(to bottom, black 45%, rgb(0 0 0 / var(--notes-fade-alpha)) 100%)",
+        transition: "--notes-fade-alpha 300ms var(--ease-snappy)",
+      } as React.CSSProperties}
     >
       {notes}
     </div>
@@ -349,10 +351,12 @@ function CollapsibleNotes({
   visible,
   notes,
   onEdit,
+  notesClassName,
 }: {
   visible: boolean
   notes: string
   onEdit?: () => void
+  notesClassName?: string
 }) {
   return (
     <div
@@ -369,12 +373,12 @@ function CollapsibleNotes({
         inert={!visible || undefined}
       >
         {notes.trim() ? (
-          <NotesPreview notes={notes} onEdit={onEdit} className="mt-6" />
+          <NotesPreview notes={notes} onEdit={onEdit} className={cn("mt-6", notesClassName)} />
         ) : onEdit ? (
           <button
             type="button"
             onClick={onEdit}
-            className="mt-6 flex items-center gap-1.5 rounded-full bg-white/10 px-3.5 py-2 text-[12px] font-semibold text-white/55 transition hover:bg-white/15 hover:text-white/85 active:scale-95"
+            className="mt-6 flex w-full items-center justify-center gap-1.5 rounded-full bg-white/10 px-3.5 py-2 text-[12px] font-semibold text-white/55 transition hover:bg-white/15 hover:text-white/85 active:scale-95"
           >
             <Plus className="size-3.5" strokeWidth={2.5} />
             Add notes
@@ -426,12 +430,20 @@ function SidebarPlayer({
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col px-8">
-        <div className="flex min-h-0 flex-1 flex-col justify-center">
-          <ProjectCover project={project} isPlaying={player.isPlaying} showVinyl={false} className="mx-auto w-[72%] shrink-0" />
-          <div className="mt-7 flex flex-col items-center gap-1">
-            <span className="max-w-full truncate text-lg font-bold">{track.title}</span>
-            <span className="max-w-full truncate text-[13px] text-white/55">{project.name}</span>
+        {/* Like the fullscreen player, the cover fills the room left over
+            after the notes take their natural height, shrinking only when
+            the sidebar is too short to fit everything at full size. */}
+        <div className="flex min-h-0 flex-1 items-center justify-center">
+          <div
+            className="aspect-square"
+            style={{ height: "min(100%, calc(0.72 * (var(--player-sidebar-width) - 4rem)))" }}
+          >
+            <ProjectCover project={project} isPlaying={player.isPlaying} showVinyl={false} className="h-full w-full" />
           </div>
+        </div>
+        <div className="mt-7 flex shrink-0 flex-col items-center gap-1">
+          <span className="max-w-full truncate text-lg font-bold">{track.title}</span>
+          <span className="max-w-full truncate text-[13px] text-white/55">{project.name}</span>
         </div>
         <CollapsibleNotes visible={showNotes} notes={track.notes} onEdit={onEditNotes} />
       </div>
@@ -484,14 +496,27 @@ function FullscreenPlayer({
       </button>
 
       <div className="flex min-h-0 flex-1 flex-col">
-        <div className="flex min-h-0 flex-1 flex-col justify-center">
-          <ProjectCover project={project} isPlaying={player.isPlaying} showVinyl={false} className="mx-auto w-[74%] max-w-xs shrink-0" />
-          <div className="mt-8 flex flex-col items-center gap-1">
-            <span className="max-w-full truncate text-xl font-bold">{track.title}</span>
-            <span className="max-w-full truncate text-[13px] text-white/55">{project.name}</span>
+        {/* The cover fills the room left over after the notes (capped at six
+            lines here) take their natural height, so it only shrinks on
+            screens that are too small to fit everything at full size. */}
+        <div className="flex min-h-0 flex-1 items-center justify-center">
+          <div
+            className="aspect-square"
+            style={{ height: "min(100%, calc(0.74 * (100vw - 4rem)), 20rem)" }}
+          >
+            <ProjectCover project={project} isPlaying={player.isPlaying} showVinyl={false} className="h-full w-full" />
           </div>
         </div>
-        <CollapsibleNotes visible={showNotes} notes={track.notes} onEdit={onEditNotes} />
+        <div className="mt-8 flex shrink-0 flex-col items-center gap-1">
+          <span className="max-w-full truncate text-xl font-bold">{track.title}</span>
+          <span className="max-w-full truncate text-[13px] text-white/55">{project.name}</span>
+        </div>
+        <CollapsibleNotes
+          visible={showNotes}
+          notes={track.notes}
+          onEdit={onEditNotes}
+          notesClassName="max-h-30"
+        />
       </div>
 
       <div className="mt-4">

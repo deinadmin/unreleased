@@ -141,6 +141,16 @@
     }
 }
 
+/* ── Notes preview fade ──────────────────────────────────────────────── */
+
+/* Registered so the notes preview's bottom fade mask can transition smoothly
+   instead of snapping on/off (gradients themselves aren't animatable). */
+@property --notes-fade-alpha {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 1;
+}
+
 /* ── Player sidebar ──────────────────────────────────────────────────── */
 
 :root {
