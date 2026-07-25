@@ -1,4 +1,4 @@
-import { NotebookPen, NotebookText, Play, Trash2 } from "lucide-react"
+import { MoreHorizontal, NotebookPen, NotebookText, Play, Trash2 } from "lucide-react"
 import { useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { toast } from "sonner"
@@ -56,7 +56,7 @@ export function TrackRow({
     }
   }
 
-  const openContextMenu = (event: React.MouseEvent) => {
+  const contextMenuItems = (): ContextMenuItem[] => {
     const items: ContextMenuItem[] = [{ label: "Play", icon: <Play />, onSelect: play }]
     if (isOwnProject && user) {
       items.push(
@@ -74,51 +74,74 @@ export function TrackRow({
         onSelect: () => navigate(`/project/${project.id}/notes/${track.id}`),
       })
     }
-    contextMenu.open(event, items)
+    return items
+  }
+
+  const openContextMenu = (event: React.MouseEvent) => {
+    contextMenu.open(event, contextMenuItems())
+  }
+
+  const openMobileMenu = (event: React.MouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation()
+    const rect = event.currentTarget.getBoundingClientRect()
+    contextMenu.openAt(rect.right, rect.bottom + 4, contextMenuItems())
   }
 
   return (
     <>
-    <button
-      type="button"
-      onClick={play}
+    <div
       onContextMenu={openContextMenu}
-      disabled={!track.storagePath}
-      className="group flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left transition-colors hover:bg-muted/60 disabled:cursor-default disabled:opacity-50"
+      className="track-row group relative flex w-full items-center overflow-hidden rounded-xl transition-colors hover:bg-muted/60"
     >
-      <span className="flex w-7 shrink-0 items-center justify-center">
-        {isActive && player.isPlaying ? (
-          <PlayingBars color={accent} />
-        ) : (
-          <span className="text-sm font-medium tabular-nums text-muted-foreground">{index}</span>
-        )}
-      </span>
-
-      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-        <span className="flex items-center gap-1.5">
-          <span
-            className="truncate text-[15px] font-semibold"
-            style={isActive ? { color: accent } : undefined}
-          >
-            {track.title}
-          </span>
-          {versionNumber !== null && (
-            <span className="shrink-0 rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-bold text-muted-foreground">
-              v{versionNumber}
-            </span>
+      <button
+        type="button"
+        onClick={play}
+        disabled={!track.storagePath}
+        className="flex min-w-0 flex-1 items-center gap-3 rounded-xl px-3 py-3 text-left disabled:cursor-default disabled:opacity-50"
+      >
+        <span className="flex w-7 shrink-0 items-center justify-center">
+          {isActive && player.isPlaying ? (
+            <PlayingBars color={accent} />
+          ) : (
+            <span className="text-sm font-medium tabular-nums text-muted-foreground">{index}</span>
           )}
         </span>
-        <span className="flex items-center gap-1 text-xs text-muted-foreground">
-          <span>{formatRelativeDate(track.addedDate)}</span>
-          <span>•</span>
-          <span>{formatFileSize(track.fileSize)}</span>
-        </span>
-      </span>
 
-      <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
-        {formatDuration(track.duration)}
-      </span>
-    </button>
+        <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+          <span className="flex items-center gap-1.5">
+            <span
+              className="truncate text-[15px] font-semibold"
+              style={isActive ? { color: accent } : undefined}
+            >
+              {track.title}
+            </span>
+            {versionNumber !== null && (
+              <span className="shrink-0 rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-bold text-muted-foreground">
+                v{versionNumber}
+              </span>
+            )}
+          </span>
+          <span className="flex items-center gap-1 text-xs text-muted-foreground">
+            <span>{formatRelativeDate(track.addedDate)}</span>
+            <span>•</span>
+            <span>{formatFileSize(track.fileSize)}</span>
+          </span>
+        </span>
+
+        <span className="track-row-duration shrink-0 text-xs tabular-nums text-muted-foreground">
+          {formatDuration(track.duration)}
+        </span>
+      </button>
+
+      <button
+        type="button"
+        aria-label={`More options for ${track.title}`}
+        onClick={openMobileMenu}
+        className="track-row-action absolute right-2.5 flex size-10 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"
+      >
+        <MoreHorizontal className="size-5" />
+      </button>
+    </div>
 
     <Dialog open={confirmDelete} onOpenChange={setConfirmDelete}>
       <DialogContent className="rounded-3xl p-6 sm:max-w-sm">

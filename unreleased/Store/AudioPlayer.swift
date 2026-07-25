@@ -86,6 +86,12 @@ final class AudioPlayer {
     private static let equalizerGainsKey = "audio.equalizer.gains"
     private static let customEqualizerPresetsKey = "audio.equalizer.customPresets"
 
+    private struct PlaybackTarget {
+        let track: Track
+        let project: Project
+        let queueItemID: QueuedItem.ID?
+    }
+
     init(store: ProjectStore) {
         self.store = store
         let savedGains = (UserDefaults.standard.array(forKey: Self.equalizerGainsKey) as? [NSNumber])?
@@ -174,24 +180,38 @@ final class AudioPlayer {
 
     // MARK: - Playback Control
 
-    func play(track: Track, in project: Project, fileURL: URL, fromQueue: Bool = false) {
-        if currentTrack?.id == track.id, !isLoadingAudio {
+    func play(
+        track: Track,
+        in project: Project,
+        fileURL: URL,
+        queueItemID: QueuedItem.ID? = nil
+    ) {
+        if currentTrack?.id == track.id, queueItemID == nil, !isLoadingAudio {
             togglePlayPause()
             return
         }
-        if !fromQueue {
+        if queueItemID == nil {
             contextProjectID = project.id
             contextTrackID = track.id
         }
         cancelLoad()
         isLoadingAudio = false
         loadingProgress = 0
-        startPlayback(track: track, in: project, fileURL: fileURL, fromQueue: fromQueue)
+        startPlayback(
+            track: track,
+            in: project,
+            fileURL: fileURL,
+            queueItemID: queueItemID
+        )
     }
 
     /// Shows the mini player immediately; downloads uncached audio in the background.
-    func play(track: Track, in project: Project, fromQueue: Bool = false) {
-        if currentTrack?.id == track.id, !isLoadingAudio {
+    func play(
+        track: Track,
+        in project: Project,
+        queueItemID: QueuedItem.ID? = nil
+    ) {
+        if currentTrack?.id == track.id, queueItemID == nil, !isLoadingAudio {
             togglePlayPause()
             return
         }
@@ -217,7 +237,7 @@ final class AudioPlayer {
             return
         }
 
-        if !fromQueue {
+        if queueItemID == nil {
             contextProjectID = project.id
             contextTrackID = track.id
         }
@@ -236,7 +256,12 @@ final class AudioPlayer {
         if store.hasCachedAudio(for: track) {
             isLoadingAudio = false
             loadingProgress = 0
-            startPlayback(track: track, in: project, fileURL: store.audioFileURL(for: track), fromQueue: fromQueue)
+            startPlayback(
+                track: track,
+                in: project,
+                fileURL: store.audioFileURL(for: track),
+                queueItemID: queueItemID
+            )
             return
         }
 
@@ -266,7 +291,12 @@ final class AudioPlayer {
                     return
                 }
 
-                self.startPlayback(track: track, in: project, fileURL: url, fromQueue: fromQueue)
+                self.startPlayback(
+                    track: track,
+                    in: project,
+                    fileURL: url,
+                    queueItemID: queueItemID
+                )
             }
         }
     }
@@ -343,13 +373,15 @@ final class AudioPlayer {
         track: Track,
         in project: Project,
         fileURL: URL,
-        fromQueue: Bool = false,
+        queueItemID: QueuedItem.ID? = nil,
         startingAt: TimeInterval = 0,
         shouldPlay: Bool = true
     ) {
         tearDownPlayer()
 
-        dequeueIfQueued(track.id)
+        if let queueItemID {
+            dequeueQueueItem(id: queueItemID)
+        }
 
         currentTrack = track
         currentProject = project
@@ -376,7 +408,7 @@ final class AudioPlayer {
                 track: track,
                 in: project,
                 fileURL: fileURL,
-                fromQueue: fromQueue,
+                fromQueue: queueItemID != nil,
                 startingAt: startingAt,
                 shouldPlay: shouldPlay
             )
@@ -457,12 +489,8 @@ final class AudioPlayer {
     }
 
     /// Appends a track to the end of the universal queue. Tracks from any project are allowed.
-    /// If nothing is currently playing, the added track starts playing immediately.
+    /// Queueing never changes playback; items become active after playback starts explicitly.
     func addToQueue(_ track: Track, in project: Project) {
-        guard currentTrack != nil else {
-            play(track: track, in: project)
-            return
-        }
         queue.append(QueuedItem(trackID: track.id, projectID: project.id))
     }
 
@@ -487,7 +515,7 @@ final class AudioPlayer {
         if index > 0 {
             queue.removeSubrange(0..<index)
         }
-        play(track: track, in: project, fromQueue: true)
+        play(track: track, in: project, queueItemID: item.id)
     }
 
     func isQueued(_ trackID: UUID) -> Bool {
@@ -507,7 +535,7 @@ final class AudioPlayer {
     /// Next track in the project (wraps to the first after the last).
     func skipForward() {
         guard let next = adjacentTrack(offset: 1) else { return }
-        play(track: next.track, in: next.project, fromQueue: next.fromQueue)
+        play(track: next.track, in: next.project, queueItemID: next.queueItemID)
     }
 
     /// Restart if past 1.5s; otherwise previous track (wraps to the last from the first).
@@ -518,7 +546,11 @@ final class AudioPlayer {
             return
         }
         guard let previous = adjacentTrack(offset: -1) else { return }
-        play(track: previous.track, in: previous.project, fromQueue: previous.fromQueue)
+        play(
+            track: previous.track,
+            in: previous.project,
+            queueItemID: previous.queueItemID
+        )
     }
 
     func stop() {
@@ -569,13 +601,13 @@ final class AudioPlayer {
             return
         }
 
-        if next.track.id == currentTrack?.id {
+        if next.track.id == currentTrack?.id, next.queueItemID == nil {
             currentTime = 0
             isPlaying = scheduleAudio(from: 0, shouldPlay: true)
             updateNowPlayingInfo()
             return
         }
-        play(track: next.track, in: next.project, fromQueue: next.fromQueue)
+        play(track: next.track, in: next.project, queueItemID: next.queueItemID)
     }
 
     private func cancelLoad() {
@@ -594,20 +626,28 @@ final class AudioPlayer {
         return tracks.firstIndex { $0.id == currentTrack.id }
     }
 
-    private func adjacentTrack(offset: Int) -> (track: Track, project: Project, fromQueue: Bool)? {
+    private func adjacentTrack(offset: Int) -> PlaybackTarget? {
         if offset > 0 {
             // Queue always takes precedence for forward navigation.
             if let first = queueItems.first {
-                return (first.track, first.project, true)
+                return PlaybackTarget(
+                    track: first.track,
+                    project: first.project,
+                    queueItemID: first.item.id
+                )
             }
             // No queue: resume from the origin context project remainder.
             if let next = contextRemainder().first {
-                return (next.track, next.project, false)
+                return PlaybackTarget(
+                    track: next.track,
+                    project: next.project,
+                    queueItemID: nil
+                )
             }
             // Wrap around inside the context project (or current project as fallback).
             if let project = contextProject() ?? liveCurrentProject(),
                let first = project.tracks.first {
-                return (first, project, false)
+                return PlaybackTarget(track: first, project: project, queueItemID: nil)
             }
             return nil
         }
@@ -620,7 +660,11 @@ final class AudioPlayer {
         if isShuffleEnabled, offset < 0 {
             guard let result = shuffledAdjacentTrack(offset: offset, in: project, tracks: tracks)
             else { return nil }
-            return (result.track, result.project, false)
+            return PlaybackTarget(
+                track: result.track,
+                project: result.project,
+                queueItemID: nil
+            )
         }
 
         let index: Int
@@ -630,7 +674,7 @@ final class AudioPlayer {
             index = offset > 0 ? 0 : tracks.count - 1
         }
 
-        return (tracks[index], project, false)
+        return PlaybackTarget(track: tracks[index], project: project, queueItemID: nil)
     }
 
     /// Queued items (universal, in order) followed by the remaining tracks of the
@@ -722,8 +766,8 @@ final class AudioPlayer {
         return result
     }
 
-    private func dequeueIfQueued(_ trackID: UUID) {
-        guard let index = queue.firstIndex(where: { $0.trackID == trackID }) else { return }
+    private func dequeueQueueItem(id: QueuedItem.ID) {
+        guard let index = queue.firstIndex(where: { $0.id == id }) else { return }
         queue.remove(at: index)
     }
 
@@ -1171,8 +1215,8 @@ final class AudioPlayer {
     }
 }
 
-/// Universal queue entry. Each entry has its own identity so duplicate tracks
-/// (and removal of a specific instance) can be modelled cleanly later if needed.
+/// Universal queue entry. Each occurrence has its own identity so duplicate tracks
+/// can advance and be removed independently.
 struct QueuedItem: Identifiable, Hashable, Sendable {
     let id: UUID
     let trackID: UUID

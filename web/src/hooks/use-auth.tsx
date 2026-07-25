@@ -41,8 +41,13 @@ const AuthContext = createContext<AuthContextValue | null>(null)
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [initializing, setInitializing] = useState(true)
-  const [username, setUsername] = useState<string | null>(null)
-  const [usernameLoaded, setUsernameLoaded] = useState(false)
+  // Keyed by uid so the profile is never mistaken for another account's (or a
+  // signed-out session's) result — a stale `null` username would otherwise
+  // flash the username onboarding while the real profile is still loading.
+  const [profile, setProfile] = useState<{ uid: string | null; username: string | null }>({
+    uid: null,
+    username: null,
+  })
 
   useEffect(() => {
     return onAuthStateChanged(auth, (nextUser) => {
@@ -51,25 +56,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     })
   }, [])
 
+  // Guests and signed-out sessions have no profile document to read.
+  const profileUid = user && !user.isAnonymous ? user.uid : null
+
   useEffect(() => {
-    if (!user || user.isAnonymous) {
-      setUsername(null)
-      setUsernameLoaded(true)
+    if (!profileUid) {
+      setProfile({ uid: null, username: null })
       return
     }
-    setUsernameLoaded(false)
     return onSnapshot(
-      doc(db, "userProfiles", user.uid),
+      doc(db, "userProfiles", profileUid),
       (snapshot) => {
-        setUsername((snapshot.data()?.username as string | undefined) ?? null)
-        setUsernameLoaded(true)
+        setProfile({
+          uid: profileUid,
+          username: (snapshot.data()?.username as string | undefined) ?? null,
+        })
       },
-      () => {
-        setUsername(null)
-        setUsernameLoaded(true)
-      },
+      () => setProfile({ uid: profileUid, username: null }),
     )
-  }, [user])
+  }, [profileUid])
+
+  const usernameLoaded = profile.uid === profileUid
+  const username = usernameLoaded ? profile.username : null
 
   const value: AuthContextValue = {
     user,

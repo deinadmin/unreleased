@@ -59,6 +59,11 @@ struct ContentView: View {
             : toastBottomInsetWithoutPlayer
     }
 
+    private var visibleToasts: [PlayerToastCenter.Toast] {
+        guard searchState.isActive else { return toastCenter.toasts }
+        return toastCenter.toasts.filter { $0.icon == .spinner }
+    }
+
     init() {
         let store = ProjectStore()
         let player = AudioPlayer(store: store)
@@ -126,19 +131,20 @@ struct ContentView: View {
                 }
             }
 
-            if let toast = toastCenter.toast,
-               !searchState.isActive || toast.icon == .spinner {
-                PlayerToastBanner(toast: toast)
-                    .padding(.bottom, toastBottomInset)
-                    .frame(maxWidth: .infinity)
-                    .zIndex(11)
-                    .transition(
-                        .asymmetric(
-                            insertion: .opacity.combined(with: .offset(y: 10)),
-                            removal: .opacity.combined(with: .offset(y: 6))
+            VStack(spacing: 8) {
+                ForEach(visibleToasts) { toast in
+                    PlayerToastBanner(toast: toast)
+                        .transition(
+                            .asymmetric(
+                                insertion: .opacity.combined(with: .offset(y: 10)),
+                                removal: .opacity.combined(with: .offset(y: 6))
+                            )
                         )
-                    )
+                }
             }
+            .padding(.bottom, toastBottomInset)
+            .frame(maxWidth: .infinity)
+            .zIndex(11)
 
             // ── Mini player or search bar ────────────────────────────────────────
             bottomChrome
@@ -150,7 +156,7 @@ struct ContentView: View {
         }
         .animation(.spring(response: 0.38, dampingFraction: 0.86), value: searchState.isActive)
         .animation(.spring(response: 0.38, dampingFraction: 0.86), value: miniPlayerVisibility.isHidden)
-        .animation(.spring(response: 0.4, dampingFraction: 0.86), value: toastCenter.toast)
+        .animation(.spring(response: 0.4, dampingFraction: 0.86), value: toastCenter.toasts)
         .animation(.spring(response: 0.4, dampingFraction: 0.86), value: toastBottomInset)
         .environment(store)
         .environment(player)

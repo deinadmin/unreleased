@@ -20,8 +20,8 @@ export const PLAN_TIERS: Record<
   free: { displayName: "Free", storageDescription: "1 GB storage", storageLimitBytes: 1_000_000_000 },
   premium: {
     displayName: "Premium",
-    storageDescription: "20 GB storage",
-    storageLimitBytes: 20_000_000_000,
+    storageDescription: "30 GB storage",
+    storageLimitBytes: 30_000_000_000,
   },
   unlimited: {
     displayName: "Unlimited",
@@ -50,15 +50,18 @@ export function expiryDescription(plan: UserPlan): string | null {
 }
 
 /** Listens to `users/{uid}` for the console-managed plan fields. */
-export function usePlan(): UserPlan {
+export function usePlanState(): { plan: UserPlan; loading: boolean } {
   const { user, isSignedIn } = useAuth()
   const [plan, setPlan] = useState<UserPlan>(DEFAULT_PLAN)
+  const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     if (!user || !isSignedIn) {
       setPlan(DEFAULT_PLAN)
+      setLoading(false)
       return
     }
+    setLoading(true)
     return onSnapshot(
       doc(db, "users", user.uid),
       (snapshot) => {
@@ -73,10 +76,19 @@ export function usePlan(): UserPlan {
         } else {
           setPlan(DEFAULT_PLAN)
         }
+        setLoading(false)
       },
-      () => setPlan(DEFAULT_PLAN),
+      () => {
+        setPlan(DEFAULT_PLAN)
+        setLoading(false)
+      },
     )
   }, [user, isSignedIn])
 
-  return plan
+  return { plan, loading }
+}
+
+/** Listens to `users/{uid}` for the console-managed plan fields. */
+export function usePlan(): UserPlan {
+  return usePlanState().plan
 }

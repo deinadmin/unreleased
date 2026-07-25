@@ -23,6 +23,14 @@ function persist(storagePath: string, url: string) {
   }
 }
 
+function removePersisted(storagePath: string) {
+  try {
+    localStorage.removeItem(STORAGE_KEY_PREFIX + storagePath)
+  } catch {
+    // Ignore storage errors (e.g. private browsing).
+  }
+}
+
 /** Synchronously returns a previously resolved download URL, if any (memory or persisted). */
 export function cachedDownloadURL(storagePath: string): string | undefined {
   const inMemory = resolvedCache.get(storagePath)
@@ -50,4 +58,11 @@ export function downloadURL(storagePath: string): Promise<string> {
     cache.set(storagePath, promise)
   }
   return promise
+}
+
+/** Clears a URL that is stale because its object was replaced or its token was revoked. */
+export function invalidateDownloadURL(storagePath: string): void {
+  cache.delete(storagePath)
+  resolvedCache.delete(storagePath)
+  removePersisted(storagePath)
 }

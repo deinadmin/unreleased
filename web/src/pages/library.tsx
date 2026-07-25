@@ -98,7 +98,7 @@ function LibrarySkeleton() {
     <div className="grid grid-cols-2 gap-x-4 gap-y-6 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
       {Array.from({ length: 10 }).map((_, i) => (
         <div key={i} className="flex flex-col gap-2">
-          <Skeleton className="aspect-square rounded-2xl" />
+          <Skeleton className="aspect-square rounded-[7.7%]" />
           <Skeleton className="h-4 w-3/4 rounded-md" />
           <Skeleton className="h-3 w-1/3 rounded-md" />
         </div>

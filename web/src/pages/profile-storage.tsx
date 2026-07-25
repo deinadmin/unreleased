@@ -1,18 +1,27 @@
-import { AudioWaveform, CircleUser, Cloud, CloudOff, CloudUpload, ListMusic } from "lucide-react"
+import {
+  AudioWaveform,
+  CircleUser,
+  Cloud,
+  CloudOff,
+  CloudUpload,
+  ListMusic,
+  Trash2,
+} from "lucide-react"
 import { useSyncExternalStore } from "react"
 import { AppHeader } from "@/components/app-header"
 import { SettingsDivider, SettingsPageHeader, SettingsRow, SettingsSection } from "@/components/settings"
 import { useAuth } from "@/hooks/use-auth"
-import { PLAN_TIERS, effectiveTier, usePlan } from "@/hooks/use-plan"
+import { PLAN_TIERS, effectiveTier, usePlanState } from "@/hooks/use-plan"
 import { useProjects } from "@/hooks/use-projects"
 import { formatFileSize } from "@/lib/format"
+import { trackStorageBytes } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
 /** Web port of the iOS `StorageSyncView` (storage usage + sync details). */
 export function ProfileStoragePage() {
   const { user } = useAuth()
-  const { projects } = useProjects()
-  const plan = usePlan()
+  const { projects, loading: projectsLoading } = useProjects()
+  const { plan, loading: planLoading } = usePlanState()
   const online = useOnlineStatus()
 
   // Only own projects count against the storage limit (shared projects live in
@@ -20,14 +29,7 @@ export function ProfileStoragePage() {
   const ownProjects = projects.filter((p) => !p.ownerID)
   const usedBytes = ownProjects
     .flatMap((p) => p.tracks)
-    .reduce(
-      (total, track) =>
-        total +
-        (track.versions.length === 0
-          ? track.fileSize
-          : track.versions.reduce((sum, v) => sum + v.fileSize, 0)),
-      0,
-    )
+    .reduce((total, track) => total + trackStorageBytes(track), 0)
   const limitBytes = PLAN_TIERS[effectiveTier(plan)].storageLimitBytes
   const fraction = limitBytes ? Math.min(1, usedBytes / limitBytes) : 0
   const freeBytes = limitBytes ? Math.max(0, limitBytes - usedBytes) : null
@@ -65,15 +67,14 @@ export function ProfileStoragePage() {
               </div>
             </div>
 
-            <div className="h-2.5 overflow-hidden rounded-full bg-foreground/8">
-              <div
-                className={cn(
-                  "h-full rounded-full transition-all duration-500",
-                  fraction > 0.9 ? "bg-destructive" : "bg-brand",
-                )}
-                style={{ width: `${Math.max(fraction * 100, usedBytes > 0 ? 1.5 : 0)}%` }}
-              />
-            </div>
+            {!projectsLoading && !planLoading && (
+              <div className="h-2.5 overflow-hidden rounded-full bg-foreground/8">
+                <div
+                  className="h-full rounded-full bg-brand"
+                  style={{ width: `${Math.max(fraction * 100, usedBytes > 0 ? 1.5 : 0)}%` }}
+                />
+              </div>
+            )}
 
             <div className="flex items-center gap-4 text-[13px] text-muted-foreground">
               <span className="flex items-center gap-1.5">
@@ -126,6 +127,15 @@ export function ProfileStoragePage() {
             icon={<AudioWaveform className="size-4" />}
             title="Tracks"
             value={String(allTracks.length)}
+          />
+          <SettingsDivider />
+          <SettingsRow
+            icon={<Trash2 className="size-4" />}
+            iconClassName="text-destructive"
+            title="Delete tracks"
+            titleClassName="text-destructive"
+            chevron
+            to="/profile/storage/delete-tracks"
           />
           <SettingsDivider />
           <SettingsRow

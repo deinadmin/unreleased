@@ -175,7 +175,7 @@ function Swatch({
       {children}
       {selected && (
         <>
-          <span className="pointer-events-none absolute inset-0 rounded-[14px] border-[3px] border-white" />
+          <span className="pointer-events-none absolute inset-0 rounded-[14px] border-[3px] border-foreground/60" />
           <Check className="relative size-3.5 text-white drop-shadow-sm" strokeWidth={3.5} />
         </>
       )}

@@ -20,7 +20,7 @@ enum PlanTier: String, Codable {
     var storageLimitBytes: Int64? {
         switch self {
         case .free:      1_000_000_000       // 1 GB
-        case .premium:   20_000_000_000      // 20 GB
+        case .premium:   30_000_000_000      // 30 GB
         case .unlimited: nil
         }
     }
@@ -28,7 +28,7 @@ enum PlanTier: String, Codable {
     var storageDescription: String {
         switch self {
         case .free:      "1 GB storage"
-        case .premium:   "20 GB storage"
+        case .premium:   "30 GB storage"
         case .unlimited: "Unlimited storage"
         }
     }
@@ -38,7 +38,7 @@ enum PlanTier: String, Codable {
         case .free:
             return ["1 GB storage", "Cloud sync", "Unlimited projects"]
         case .premium:
-            return ["20 GB storage", "Cloud sync", "Unlimited projects"]
+            return ["30 GB storage", "Cloud sync", "Unlimited projects"]
         case .unlimited:
             return ["Unlimited storage", "Cloud sync", "Unlimited projects"]
         }

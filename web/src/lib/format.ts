@@ -16,6 +16,11 @@ export function formatFileSize(bytes: number): string {
   return `${(bytes / 1_000_000_000).toFixed(2)} GB`
 }
 
+/** Abbreviated calendar date, matching the iOS `.abbreviated` date style. */
+export function formatShortDate(date: Date): string {
+  return date.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })
+}
+
 const rtf = new Intl.RelativeTimeFormat("en", { numeric: "auto" })
 
 export function formatRelativeDate(date: Date): string {

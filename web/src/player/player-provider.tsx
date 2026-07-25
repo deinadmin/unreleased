@@ -35,6 +35,12 @@ interface PlayerContextValue {
 
 const PlayerContext = createContext<PlayerContextValue | null>(null)
 
+function showUploadPendingToast(trackTitle: string) {
+  toast("Still uploading", {
+    description: `“${trackTitle}” hasn’t finished uploading yet. It’ll be playable on this device once the upload completes.`,
+  })
+}
+
 export function PlayerProvider({ children }: { children: ReactNode }) {
   const audioRef = useRef<HTMLAudioElement | null>(null)
   if (audioRef.current === null) {
@@ -57,7 +63,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const play = useCallback(
     (nextTrack: Track, nextProject: Project) => {
       if (!nextTrack.storagePath) {
-        toast("This track hasn't finished uploading from the app yet.")
+        showUploadPendingToast(nextTrack.title)
         return
       }
       const token = ++loadToken.current
@@ -83,6 +89,10 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
           if (loadToken.current !== token) return
           if ((error as { name?: string })?.name === "AbortError") return
           console.error("playback failed", error)
+          if ((error as { code?: string })?.code === "storage/object-not-found") {
+            showUploadPendingToast(nextTrack.title)
+            return
+          }
           toast("Couldn't play this track. Check your connection and try again.")
         })
     },

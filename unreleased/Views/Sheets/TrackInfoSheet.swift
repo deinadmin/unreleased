@@ -198,7 +198,6 @@ struct TrackInfoSheet: View {
                 renameText = liveTrack.title
                 showRenameAlert = true
             })
-            actions.append(TrackInfoAction(title: "Replace audio", systemImage: "waveform.badge.plus"))
         }
 
         actions.append(TrackInfoAction(title: "Versions", systemImage: "square.stack.3d.up") {

@@ -462,6 +462,13 @@ struct PlayerView: View {
         )
         .frame(height: isExpanded ? 60 : 26)
         .frame(maxWidth: isExpanded ? .infinity : nil)
+        // Queue/Notes toggles animate the matched-geometry cover. Keep that
+        // spring transaction out of the waveform: its Canvas already advances
+        // from TimelineView, and combining both briefly makes the bars wobble
+        // when this view is removed or recreated during rapid toggles.
+        .transaction { transaction in
+            transaction.animation = nil
+        }
         .onChange(of: player.currentTime) { _, _ in
             if let target = targetScrubProgress {
                 let tolerance = player.duration * 0.01
@@ -781,7 +788,7 @@ struct PlayerView: View {
     private func queueRow(item: QueuedItem, track: Track, project: Project) -> some View {
         HStack(spacing: 12) {
             Button {
-                withAnimation(.spring(response: 0.34, dampingFraction: 0.84)) {
+                withAnimation(Self.expandedPanelSpring) {
                     isShowingQueue = false
                 }
                 player.playQueueItem(id: item.id)
@@ -832,7 +839,7 @@ struct PlayerView: View {
         HStack(spacing: 0) {
             bottomAccessoryButton(icon: "doc.text", label: "notes", isActive: isShowingNotes) {
                 bottomAccessoryHapticTrigger += 1
-                withAnimation(.spring(response: 0.34, dampingFraction: 0.84)) {
+                withAnimation(Self.expandedPanelSpring) {
                     isShowingVersionPicker = false
                     isShowingNotes.toggle()
                     if isShowingNotes { isShowingQueue = false }
@@ -844,7 +851,7 @@ struct PlayerView: View {
                 isActive: isShowingQueue
             ) {
                 bottomAccessoryHapticTrigger += 1
-                withAnimation(.spring(response: 0.34, dampingFraction: 0.84)) {
+                withAnimation(Self.expandedPanelSpring) {
                     isShowingVersionPicker = false
                     isShowingQueue.toggle()
                     if isShowingQueue { isShowingNotes = false }
@@ -861,6 +868,10 @@ struct PlayerView: View {
     }
 
     private static let bottomAccessoryHeight: CGFloat = 48
+    private static let expandedPanelSpring = Animation.spring(
+        response: 0.22,
+        dampingFraction: 0.90
+    )
 
     private func bottomAccessoryButton(
         icon: String,

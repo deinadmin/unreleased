@@ -20,6 +20,7 @@ import { useAuth } from "@/hooks/use-auth"
 import { decodeProject } from "@/lib/codec"
 import { db } from "@/lib/firebase"
 import { normalizeProjectID, removeSharedRef, sharedRefsDoc } from "@/lib/invites"
+import { preloadProjectCover } from "@/lib/project-cover-cache"
 import { sharedPlayableProject, type Project } from "@/lib/types"
 
 interface ProjectsContextValue {
@@ -55,6 +56,7 @@ export function ProjectsProvider({ children }: { children: ReactNode }) {
       const decoded = await decodeProject(snapshot.data())
       if (!decoded) return null
       const project = sharedPlayableProject({ ...decoded, ownerID })
+      preloadProjectCover(project.coverStoragePath)
       setSharedProjects((prev) => new Map(prev).set(projectID, project))
       return project
     },
@@ -78,7 +80,9 @@ export function ProjectsProvider({ children }: { children: ReactNode }) {
       async (snapshot) => {
         const decoded = await Promise.all(snapshot.docs.map((d) => decodeProject(d.data())))
         if (cancelled) return
-        setOwnProjects(decoded.filter((p): p is Project => p !== null))
+        const projects = decoded.filter((p): p is Project => p !== null)
+        projects.forEach((project) => preloadProjectCover(project.coverStoragePath))
+        setOwnProjects(projects)
         setLoading(false)
       },
       (error) => {
@@ -146,6 +150,7 @@ export function ProjectsProvider({ children }: { children: ReactNode }) {
               const decoded = await decodeProject(projectSnapshot.data())
               if (!decoded) return
               const project = sharedPlayableProject({ ...decoded, ownerID })
+              preloadProjectCover(project.coverStoragePath)
               setSharedProjects((prev) => new Map(prev).set(projectID, project))
             },
             (error) => {

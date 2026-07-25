@@ -1,35 +1,48 @@
 import { useEffect, useState } from "react"
-import { cachedDownloadURL, downloadURL } from "@/lib/storage-urls"
+import { cachedProjectCoverURL, projectCoverURL } from "@/lib/project-cover-cache"
+import { cachedDownloadURL } from "@/lib/storage-urls"
 
 /**
- * Resolves a Cloud Storage path to a download URL (cached in memory and across reloads
- * via localStorage, so already-seen artwork renders immediately instead of popping in).
+ * Resolves a project cover to an object URL backed by Cache Storage. Route
+ * changes are synchronous from memory; reloads read the image bytes from the
+ * browser's persistent cache instead of Firebase Storage.
  */
 export function useStorageUrl(storagePath: string | undefined): string | undefined {
-  const [url, setUrl] = useState<string | undefined>(() => storagePath && cachedDownloadURL(storagePath))
+  const synchronousURL = storagePath
+    ? cachedProjectCoverURL(storagePath) ?? cachedDownloadURL(storagePath)
+    : undefined
+  const [resolved, setResolved] = useState<{ path: string | undefined; url: string | undefined }>(
+    () => ({ path: storagePath, url: synchronousURL }),
+  )
 
   useEffect(() => {
     if (!storagePath) {
-      setUrl(undefined)
+      setResolved({ path: undefined, url: undefined })
       return
     }
-    const cached = cachedDownloadURL(storagePath)
+    const cached = cachedProjectCoverURL(storagePath)
     if (cached) {
-      setUrl(cached)
+      setResolved({ path: storagePath, url: cached })
       return
     }
+    const directURL = cachedDownloadURL(storagePath)
+    if (directURL) {
+      setResolved({ path: storagePath, url: directURL })
+      return
+    }
+    setResolved({ path: storagePath, url: undefined })
     let cancelled = false
-    downloadURL(storagePath)
+    projectCoverURL(storagePath)
       .then((resolved) => {
-        if (!cancelled) setUrl(resolved)
+        if (!cancelled) setResolved({ path: storagePath, url: resolved })
       })
       .catch(() => {
-        if (!cancelled) setUrl(undefined)
+        if (!cancelled) setResolved({ path: storagePath, url: undefined })
       })
     return () => {
       cancelled = true
     }
   }, [storagePath])
 
-  return url
+  return resolved.path === storagePath ? resolved.url : synchronousURL
 }

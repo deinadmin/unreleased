@@ -47,6 +47,12 @@ struct ProjectShareSheet: View {
         return ProjectLinkRouter.shareURL(ownerID: ownerID, projectID: project.id).absoluteString
     }
 
+    private var displayedDeepLink: String {
+        deepLink.hasPrefix("https://")
+            ? String(deepLink.dropFirst("https://".count))
+            : deepLink
+    }
+
     private var isOwner: Bool { !project.isShared }
 
     var body: some View {
@@ -271,11 +277,11 @@ struct ProjectShareSheet: View {
             copyLink()
         } label: {
             HStack(spacing: 0) {
-                Text(deepLink.isEmpty ? "Sign in to share" : deepLink)
+                Text(deepLink.isEmpty ? "Sign in to share" : displayedDeepLink)
                     .font(.system(size: 13, design: .monospaced))
                     .foregroundStyle(deepLink.isEmpty || !linkEnabled ? .tertiary : .secondary)
                     .lineLimit(1)
-                    .truncationMode(.middle)
+                    .truncationMode(.tail)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.leading, 16)
 

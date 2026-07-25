@@ -148,6 +148,12 @@ export function vinylGradientCSS(project: Project): string {
   return gradientCSS(project.gradient)
 }
 
+/** Bytes a track occupies in the cloud: every version, or its own file. */
+export function trackStorageBytes(track: Track): number {
+  if (track.versions.length === 0) return track.fileSize
+  return track.versions.reduce((total, version) => total + version.fileSize, 0)
+}
+
 export function trackCountText(project: Project): string {
   const n = project.tracks.length
   return n === 1 ? "1 track" : `${n} tracks`

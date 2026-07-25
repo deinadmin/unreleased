@@ -5,17 +5,22 @@ import UIKit
 struct CoverControlContrastModifier: ViewModifier {
     let coverImage: UIImage?
     let fallbackGradient: GradientTheme?
+    let backgroundHex: String?
     let sampleRect: CGRect
 
     private var usesDarkControl: Bool {
         let luminance: CGFloat
-        if let coverImage {
+        if let backgroundHex,
+           let backgroundLuminance = CoverArtworkLuminance.relativeLuminance(ofHex: backgroundHex) {
+            luminance = backgroundLuminance
+        } else if let coverImage {
             luminance = CoverArtworkLuminance.relativeLuminance(
                 of: coverImage,
                 in: sampleRect
             )
         } else if let fallbackGradient {
-            luminance = CoverArtworkLuminance.relativeLuminance(of: fallbackGradient)
+            let accentHex = ProjectAccentColor.hex(from: fallbackGradient)
+            luminance = CoverArtworkLuminance.relativeLuminance(ofHex: accentHex) ?? 0
         } else {
             luminance = 0
         }
@@ -44,11 +49,13 @@ extension View {
     func coverControlContrast(
         for coverImage: UIImage?,
         fallbackGradient: GradientTheme? = nil,
+        backgroundHex: String? = nil,
         sampleRect: CGRect = CGRect(x: 0.4, y: 0.4, width: 0.2, height: 0.2)
     ) -> some View {
         modifier(CoverControlContrastModifier(
             coverImage: coverImage,
             fallbackGradient: fallbackGradient,
+            backgroundHex: backgroundHex,
             sampleRect: sampleRect
         ))
     }
@@ -139,13 +146,7 @@ private enum CoverArtworkLuminance {
         return "\(ObjectIdentifier(image).hashValue):\(values[0]):\(values[1]):\(values[2]):\(values[3])" as NSString
     }
 
-    nonisolated static func relativeLuminance(of gradient: GradientTheme) -> CGFloat {
-        let luminances = gradient.colors.compactMap(relativeLuminance(ofHex:))
-        guard !luminances.isEmpty else { return 0 }
-        return luminances.reduce(0, +) / CGFloat(luminances.count)
-    }
-
-    nonisolated private static func relativeLuminance(ofHex hex: String) -> CGFloat? {
+    nonisolated static func relativeLuminance(ofHex hex: String) -> CGFloat? {
         let value = hex.trimmingCharacters(in: CharacterSet(charactersIn: "#"))
         guard value.count == 6, let rgb = UInt32(value, radix: 16) else { return nil }
 

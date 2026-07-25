@@ -36,8 +36,9 @@ struct CreateProjectSheet: View {
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Create") { createProject() }
-                        .buttonStyle(.borderless)
-                        .tint(.primary)
+                        .buttonStyle(.glassProminent)
+                        .tint(.accentColor)
+                        .foregroundStyle(.white)
                         .fontWeight(.semibold)
                         .disabled(trimmedName.isEmpty)
                         .fixedSize(horizontal: true, vertical: false)

@@ -279,6 +279,7 @@ final class ProjectStore {
 
                 if !self.serverStorageAtCapacity, self.hasStorageCapacity {
                     self.storageUploadWasRejected = false
+                    self.syncService?.scheduleMissingAudioRepair()
                 }
                 self.updateSyncStatus()
             },
@@ -886,10 +887,14 @@ final class ProjectStore {
     }
 
     func accentColor(for project: Project) -> Color {
-        if let hex = project.accentColorHex {
-            return ProjectAccentColor.color(hex: hex)
-        }
-        return ProjectAccentColor.color(hex: ProjectAccentColor.hex(from: project.gradient))
+        ProjectAccentColor.color(hex: accentHex(for: project))
+    }
+
+    /// The resolved color used by accent-backed controls. Keeping the hex value
+    /// available lets those controls calculate contrast against their actual
+    /// rendered background instead of the visually related cover artwork.
+    func accentHex(for project: Project) -> String {
+        project.accentColorHex ?? ProjectAccentColor.hex(from: project.gradient)
     }
 
     func resolvedAccentHex(gradient: GradientTheme, coverImage: UIImage?) -> String {

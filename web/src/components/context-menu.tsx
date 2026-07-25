@@ -14,12 +14,15 @@ export interface ContextMenuItem {
   label: string
   icon?: ReactNode
   destructive?: boolean
+  disabled?: boolean
   onSelect: () => void
 }
 
 interface ContextMenuContextValue {
   /** Opens the custom menu at the pointer position of a `contextmenu` event. */
   open: (event: React.MouseEvent, items: ContextMenuItem[]) => void
+  /** Opens the custom menu at explicit viewport coordinates. */
+  openAt: (x: number, y: number, items: ContextMenuItem[]) => void
 }
 
 const ContextMenuContext = createContext<ContextMenuContextValue | null>(null)
@@ -42,6 +45,10 @@ export function ContextMenuProvider({ children }: { children: ReactNode }) {
   const open = useCallback((event: React.MouseEvent, items: ContextMenuItem[]) => {
     event.preventDefault()
     if (items.length > 0) setMenu({ x: event.clientX, y: event.clientY, items })
+  }, [])
+
+  const openAt = useCallback((x: number, y: number, items: ContextMenuItem[]) => {
+    if (items.length > 0) setMenu({ x, y, items })
   }, [])
 
   // Keep the menu inside the viewport.
@@ -77,7 +84,7 @@ export function ContextMenuProvider({ children }: { children: ReactNode }) {
   }, [menu])
 
   return (
-    <ContextMenuContext.Provider value={{ open }}>
+    <ContextMenuContext.Provider value={{ open, openAt }}>
       {children}
       {menu && (
         <div
@@ -91,12 +98,14 @@ export function ContextMenuProvider({ children }: { children: ReactNode }) {
               key={item.label}
               type="button"
               role="menuitem"
+              disabled={item.disabled}
               onClick={() => {
                 setMenu(null)
                 item.onSelect()
               }}
               className={cn(
                 "flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-[13px] font-medium outline-none transition-colors",
+                "disabled:pointer-events-none disabled:opacity-40",
                 item.destructive
                   ? "text-destructive hover:bg-destructive/10"
                   : "hover:bg-muted",

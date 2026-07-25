@@ -1,4 +1,13 @@
-import { ChevronLeft, LogOut, MoreHorizontal, Pause, Play, Plus, Share } from "lucide-react"
+import {
+  ChevronLeft,
+  LogOut,
+  MoreHorizontal,
+  Pause,
+  Play,
+  Plus,
+  Share,
+  Trash2,
+} from "lucide-react"
 import { useState } from "react"
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom"
 import { toast } from "sonner"
@@ -21,7 +30,7 @@ import { useProject, useProjects } from "@/hooks/use-projects"
 import { formatProjectDuration } from "@/lib/format"
 import { leaveSharedProject } from "@/lib/invites"
 import { projectBackLink } from "@/lib/project-navigation"
-import { updateProjectName } from "@/lib/project-edits"
+import { deleteProject, updateProjectName } from "@/lib/project-edits"
 import { projectAccent, trackCountText, type Project } from "@/lib/types"
 import { usePlayer } from "@/player/player-provider"
 import { AudioDropzone } from "@/uploads/dropzone"
@@ -38,7 +47,9 @@ export function ProjectPage() {
   const { importFiles, isImporting } = useUploads()
   const [shareOpen, setShareOpen] = useState(false)
   const [coverOpen, setCoverOpen] = useState(false)
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
   const [leaveConfirmOpen, setLeaveConfirmOpen] = useState(false)
+  const [isDeleting, setIsDeleting] = useState(false)
   const [isLeaving, setIsLeaving] = useState(false)
   const backLink = projectBackLink(location.state)
 
@@ -105,6 +116,20 @@ export function ProjectPage() {
     } catch {
       toast("Couldn't leave this project. Please try again.")
       setIsLeaving(false)
+    }
+  }
+  const removeProject = async () => {
+    if (!user || !isOwnProject || isDeleting) return
+    setIsDeleting(true)
+    try {
+      if (isActiveProject) player.stop()
+      await deleteProject(user.uid, project)
+      setDeleteConfirmOpen(false)
+      navigate("/", { replace: true })
+    } catch (error) {
+      console.error("deleting project failed", error)
+      toast("Couldn't delete this project. Please try again.")
+      setIsDeleting(false)
     }
   }
 
@@ -207,6 +232,29 @@ export function ProjectPage() {
                   </button>
                 )}
 
+                {isOwnProject && (
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <button
+                        type="button"
+                        aria-label="More project actions"
+                        className="flex size-11 items-center justify-center rounded-full border border-foreground/6 bg-secondary shadow-sm transition hover:bg-secondary/70 active:scale-95"
+                      >
+                        <MoreHorizontal className="size-4.5" />
+                      </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-44">
+                      <DropdownMenuItem
+                        variant="destructive"
+                        onSelect={() => setDeleteConfirmOpen(true)}
+                      >
+                        <Trash2 />
+                        Delete
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                )}
+
                 {!isOwnProject && (
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
@@ -257,6 +305,35 @@ export function ProjectPage() {
           {isOwnProject && (
             <CoverDialog project={project} open={coverOpen} onOpenChange={setCoverOpen} />
           )}
+
+          <Dialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
+            <DialogContent className="rounded-3xl p-6 sm:max-w-sm">
+              <DialogHeader className="min-w-0 pb-1">
+                <DialogTitle className="truncate">Delete “{project.name}”?</DialogTitle>
+              </DialogHeader>
+              <p className="text-[13px] leading-5 text-muted-foreground">
+                This will permanently delete the project and all of its tracks.
+              </p>
+              <div className="flex justify-end gap-2 pt-5">
+                <Button
+                  variant="ghost"
+                  size="lg"
+                  disabled={isDeleting}
+                  onClick={() => setDeleteConfirmOpen(false)}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  variant="destructive"
+                  size="lg"
+                  disabled={isDeleting}
+                  onClick={() => void removeProject()}
+                >
+                  {isDeleting ? "Deleting…" : "Delete"}
+                </Button>
+              </div>
+            </DialogContent>
+          </Dialog>
 
           <Dialog open={leaveConfirmOpen} onOpenChange={setLeaveConfirmOpen}>
             <DialogContent className="rounded-3xl p-6 sm:max-w-sm">

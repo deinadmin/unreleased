@@ -1,4 +1,4 @@
-import { useLayoutEffect } from "react"
+import { lazy, Suspense, useLayoutEffect } from "react"
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-router-dom"
 import { Toaster } from "sonner"
 import { AppMark } from "@/components/app-mark"
@@ -9,20 +9,48 @@ import { AuthProvider, useAuth } from "@/hooks/use-auth"
 import { NotificationsProvider } from "@/hooks/use-notifications"
 import { ProjectsProvider } from "@/hooks/use-projects"
 import { ChooseUsernamePage } from "@/pages/choose-username"
-import { EmailAuthPage } from "@/pages/email-auth"
-import { LibraryPage } from "@/pages/library"
-import { NotificationsPage } from "@/pages/notifications"
-import { ProfilePage } from "@/pages/profile"
-import { ProfileAboutPage } from "@/pages/profile-about"
-import { ProfileNotificationsPage } from "@/pages/profile-notifications"
-import { ProfileStoragePage } from "@/pages/profile-storage"
-import { ProjectPage } from "@/pages/project"
-import { SharedProjectPage } from "@/pages/shared"
-import { TrackNotesPage } from "@/pages/track-notes"
-import { WelcomePage } from "@/pages/welcome"
 import { PlayerProvider } from "@/player/player-provider"
 import { UploadsCard } from "@/uploads/uploads-card"
 import { UploadsProvider } from "@/uploads/uploads-provider"
+
+const DeleteTracksPage = lazy(() =>
+  import("@/pages/delete-tracks").then((module) => ({ default: module.DeleteTracksPage })),
+)
+const EmailAuthPage = lazy(() =>
+  import("@/pages/email-auth").then((module) => ({ default: module.EmailAuthPage })),
+)
+const LibraryPage = lazy(() =>
+  import("@/pages/library").then((module) => ({ default: module.LibraryPage })),
+)
+const NotificationsPage = lazy(() =>
+  import("@/pages/notifications").then((module) => ({ default: module.NotificationsPage })),
+)
+const ProfilePage = lazy(() =>
+  import("@/pages/profile").then((module) => ({ default: module.ProfilePage })),
+)
+const ProfileAboutPage = lazy(() =>
+  import("@/pages/profile-about").then((module) => ({ default: module.ProfileAboutPage })),
+)
+const ProfileNotificationsPage = lazy(() =>
+  import("@/pages/profile-notifications").then((module) => ({
+    default: module.ProfileNotificationsPage,
+  })),
+)
+const ProfileStoragePage = lazy(() =>
+  import("@/pages/profile-storage").then((module) => ({ default: module.ProfileStoragePage })),
+)
+const ProjectPage = lazy(() =>
+  import("@/pages/project").then((module) => ({ default: module.ProjectPage })),
+)
+const SharedProjectPage = lazy(() =>
+  import("@/pages/shared").then((module) => ({ default: module.SharedProjectPage })),
+)
+const TrackNotesPage = lazy(() =>
+  import("@/pages/track-notes").then((module) => ({ default: module.TrackNotesPage })),
+)
+const WelcomePage = lazy(() =>
+  import("@/pages/welcome").then((module) => ({ default: module.WelcomePage })),
+)
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const { isSignedIn, initializing, username, usernameLoaded } = useAuth()
@@ -62,7 +90,8 @@ export default function App() {
                 <BrowserRouter>
                 <ContextMenuProvider>
                 <ScrollToTop />
-                <Routes>
+                <Suspense fallback={<Splash />}>
+                  <Routes>
                   <Route path="/welcome" element={<WelcomePage />} />
                   <Route path="/welcome/email" element={<EmailAuthPage />} />
                   <Route path="/shared/:ownerId/:projectId" element={<SharedProjectPage />} />
@@ -123,6 +152,14 @@ export default function App() {
                     }
                   />
                   <Route
+                    path="/profile/storage/delete-tracks"
+                    element={
+                      <RequireAuth>
+                        <DeleteTracksPage />
+                      </RequireAuth>
+                    }
+                  />
+                  <Route
                     path="/profile/about"
                     element={
                       <RequireAuth>
@@ -131,7 +168,8 @@ export default function App() {
                     }
                   />
                   <Route path="*" element={<Navigate to="/" replace />} />
-                </Routes>
+                  </Routes>
+                </Suspense>
                 <PlayerDock />
                 <UploadsCard />
                 </ContextMenuProvider>

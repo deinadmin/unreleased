@@ -179,6 +179,66 @@ body {
   }
 }
 
+/* Card actions stay discoverable on touch devices and reveal on hover for mice. */
+.project-card-action {
+  opacity: 1;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .project-card-action {
+    opacity: 0;
+  }
+
+  .group:hover .project-card-action,
+  .project-card-action:focus-visible,
+  .project-card-action[data-active="true"] {
+    opacity: 1;
+  }
+}
+
+/* Track metadata and actions share one quick, synchronized hover transition. */
+.track-row-duration,
+.track-row-action {
+  transition:
+    transform 130ms var(--ease-snappy),
+    opacity 100ms ease-out,
+    color 100ms ease-out,
+    background-color 100ms ease-out;
+}
+
+.track-row-duration {
+  transform: translateX(-3rem);
+}
+
+.track-row-action {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .track-row-duration {
+    transform: translateX(0);
+  }
+
+  .track-row-action {
+    pointer-events: none;
+    opacity: 0;
+    transform: translateX(0.75rem);
+  }
+
+  .track-row:hover .track-row-duration,
+  .track-row:has(.track-row-action:focus-visible) .track-row-duration {
+    transform: translateX(-3rem);
+  }
+
+  .track-row:hover .track-row-action,
+  .track-row-action:focus-visible {
+    pointer-events: auto;
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
 /* ── Motion ──────────────────────────────────────────────────────────── */
 
 @keyframes vinyl-spin {

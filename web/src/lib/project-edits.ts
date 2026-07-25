@@ -1,10 +1,23 @@
-import { Timestamp, deleteField, doc, setDoc, updateDoc } from "firebase/firestore"
+import {
+  Timestamp,
+  collection,
+  deleteField,
+  doc,
+  getDocs,
+  setDoc,
+  updateDoc,
+  writeBatch,
+} from "firebase/firestore"
 import { deleteObject, ref as storageRef, uploadBytes } from "firebase/storage"
 import { accentHexFromGradient, accentHexFromImage, gradientHexPairFromImage } from "./accent-color"
 import { encodeGradient, encodeProject, encodeTrack } from "./codec"
 import { db, storage } from "./firebase"
 import { compressedSquareJpeg, COVER_PHOTO_LIMITS } from "./photo-compression"
-import type { GradientTheme, Project } from "./types"
+import {
+  cacheUploadedProjectCover,
+  invalidateProjectCover,
+} from "./project-cover-cache"
+import type { GradientTheme, Project, Track } from "./types"
 
 /** Firestore edits for the user's own projects, mirroring the iOS `EditProjectSheet.save()`. */
 
@@ -69,12 +82,62 @@ export async function deleteTrack(uid: string, project: Project, trackID: string
     updatedDate: Timestamp.now(),
   })
   // Best-effort cleanup of the cloud audio files.
-  const paths = new Set<string>()
-  if (target.storagePath) paths.add(target.storagePath)
-  for (const version of target.versions) {
-    if (version.storagePath) paths.add(version.storagePath)
+  deleteAudioObjects(audioPaths(target))
+}
+
+/** A track queued for deletion, identified by the project that holds it. */
+export interface TrackLocation {
+  projectID: string
+  trackID: string
+}
+
+/**
+ * Removes several tracks with one write per affected project, mirroring the iOS
+ * `ProjectStore.deleteOwnedTracks`. Shared projects are skipped as a second
+ * layer of protection beyond the filtering done by the deletion screen.
+ */
+export async function deleteTracks(
+  uid: string,
+  projects: Project[],
+  locations: TrackLocation[],
+): Promise<void> {
+  const trackIDsByProject = new Map<string, Set<string>>()
+  for (const { projectID, trackID } of locations) {
+    const ids = trackIDsByProject.get(projectID) ?? new Set<string>()
+    ids.add(trackID)
+    trackIDsByProject.set(projectID, ids)
   }
-  for (const path of paths) {
+
+  const removedPaths: string[] = []
+  await Promise.all(
+    projects.map(async (project) => {
+      const trackIDs = trackIDsByProject.get(project.id)
+      if (project.ownerID || !trackIDs) return
+      const removed = project.tracks.filter((t) => trackIDs.has(t.id))
+      if (removed.length === 0) return
+      const tracks = await Promise.all(
+        project.tracks.filter((t) => !trackIDs.has(t.id)).map(encodeTrack),
+      )
+      await updateDoc(projectDoc(uid, project.id), {
+        tracks,
+        updatedDate: Timestamp.now(),
+      })
+      removedPaths.push(...removed.flatMap(audioPaths))
+    }),
+  )
+  // Best-effort cleanup of the cloud audio files.
+  deleteAudioObjects(removedPaths)
+}
+
+/** Every cloud audio object a track owns: its own file plus each version. */
+function audioPaths(track: Track): string[] {
+  return [track.storagePath, ...track.versions.map((v) => v.storagePath)].filter(
+    (path): path is string => Boolean(path),
+  )
+}
+
+function deleteAudioObjects(paths: string[]): void {
+  for (const path of new Set(paths)) {
     deleteObject(storageRef(storage, path)).catch(() => {})
   }
 }
@@ -94,6 +157,7 @@ export async function setProjectGradient(
   })
   // Best-effort cleanup of the replaced cloud cover.
   if (project.coverStoragePath) {
+    await invalidateProjectCover(project.coverStoragePath)
     deleteObject(storageRef(storage, project.coverStoragePath)).catch(() => {})
   }
 }
@@ -114,22 +178,78 @@ export async function setProjectCoverImage(
     const accentColorHex = accentHexFromImage(bitmap)
     const coverGradientColors = gradientHexPairFromImage(bitmap)
 
-    // Same naming convention as the iOS `saveCoverImage`.
-    const fileName = `${project.id}-${Math.floor(Date.now() / 1000)}.jpg`
+    // A unique immutable path is what makes long-lived browser caching safe.
+    const fileName = `${project.id}-${Date.now()}-${crypto.randomUUID()}.jpg`
     const storagePath = `users/${uid}/covers/${fileName}`
-    await uploadBytes(storageRef(storage, storagePath), blob, { contentType: "image/jpeg" })
-
-    await updateDoc(projectDoc(uid, project.id), {
-      coverStoragePath: storagePath,
-      accentColorHex,
-      coverGradientColors,
-      updatedDate: Timestamp.now(),
+    await uploadBytes(storageRef(storage, storagePath), blob, {
+      contentType: "image/jpeg",
+      cacheControl: "public,max-age=31536000,immutable",
     })
 
+    try {
+      // Seed the exact uploaded bytes before publishing the new path. When the
+      // Firestore listener fires, every cover can render without downloading.
+      await cacheUploadedProjectCover(storagePath, blob)
+      await updateDoc(projectDoc(uid, project.id), {
+        coverStoragePath: storagePath,
+        accentColorHex,
+        coverGradientColors,
+        updatedDate: Timestamp.now(),
+      })
+    } catch (error) {
+      await invalidateProjectCover(storagePath)
+      deleteObject(storageRef(storage, storagePath)).catch(() => {})
+      throw error
+    }
+
     if (project.coverStoragePath && project.coverStoragePath !== storagePath) {
+      await invalidateProjectCover(project.coverStoragePath)
       deleteObject(storageRef(storage, project.coverStoragePath)).catch(() => {})
     }
   } finally {
     bitmap.close()
   }
+}
+
+/**
+ * Permanently removes an owned project and its related cloud records. Storage
+ * cleanup is best-effort after the authoritative Firestore delete succeeds.
+ */
+export async function deleteProject(uid: string, project: Project): Promise<void> {
+  const projectRef = projectDoc(uid, project.id)
+  const [invitees, pendingInvites] = await Promise.all([
+    getDocs(collection(projectRef, "invitees")),
+    getDocs(collection(projectRef, "pendingInvites")),
+  ])
+
+  const batch = writeBatch(db)
+  invitees.forEach((snapshot) => batch.delete(snapshot.ref))
+  pendingInvites.forEach((snapshot) => batch.delete(snapshot.ref))
+  batch.delete(doc(db, "users", uid, "projectPreviews", project.id))
+
+  for (const track of project.tracks) {
+    const versionIDs = track.versions.length > 0
+      ? track.versions.map((version) => version.id)
+      : [track.id]
+    for (const versionID of versionIDs) {
+      batch.delete(doc(db, "users", uid, "versionAccess", versionID))
+    }
+  }
+  batch.delete(projectRef)
+  await batch.commit()
+
+  const storagePaths = new Set<string>()
+  if (project.coverStoragePath) {
+    storagePaths.add(project.coverStoragePath)
+    await invalidateProjectCover(project.coverStoragePath)
+  }
+  for (const track of project.tracks) {
+    if (track.storagePath) storagePaths.add(track.storagePath)
+    for (const version of track.versions) {
+      if (version.storagePath) storagePaths.add(version.storagePath)
+    }
+  }
+  await Promise.allSettled(
+    [...storagePaths].map((path) => deleteObject(storageRef(storage, path))),
+  )
 }

@@ -45,7 +45,9 @@ struct EditProjectSheet: View {
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Save") { save() }
-                        .tint(.primary)
+                        .buttonStyle(.glassProminent)
+                        .tint(.accentColor)
+                        .foregroundStyle(.white)
                         .fontWeight(.semibold)
                         .fixedSize(horizontal: true, vertical: false)
                         .padding(8)

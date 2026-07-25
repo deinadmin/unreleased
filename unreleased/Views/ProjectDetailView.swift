@@ -242,7 +242,6 @@ struct ProjectDetailView: View {
                             accentColor: store.accentColor(for: project),
                             onShowInfo: { trackForInfo = track }
                         )
-                        .padding(.horizontal, 20)
 
                         if index < tracks.count - 1 {
                             Divider()
@@ -681,7 +680,7 @@ private struct PlayButton: View {
     }
 
     private var buttonFill: Color { store.accentColor(for: project) }
-    private var coverImage: UIImage? { store.coverImage(for: project) }
+    private var buttonFillHex: String { store.accentHex(for: project) }
 
     var body: some View {
         Button {
@@ -694,8 +693,8 @@ private struct PlayButton: View {
                 Image(systemName: isActiveProject && player.isPlaying ? "pause.fill" : "play.fill")
                     .font(.system(size: 22, weight: .bold))
                     .coverControlContrast(
-                        for: coverImage,
-                        fallbackGradient: project.gradient
+                        for: nil,
+                        backgroundHex: buttonFillHex
                     )
                     .animation(nil, value: player.isPlaying)
             }
@@ -717,6 +716,7 @@ private struct PlayButton: View {
 private struct TrackRow: View {
     @Environment(AudioPlayer.self) private var player
     @Environment(ProjectStore.self) private var store
+    @Environment(PlayerToastCenter.self) private var toastCenter
 
     let track: Track
     let index: Int
@@ -725,10 +725,37 @@ private struct TrackRow: View {
     let onShowInfo: () -> Void
 
     @State private var playHapticTick = 0
+    @State private var queueThresholdHapticTick = 0
+    @State private var queueCompletionHapticTick = 0
+    @State private var horizontalOffset: CGFloat = 0
+    @State private var isQueueArmed = false
+    @State private var isSuppressingTap = false
+    @State private var tapSuppressionGeneration = 0
+
+    private static let queueActivationDistance: CGFloat = 84
+    private static let minimumProjectedCommitDistance: CGFloat = 44
+    private static let maximumDirectReveal: CGFloat = 108
+    private static let actionBackgroundWidth: CGFloat = 200
 
     private var isActive: Bool { player.currentTrack?.id == track.id }
 
     var body: some View {
+        ZStack(alignment: .leading) {
+            queueActionBackground
+            rowContent
+                .background(Color(uiColor: .systemBackground))
+                .offset(x: horizontalOffset)
+        }
+        .frame(maxWidth: .infinity)
+        .contentShape(Rectangle())
+        .clipped()
+        .gesture(queuePanGesture)
+        .sensoryFeedback(.impact(weight: .medium), trigger: playHapticTick)
+        .sensoryFeedback(.selection, trigger: queueThresholdHapticTick)
+        .sensoryFeedback(.success, trigger: queueCompletionHapticTick)
+    }
+
+    private var rowContent: some View {
         HStack(spacing: 12) {
             Button {
                 playTrack()
@@ -765,8 +792,11 @@ private struct TrackRow: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .accessibilityAction(named: "Add to queue") {
+                queueTrack()
+            }
 
-            Button(action: onShowInfo) {
+            Button(action: showInfo) {
                 Image(systemName: "ellipsis")
                     .font(.system(size: 14))
                     .foregroundStyle(.secondary)
@@ -776,13 +806,142 @@ private struct TrackRow: View {
             .buttonStyle(.plain)
             .accessibilityLabel("Track info")
         }
+        .padding(.horizontal, 20)
+        .frame(maxWidth: .infinity)
         .padding(.vertical, 12)
-        .sensoryFeedback(.impact(weight: .medium), trigger: playHapticTick)
+    }
+
+    private var queueActionBackground: some View {
+        Color(uiColor: .systemBackground)
+            .overlay(alignment: .leading) {
+                accentColor
+                    .frame(width: Self.actionBackgroundWidth)
+                    .overlay(alignment: .leading) {
+                        ZStack {
+                            Circle()
+                                .fill(.white.opacity(isQueueArmed ? 1 : 0.18))
+
+                            Image(systemName: "text.line.first.and.arrowtriangle.forward")
+                                .font(.system(size: 17, weight: .semibold))
+                                .foregroundStyle(isQueueArmed ? accentColor : .white)
+                        }
+                        .frame(width: 42, height: 42)
+                        .scaleEffect(queueActionScale)
+                        .opacity(queueRevealProgress)
+                        .offset(x: 10 - (1 - queueRevealProgress) * 8)
+                        .animation(
+                            .spring(response: 0.22, dampingFraction: 0.72),
+                            value: isQueueArmed
+                        )
+                    }
+            }
+            .accessibilityHidden(true)
+    }
+
+    private var queueRevealProgress: CGFloat {
+        min(max(horizontalOffset / Self.queueActivationDistance, 0), 1)
+    }
+
+    private var queueActionScale: CGFloat {
+        let revealScale = 0.72 + (0.28 * queueRevealProgress)
+        return isQueueArmed ? revealScale * 1.1 : revealScale
+    }
+
+    private var queuePanGesture: HorizontalPanGesture {
+        HorizontalPanGesture(
+            onChanged: handleDragChanged,
+            onEnded: handleDragEnded,
+            onCancelled: handleDragCancelled
+        )
     }
 
     private func playTrack() {
+        guard !isSuppressingTap else { return }
         playHapticTick &+= 1
         player.play(track: track, in: project)
+    }
+
+    private func showInfo() {
+        guard !isSuppressingTap else { return }
+        onShowInfo()
+    }
+
+    private func queueTrack() {
+        player.addToQueue(track, in: project)
+        toastCenter.showTrackQueued()
+        queueCompletionHapticTick &+= 1
+    }
+
+    private func handleDragChanged(_ translation: CGPoint) {
+        tapSuppressionGeneration &+= 1
+        isSuppressingTap = true
+
+        horizontalOffset = resistedOffset(for: translation.x)
+        let shouldArm = horizontalOffset >= Self.queueActivationDistance
+        if shouldArm, !isQueueArmed {
+            queueThresholdHapticTick &+= 1
+        }
+        isQueueArmed = shouldArm
+    }
+
+    private func handleDragEnded(_ translation: CGPoint, _ predictedEndTranslation: CGPoint) {
+        defer {
+            releaseTapSuppressionAfterGesture()
+        }
+
+        let projectedOffset = resistedOffset(for: predictedEndTranslation.x)
+        let shouldQueue = isQueueArmed
+            || (horizontalOffset >= Self.minimumProjectedCommitDistance
+                && projectedOffset >= Self.queueActivationDistance)
+
+        if shouldQueue {
+            queueTrack()
+        }
+
+        withAnimation(.spring(response: 0.34, dampingFraction: 0.82)) {
+            horizontalOffset = 0
+            isQueueArmed = false
+        }
+    }
+
+    private func handleDragCancelled() {
+        withAnimation(.spring(response: 0.34, dampingFraction: 0.82)) {
+            horizontalOffset = 0
+            isQueueArmed = false
+        }
+        releaseTapSuppressionAfterGesture()
+    }
+
+    private func releaseTapSuppressionAfterGesture() {
+        let generation = tapSuppressionGeneration
+        Task { @MainActor in
+            // A Button's action can be delivered shortly after the pan ends. Keep
+            // suppressing it through that post-gesture window so a swipe-to-queue
+            // can never also become a play tap.
+            try? await Task.sleep(for: .milliseconds(300))
+            guard generation == tapSuppressionGeneration else { return }
+            isSuppressingTap = false
+        }
+    }
+
+    private func resistedOffset(for translation: CGFloat) -> CGFloat {
+        if translation < 0 {
+            return -rubberBandDistance(-translation, dimension: 36)
+        }
+
+        guard translation > Self.maximumDirectReveal else { return translation }
+        return Self.maximumDirectReveal
+            + rubberBandDistance(
+                translation - Self.maximumDirectReveal,
+                dimension: 64
+            )
+    }
+
+    /// Mirrors UIKit-style rubber banding: movement remains responsive near zero,
+    /// then approaches a finite limit as the drag continues.
+    private func rubberBandDistance(_ distance: CGFloat, dimension: CGFloat) -> CGFloat {
+        let normalizedDistance = distance * 0.55 / dimension
+        return dimension * (1 - (1 / (normalizedDistance + 1)))
     }
 
     @ViewBuilder
@@ -794,6 +953,59 @@ private struct TrackRow: View {
             Text("\(index)")
                 .font(.system(size: 14, weight: .medium).monospacedDigit())
                 .foregroundStyle(.secondary)
+        }
+    }
+}
+
+/// A pan recognizer that only begins for horizontal movement. Rejecting vertical
+/// movement before recognition lets an enclosing vertical ScrollView own the drag.
+private struct HorizontalPanGesture: UIGestureRecognizerRepresentable {
+    let onChanged: (CGPoint) -> Void
+    let onEnded: (CGPoint, CGPoint) -> Void
+    let onCancelled: () -> Void
+
+    func makeCoordinator(converter: CoordinateSpaceConverter) -> Coordinator {
+        Coordinator()
+    }
+
+    func makeUIGestureRecognizer(context: Context) -> UIPanGestureRecognizer {
+        let recognizer = UIPanGestureRecognizer()
+        recognizer.delegate = context.coordinator
+        recognizer.maximumNumberOfTouches = 1
+        return recognizer
+    }
+
+    func handleUIGestureRecognizerAction(
+        _ recognizer: UIPanGestureRecognizer,
+        context: Context
+    ) {
+        let translation = recognizer.translation(in: recognizer.view)
+
+        switch recognizer.state {
+        case .began, .changed:
+            onChanged(translation)
+        case .ended:
+            let velocity = recognizer.velocity(in: recognizer.view)
+            let predictedEndTranslation = CGPoint(
+                x: translation.x + velocity.x / 4,
+                y: translation.y + velocity.y / 4
+            )
+            onEnded(translation, predictedEndTranslation)
+        case .cancelled, .failed:
+            onCancelled()
+        default:
+            break
+        }
+    }
+
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+        func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+            guard let pan = gestureRecognizer as? UIPanGestureRecognizer else {
+                return false
+            }
+
+            let velocity = pan.velocity(in: pan.view)
+            return abs(velocity.x) > abs(velocity.y) * 1.15
         }
     }
 }

@@ -33,6 +33,7 @@ final class ProjectSyncService {
 
     private var listener: ListenerRegistration?
     private var pushTask: Task<Void, Never>?
+    private var audioRepairTask: Task<Void, Never>?
     private var lastSyncedUpdated: [UUID: Date] = [:]
     private var applyingRemote = false
     private var uploadTasks: [UUID: Task<Void, Never>] = [:]
@@ -50,6 +51,7 @@ final class ProjectSyncService {
     var isActive: Bool {
         isPushing
             || pushTask != nil
+            || audioRepairTask != nil
             || !uploadTasks.isEmpty
             || !coverUploadTasks.isEmpty
             || hasPendingCloudWork
@@ -146,6 +148,7 @@ final class ProjectSyncService {
         }
 
         schedulePush()
+        scheduleMissingAudioRepair()
     }
 
     func stop() {
@@ -153,6 +156,8 @@ final class ProjectSyncService {
         listener = nil
         pushTask?.cancel()
         pushTask = nil
+        audioRepairTask?.cancel()
+        audioRepairTask = nil
         isPushing = false
         uploadTasks.values.forEach { $0.cancel() }
         uploadTasks.removeAll()
@@ -174,6 +179,62 @@ final class ProjectSyncService {
             await self.pushPendingProjects()
             self.pushTask = nil
             self.notifyActivityChanged()
+        }
+    }
+
+    /// Repairs cloud objects that disappeared while their Firestore
+    /// `storagePath` remained intact. Without this check iOS keeps playing its
+    /// local cache, but web playback receives `storage/object-not-found`.
+    func scheduleMissingAudioRepair() {
+        guard audioRepairTask == nil else { return }
+        audioRepairTask = Task { [weak self] in
+            defer {
+                self?.audioRepairTask = nil
+                self?.notifyActivityChanged()
+            }
+            await self?.repairMissingAudioObjects()
+        }
+        notifyActivityChanged()
+    }
+
+    private func repairMissingAudioObjects() async {
+        if let canUploadAudioProvider, !canUploadAudioProvider() { return }
+
+        let projects = snapshotProvider().filter { !$0.isShared }
+        for project in projects {
+            for track in project.tracks {
+                for version in uploadCandidates(in: track) {
+                    guard !Task.isCancelled else { return }
+                    guard let storagePath = version.storagePath else { continue }
+
+                    let localURL = audioDirectory.appendingPathComponent(version.fileName)
+                    guard FileManager.default.fileExists(atPath: localURL.path) else { continue }
+
+                    do {
+                        let exists = try await AudioFileCache.shared.objectExists(
+                            storagePath: storagePath
+                        )
+                        guard !exists else { continue }
+
+                        if !track.versions.isEmpty {
+                            try await writeVersionAccess(
+                                projectID: project.id,
+                                version: version
+                            )
+                        }
+                        _ = try await AudioFileCache.shared.upload(
+                            localURL: localURL,
+                            to: storagePath,
+                            contentType: mimeType(for: version.fileExtension)
+                        )
+                    } catch {
+                        print(
+                            "ProjectSyncService: missing audio repair failed for "
+                            + "\(version.id) — \(error)"
+                        )
+                    }
+                }
+            }
         }
     }
 

@@ -8,7 +8,7 @@ enum PlayerChrome {
 @Observable
 @MainActor
 final class PlayerToastCenter {
-    struct Toast: Equatable {
+    struct Toast: Equatable, Identifiable {
         enum Icon: Equatable {
             case system(String)
             case spinner
@@ -19,9 +19,11 @@ final class PlayerToastCenter {
         let icon: Icon
     }
 
-    private(set) var toast: Toast?
-    private var hideTask: Task<Void, Never>?
+    private(set) var toasts: [Toast] = []
+    private var hideTasks: [UUID: Task<Void, Never>] = [:]
     private var activeImports: [UUID: Int] = [:]
+
+    private static let maximumVisibleToastCount = 3
 
     func showTrackQueued() {
         show(
@@ -46,7 +48,6 @@ final class PlayerToastCenter {
     /// dismiss this exact toast when its background work completes.
     @discardableResult
     func showImporting(fileCount: Int) -> UUID {
-        hideTask?.cancel()
         let id = UUID()
         activeImports[id] = max(fileCount, 1)
         updateImportToast()
@@ -56,8 +57,8 @@ final class PlayerToastCenter {
     func finishImporting(id: UUID) {
         guard activeImports.removeValue(forKey: id) != nil else { return }
         if activeImports.isEmpty {
-            guard toast?.icon == .spinner else { return }
-            hideAnimated()
+            guard let toast = toasts.first(where: { $0.icon == .spinner }) else { return }
+            hideAnimated(id: toast.id)
         } else {
             updateImportToast()
         }
@@ -66,30 +67,49 @@ final class PlayerToastCenter {
     private func updateImportToast() {
         let fileCount = activeImports.values.reduce(0, +)
         let message = fileCount == 1 ? "Importing track…" : "Importing tracks…"
-        let toastID = toast?.icon == .spinner ? toast?.id ?? UUID() : UUID()
-        withAnimation(.spring(response: 0.4, dampingFraction: 0.86)) {
-            toast = Toast(id: toastID, message: message, icon: .spinner)
+
+        if let index = toasts.firstIndex(where: { $0.icon == .spinner }) {
+            let toastID = toasts[index].id
+            withAnimation(.spring(response: 0.4, dampingFraction: 0.86)) {
+                toasts[index] = Toast(id: toastID, message: message, icon: .spinner)
+            }
+        } else {
+            push(Toast(id: UUID(), message: message, icon: .spinner))
         }
     }
 
     func show(message: String, systemImage: String) {
-        // Import status is persistent and has priority until every active batch
-        // has completed.
-        guard activeImports.isEmpty else { return }
-        hideTask?.cancel()
-        withAnimation(.spring(response: 0.4, dampingFraction: 0.86)) {
-            toast = Toast(id: UUID(), message: message, icon: .system(systemImage))
-        }
-        hideTask = Task {
+        let toast = Toast(id: UUID(), message: message, icon: .system(systemImage))
+        push(toast)
+
+        hideTasks[toast.id] = Task { [weak self] in
             try? await Task.sleep(for: .seconds(2.2))
             guard !Task.isCancelled else { return }
-            hideAnimated()
+            self?.hideAnimated(id: toast.id)
         }
     }
 
-    private func hideAnimated() {
+    private func push(_ toast: Toast) {
+        var evictedToastID: UUID?
+
+        withAnimation(.spring(response: 0.4, dampingFraction: 0.86)) {
+            if toasts.count == Self.maximumVisibleToastCount {
+                evictedToastID = toasts.removeFirst().id
+            }
+            toasts.append(toast)
+        }
+
+        if let evictedToastID {
+            hideTasks.removeValue(forKey: evictedToastID)?.cancel()
+        }
+    }
+
+    private func hideAnimated(id: UUID) {
+        hideTasks.removeValue(forKey: id)?.cancel()
+        guard let index = toasts.firstIndex(where: { $0.id == id }) else { return }
+
         withAnimation(.easeOut(duration: 0.28)) {
-            toast = nil
+            _ = toasts.remove(at: index)
         }
     }
 }

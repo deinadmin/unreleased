@@ -84,6 +84,25 @@ actor AudioFileCache {
         return objectMeta.size
     }
 
+    /// Checks whether a recorded Storage path still points at an object.
+    ///
+    /// A track can remain playable on this device from its disk cache after the
+    /// server object has been removed (for example by quota enforcement). Cloud
+    /// sync uses this to repair that otherwise invisible broken state.
+    func objectExists(storagePath: String) async throws -> Bool {
+        do {
+            _ = try await CloudPaths.storageReference(storagePath: storagePath).getMetadata()
+            return true
+        } catch {
+            let nsError = error as NSError
+            if nsError.domain == StorageErrorDomain,
+               nsError.code == StorageErrorCode.objectNotFound.rawValue {
+                return false
+            }
+            throw error
+        }
+    }
+
     func delete(storagePath: String) async {
         try? await CloudPaths.storageReference(storagePath: storagePath).delete()
     }

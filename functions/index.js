@@ -330,7 +330,7 @@ function buildMessage(data) {
 // `unreleased/Models/UserPlan.swift`. `null` means unlimited (no cap).
 const PLAN_STORAGE_LIMITS = {
   free: 1_000_000_000, // 1 GB
-  premium: 20_000_000_000, // 20 GB
+  premium: 30_000_000_000, // 30 GB
   unlimited: null,
 };
 
