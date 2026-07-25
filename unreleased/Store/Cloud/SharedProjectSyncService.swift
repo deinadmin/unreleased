@@ -1,26 +1,68 @@
 import FirebaseFirestore
 import Foundation
 
+struct SharedProjectReference: Hashable, Sendable {
+    let ownerID: String
+    let projectID: UUID
+}
+
 /// Manages real-time Firestore listeners for projects shared from other users.
 /// Each listener watches a single document at `users/{ownerID}/projects/{projectID}`.
 @MainActor
 final class SharedProjectSyncService {
     typealias ProjectUpdater = (_ project: Project) -> Void
     typealias ProjectRemover = (_ projectID: UUID) -> Void
+    typealias ReferencesUpdater = (_ references: [SharedProjectReference]) -> Void
 
     private let projectUpdater: ProjectUpdater
     private let projectRemover: ProjectRemover
+    private let referencesUpdater: ReferencesUpdater
     private var listeners: [UUID: ListenerRegistration] = [:]
+    private var referencesListener: ListenerRegistration?
+    private var referencesUserID: String?
 
     init(
         projectUpdater: @escaping ProjectUpdater,
-        projectRemover: @escaping ProjectRemover
+        projectRemover: @escaping ProjectRemover,
+        referencesUpdater: @escaping ReferencesUpdater
     ) {
         self.projectUpdater = projectUpdater
         self.projectRemover = projectRemover
+        self.referencesUpdater = referencesUpdater
     }
 
     // MARK: - Subscription management
+
+    /// Watches the account-level shared-project index used by every client.
+    /// Older iOS installs stored shared projects only in local JSON; when the
+    /// server index has never existed, seed it once from those local entries.
+    func startReferenceSync(
+        userID: String,
+        seedReferences: [SharedProjectReference]
+    ) async {
+        referencesListener?.remove()
+        referencesListener = nil
+        referencesUserID = userID
+
+        let canStartListener = await ProjectInviteService.seedSharedReferencesIfNeeded(
+            userID: userID,
+            references: seedReferences
+        )
+        guard referencesUserID == userID, canStartListener else { return }
+
+        let doc = CloudPaths.sharedProjectsDocument(userID: userID)
+        referencesListener = doc.addSnapshotListener { [weak self] snapshot, error in
+            guard let self else { return }
+            Task { @MainActor in
+                guard self.referencesUserID == userID else { return }
+                if let error {
+                    print("SharedProjectSyncService: references listener failed — \(error)")
+                    return
+                }
+                self.referencesUpdater(Self.decodeReferences(snapshot?.data()))
+            }
+        }
+    }
 
     func subscribe(ownerID: String, projectID: UUID) {
         guard listeners[projectID] == nil else { return }
@@ -63,6 +105,9 @@ final class SharedProjectSyncService {
     }
 
     func stop() {
+        referencesUserID = nil
+        referencesListener?.remove()
+        referencesListener = nil
         listeners.values.forEach { $0.remove() }
         listeners.removeAll()
     }
@@ -83,6 +128,18 @@ final class SharedProjectSyncService {
         } catch {
             print("SharedProjectSyncService: fetch failed for \(projectID) — \(error)")
             return nil
+        }
+    }
+
+    private static func decodeReferences(_ data: [String: Any]?) -> [SharedProjectReference] {
+        guard let refs = data?["refs"] as? [String: Any] else { return [] }
+        return refs.compactMap { projectID, rawValue in
+            guard let id = UUID(uuidString: projectID),
+                  let value = rawValue as? [String: Any],
+                  let ownerID = value["ownerID"] as? String,
+                  !ownerID.isEmpty
+            else { return nil }
+            return SharedProjectReference(ownerID: ownerID, projectID: id)
         }
     }
 }

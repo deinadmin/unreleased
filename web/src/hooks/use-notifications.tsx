@@ -11,6 +11,7 @@ import {
 } from "firebase/firestore"
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react"
 import { useAuth } from "@/hooks/use-auth"
+import { decodeGradient } from "@/lib/codec"
 import { db } from "@/lib/firebase"
 import type { AppNotification } from "@/lib/types"
 
@@ -66,6 +67,11 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
                 projectID: data.projectID,
                 projectName:
                   typeof data.projectName === "string" ? data.projectName : "a project",
+                projectGradient: decodeGradient(data.projectGradient) ?? undefined,
+                coverStoragePath:
+                  typeof data.coverStoragePath === "string"
+                    ? data.coverStoragePath
+                    : undefined,
                 createdAt:
                   data.createdAt instanceof Timestamp ? data.createdAt.toDate() : new Date(),
                 read: data.read === true,

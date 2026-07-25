@@ -7,7 +7,7 @@ import { useMediaQuery } from "@/hooks/use-media-query"
 import { useProjects } from "@/hooks/use-projects"
 import { formatDuration, formatPlaybackTime } from "@/lib/format"
 import type { Project, Track } from "@/lib/types"
-import { cn } from "@/lib/utils"
+import { cn, isTypingTarget } from "@/lib/utils"
 import { usePlayer } from "@/player/player-provider"
 
 type PlayerValue = ReturnType<typeof usePlayer>
@@ -38,15 +38,40 @@ export function PlayerDock() {
     return () => document.body.classList.remove("player-sidebar-open")
   }, [expanded, isDesktop])
 
-  // Close the maximized player with Escape.
+  // Close the maximized player with Escape — unless a modal layer (dialog,
+  // context menu) is open, in which case that layer consumes the press and
+  // the next one closes the player.
   useEffect(() => {
     if (!expanded) return
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") player.setExpanded(false)
+      if (event.key !== "Escape" || event.defaultPrevented) return
+      const modalOpen = document.querySelector(
+        '[data-slot="dialog-content"][data-state="open"], [role="menu"]',
+      )
+      if (modalOpen) return
+      player.setExpanded(false)
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
   }, [expanded, player])
+
+  // Space toggles playback anywhere on the page, except while typing or when
+  // an interactive element is focused (Space already activates those).
+  const hasTrackRef = useRef(hasTrack)
+  hasTrackRef.current = hasTrack
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.code !== "Space" || event.repeat || event.defaultPrevented) return
+      if (event.metaKey || event.ctrlKey || event.altKey) return
+      if (!hasTrackRef.current || isTypingTarget(event.target)) return
+      const target = event.target instanceof HTMLElement ? event.target : null
+      if (target?.closest("button, a, [role='button'], [role='menuitem']")) return
+      event.preventDefault()
+      player.togglePlayPause()
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [player])
 
   if (!player.track || !player.project) return null
 
@@ -54,11 +79,13 @@ export function PlayerDock() {
   const project = projects.find((p) => p.id === player.project!.id) ?? player.project
   const track = project.tracks.find((t) => t.id === player.track!.id) ?? player.track
 
-  // Notes are only editable on the user's own projects.
+  // Notes are only editable on the user's own projects; shared projects in
+  // the library open the same page read-only.
   const canEditNotes = !project.ownerID
-  const openNotesEditor = canEditNotes
+  const inLibrary = projects.some((p) => p.id === project.id)
+  const openNotes = inLibrary
     ? () => {
-        // The editor is a route on the main screen, so collapse the
+        // The notes page is a route on the main screen, so collapse the
         // full-screen player on small devices first.
         if (!isDesktop) player.setExpanded(false)
         navigate(`/project/${project.id}/notes/${track.id}`)
@@ -73,7 +100,8 @@ export function PlayerDock() {
           project={project}
           track={track}
           expanded={expanded}
-          onEditNotes={openNotesEditor}
+          onOpenNotes={openNotes}
+          canEditNotes={canEditNotes}
         />
       ) : (
         <FullscreenPlayer
@@ -81,7 +109,8 @@ export function PlayerDock() {
           project={project}
           track={track}
           expanded={expanded}
-          onEditNotes={openNotesEditor}
+          onOpenNotes={openNotes}
+          canEditNotes={canEditNotes}
         />
       )}
 
@@ -185,7 +214,7 @@ function ProgressSection({ player, track }: { player: PlayerValue; track: Track 
           </div>
         )}
         <div
-          className="group flex h-6 cursor-pointer touch-none items-center"
+          className="group flex h-6 cursor-default touch-none items-center"
           onPointerDown={(event) => {
             event.currentTarget.setPointerCapture(event.pointerId)
             const fraction = fractionFromEvent(event)
@@ -227,15 +256,18 @@ function ProgressSection({ player, track }: { player: PlayerValue; track: Track 
 /**
  * Bottom-aligned preview of the track's notes: an 8-line window that scrolls
  * for longer notes, fading out at the bottom while more content is below.
- * Clicking it opens the notes editor when `onEdit` is provided.
+ * Clicking it opens the notes page when `onOpen` is provided (the editor for
+ * own projects, the read-only view for shared ones).
  */
 function NotesPreview({
   notes,
-  onEdit,
+  onOpen,
+  editable,
   className,
 }: {
   notes: string
-  onEdit?: () => void
+  onOpen?: () => void
+  editable?: boolean
   className?: string
 }) {
   const ref = useRef<HTMLDivElement>(null)
@@ -254,21 +286,21 @@ function NotesPreview({
   return (
     <div
       ref={ref}
-      role={onEdit ? "button" : undefined}
-      tabIndex={onEdit ? 0 : undefined}
-      aria-label={onEdit ? "Edit notes" : undefined}
-      onClick={onEdit}
+      role={onOpen ? "button" : undefined}
+      tabIndex={onOpen ? 0 : undefined}
+      aria-label={onOpen ? (editable ? "Edit notes" : "View notes") : undefined}
+      onClick={onOpen}
       onKeyDown={
-        onEdit
+        onOpen
           ? (event) => {
-              if (event.key === "Enter") onEdit()
+              if (event.key === "Enter") onOpen()
             }
           : undefined
       }
       onScroll={updateFade}
       className={cn(
         "max-h-40 overflow-y-auto overscroll-contain whitespace-pre-wrap text-[13px] leading-5 text-white/60 [scrollbar-width:thin]",
-        onEdit && "cursor-pointer outline-none transition-colors hover:text-white/85 focus:outline-none focus:ring-0",
+        onOpen && "cursor-default outline-none transition-colors hover:text-white/85 focus:outline-none focus:ring-0",
         className,
       )}
       style={{
@@ -350,12 +382,14 @@ function TransportControls({
 function CollapsibleNotes({
   visible,
   notes,
-  onEdit,
+  onOpen,
+  canEdit,
   notesClassName,
 }: {
   visible: boolean
   notes: string
-  onEdit?: () => void
+  onOpen?: () => void
+  canEdit?: boolean
   notesClassName?: string
 }) {
   return (
@@ -373,11 +407,16 @@ function CollapsibleNotes({
         inert={!visible || undefined}
       >
         {notes.trim() ? (
-          <NotesPreview notes={notes} onEdit={onEdit} className={cn("mt-6", notesClassName)} />
-        ) : onEdit ? (
+          <NotesPreview
+            notes={notes}
+            onOpen={onOpen}
+            editable={canEdit}
+            className={cn("mt-6", notesClassName)}
+          />
+        ) : canEdit && onOpen ? (
           <button
             type="button"
-            onClick={onEdit}
+            onClick={onOpen}
             className="mt-6 flex w-full items-center justify-center gap-1.5 rounded-full bg-white/10 px-3.5 py-2 text-[12px] font-semibold text-white/55 transition hover:bg-white/15 hover:text-white/85 active:scale-95"
           >
             <Plus className="size-3.5" strokeWidth={2.5} />
@@ -395,15 +434,18 @@ function SidebarPlayer({
   project,
   track,
   expanded,
-  onEditNotes,
+  onOpenNotes,
+  canEditNotes,
 }: {
   player: PlayerValue
   project: Project
   track: Track
   expanded: boolean
-  onEditNotes?: () => void
+  onOpenNotes?: () => void
+  canEditNotes?: boolean
 }) {
   const [showNotes, setShowNotes] = useState(true)
+  const canToggleNotes = Boolean(canEditNotes) || track.notes.trim().length > 0
   return (
     <aside
       aria-label="Now playing"
@@ -445,7 +487,12 @@ function SidebarPlayer({
           <span className="max-w-full truncate text-lg font-bold">{track.title}</span>
           <span className="max-w-full truncate text-[13px] text-white/55">{project.name}</span>
         </div>
-        <CollapsibleNotes visible={showNotes} notes={track.notes} onEdit={onEditNotes} />
+        <CollapsibleNotes
+          visible={showNotes}
+          notes={track.notes}
+          onOpen={onOpenNotes}
+          canEdit={canEditNotes}
+        />
       </div>
 
       <div className="px-8 pb-10 pt-4">
@@ -454,7 +501,7 @@ function SidebarPlayer({
           <TransportControls
             player={player}
             notesVisible={showNotes}
-            onToggleNotes={() => setShowNotes((v) => !v)}
+            onToggleNotes={canToggleNotes ? () => setShowNotes((v) => !v) : undefined}
           />
         </div>
       </div>
@@ -468,15 +515,18 @@ function FullscreenPlayer({
   project,
   track,
   expanded,
-  onEditNotes,
+  onOpenNotes,
+  canEditNotes,
 }: {
   player: PlayerValue
   project: Project
   track: Track
   expanded: boolean
-  onEditNotes?: () => void
+  onOpenNotes?: () => void
+  canEditNotes?: boolean
 }) {
   const [showNotes, setShowNotes] = useState(true)
+  const canToggleNotes = Boolean(canEditNotes) || track.notes.trim().length > 0
   return (
     <div
       aria-label="Now playing"
@@ -514,7 +564,8 @@ function FullscreenPlayer({
         <CollapsibleNotes
           visible={showNotes}
           notes={track.notes}
-          onEdit={onEditNotes}
+          onOpen={onOpenNotes}
+          canEdit={canEditNotes}
           notesClassName="max-h-30"
         />
       </div>
@@ -526,7 +577,7 @@ function FullscreenPlayer({
         <TransportControls
           player={player}
           notesVisible={showNotes}
-          onToggleNotes={() => setShowNotes((v) => !v)}
+          onToggleNotes={canToggleNotes ? () => setShowNotes((v) => !v) : undefined}
         />
       </div>
     </div>

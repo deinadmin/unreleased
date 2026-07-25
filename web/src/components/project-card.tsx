@@ -22,7 +22,7 @@ export function ProjectCard({ project }: { project: Project }) {
   }
 
   return (
-    <Link to={`/project/${project.id}`} className="group block select-none">
+    <Link to={`/project/${project.id}`} className="group block cursor-default select-none">
       <div className="relative aspect-square overflow-hidden rounded-2xl transition-transform duration-300 ease-out group-hover:scale-[1.015] group-active:scale-[0.98]">
         <CoverThumbnail project={project} className="h-full w-full rounded-2xl" />
 

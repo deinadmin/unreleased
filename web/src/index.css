@@ -128,6 +128,16 @@
   * {
     @apply border-border outline-ring/50;
     }
+  a,
+  button,
+  [role="button"],
+  [role="link"],
+  input[type="button"],
+  input[type="submit"],
+  input[type="reset"],
+  input[type="file"]::file-selector-button {
+    cursor: default !important;
+    }
   body {
     @apply bg-background text-foreground;
     -webkit-font-smoothing: antialiased;

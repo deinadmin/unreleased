@@ -9,9 +9,9 @@ import { useProject, useProjects } from "@/hooks/use-projects"
 import { updateTrackNotes } from "@/lib/project-edits"
 
 /**
- * Full-page notes editor for a track (own projects only). The textarea is
- * borderless so the notes read like page content, and edits auto-save shortly
- * after typing stops (plus a flush on leave).
+ * Full-page notes editor for a track. The textarea is borderless so the notes
+ * read like page content, and edits auto-save shortly after typing stops
+ * (plus a flush on leave). Shared projects render the same page read-only.
  */
 export function TrackNotesPage() {
   // Remount the editor whenever the target track changes so draft state (and
@@ -29,9 +29,11 @@ function TrackNotesEditor() {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   // null = untouched draft; falls back to the track's stored notes.
   const [draft, setDraft] = useState<string | null>(null)
+  // Notes on shared projects are view-only.
+  const readOnly = Boolean(project?.ownerID)
 
   // Focus the editor with the cursor at the end once the track has loaded.
-  const ready = Boolean(project && track)
+  const ready = Boolean(project && track) && !readOnly
   useEffect(() => {
     if (!ready) return
     const el = textareaRef.current
@@ -42,7 +44,7 @@ function TrackNotesEditor() {
 
   const persist = useCallback(
     async (notes: string) => {
-      if (!user || !project || !track) return
+      if (!user || !project || !track || project.ownerID) return
       try {
         await updateTrackNotes(user.uid, project, track.id, notes)
       } catch (error) {
@@ -121,13 +123,23 @@ function TrackNotesEditor() {
           <h1 className="text-[22px] font-bold">Notes</h1>
           <p className="pt-1 text-[13px] text-muted-foreground">{track.title}</p>
 
-          <textarea
-            ref={textareaRef}
-            value={value}
-            placeholder="Start to type…"
-            onChange={(event) => setDraft(event.target.value)}
-            className="mt-8 w-full min-h-0 flex-1 resize-none border-none bg-transparent p-0 pb-[max(1.5rem,env(safe-area-inset-bottom))] text-[15px] leading-7 outline-none placeholder:text-muted-foreground/60"
-          />
+          {readOnly ? (
+            <div className="mt-8 w-full min-h-0 flex-1 cursor-default select-none overflow-y-auto whitespace-pre-wrap pb-[max(1.5rem,env(safe-area-inset-bottom))] text-[15px] leading-7">
+              {track.notes.trim() ? (
+                track.notes
+              ) : (
+                <span className="text-muted-foreground/60">No notes yet</span>
+              )}
+            </div>
+          ) : (
+            <textarea
+              ref={textareaRef}
+              value={value}
+              placeholder="Start to type…"
+              onChange={(event) => setDraft(event.target.value)}
+              className="mt-8 w-full min-h-0 flex-1 resize-none border-none bg-transparent p-0 pb-[max(1.5rem,env(safe-area-inset-bottom))] text-[15px] leading-7 outline-none placeholder:text-muted-foreground/60"
+            />
+          )}
         </section>
       </main>
     </div>

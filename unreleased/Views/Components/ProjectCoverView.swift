@@ -1,3 +1,4 @@
+import FirebaseStorage
 import SwiftUI
 
 // MARK: - Project Cover
@@ -186,5 +187,51 @@ struct ProjectCoverThumbnail: View {
             }
         }
         .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+    }
+}
+
+/// A project cover stored in Firebase Storage with a gradient-first fallback.
+/// Invite previews use this before the recipient can read the full project.
+struct CloudProjectCoverThumbnail: View {
+    let gradient: GradientTheme
+    let coverStoragePath: String?
+    var size: CGFloat = 56
+    var cornerRadius: CGFloat = 12
+
+    @State private var coverURL: URL?
+
+    private var coverShape: RoundedRectangle {
+        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+    }
+
+    var body: some View {
+        ZStack {
+            coverShape
+                .fill(gradient.gradient)
+
+            if let coverURL {
+                AsyncImage(url: coverURL) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image
+                            .resizable()
+                            .scaledToFill()
+                    case .empty, .failure:
+                        Color.clear
+                    @unknown default:
+                        Color.clear
+                    }
+                }
+            }
+        }
+        .frame(width: size, height: size)
+        .clipShape(coverShape)
+        .task(id: coverStoragePath) {
+            coverURL = nil
+            guard let coverStoragePath else { return }
+            coverURL = try? await CloudPaths.storageReference(
+                storagePath: coverStoragePath
+            ).downloadURL()
+        }
     }
 }

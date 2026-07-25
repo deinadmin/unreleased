@@ -1,6 +1,14 @@
-import { collection, doc, onSnapshot, orderBy, query } from "firebase/firestore"
+import {
+  collection,
+  doc,
+  getDocFromServer,
+  onSnapshot,
+  orderBy,
+  query,
+} from "firebase/firestore"
 import {
   createContext,
+  useCallback,
   useContext,
   useEffect,
   useMemo,
@@ -17,15 +25,41 @@ import { sharedPlayableProject, type Project } from "@/lib/types"
 interface ProjectsContextValue {
   projects: Project[]
   loading: boolean
+  materializeSharedProject: (ownerID: string, projectID: string) => Promise<Project | null>
 }
 
-const ProjectsContext = createContext<ProjectsContextValue>({ projects: [], loading: true })
+const ProjectsContext = createContext<ProjectsContextValue>({
+  projects: [],
+  loading: true,
+  materializeSharedProject: async () => null,
+})
 
 export function ProjectsProvider({ children }: { children: ReactNode }) {
   const { user, isSignedIn } = useAuth()
   const [ownProjects, setOwnProjects] = useState<Project[]>([])
   const [sharedProjects, setSharedProjects] = useState<Map<string, Project>>(new Map())
   const [loading, setLoading] = useState(true)
+
+  /**
+   * Loads an accepted shared project directly into the context. Acceptance uses
+   * this before navigating so the destination route never observes a temporary
+   * "missing" project while the shared-reference listener catches up.
+   */
+  const materializeSharedProject = useCallback(
+    async (ownerID: string, rawProjectID: string): Promise<Project | null> => {
+      const projectID = normalizeProjectID(rawProjectID)
+      const snapshot = await getDocFromServer(
+        doc(db, "users", ownerID, "projects", projectID),
+      )
+      if (!snapshot.exists()) return null
+      const decoded = await decodeProject(snapshot.data())
+      if (!decoded) return null
+      const project = sharedPlayableProject({ ...decoded, ownerID })
+      setSharedProjects((prev) => new Map(prev).set(projectID, project))
+      return project
+    },
+    [],
+  )
 
   // Own projects.
   useEffect(() => {
@@ -114,14 +148,12 @@ export function ProjectsProvider({ children }: { children: ReactNode }) {
               const project = sharedPlayableProject({ ...decoded, ownerID })
               setSharedProjects((prev) => new Map(prev).set(projectID, project))
             },
-            () => {
-              // Permission denied — owner revoked access. Remove locally.
-              setSharedProjects((prev) => {
-                const next = new Map(prev)
-                next.delete(projectID)
-                return next
-              })
-              listeners.get(projectID)?.()
+            (error) => {
+              // Never delete the authoritative shared reference because a
+              // listener failed: offline/transient errors are not revocations.
+              // Real revocations are removed by the server-side invitee-delete
+              // trigger and arrive through the shared-refs listener.
+              console.error(`shared project listener failed for ${projectID}`, error)
               listeners.delete(projectID)
             },
           )
@@ -143,7 +175,9 @@ export function ProjectsProvider({ children }: { children: ReactNode }) {
   }, [ownProjects, sharedProjects])
 
   return (
-    <ProjectsContext.Provider value={{ projects, loading }}>{children}</ProjectsContext.Provider>
+    <ProjectsContext.Provider value={{ projects, loading, materializeSharedProject }}>
+      {children}
+    </ProjectsContext.Provider>
   )
 }
 
@@ -153,5 +187,7 @@ export function useProjects(): ProjectsContextValue {
 
 export function useProject(projectID: string | undefined): Project | undefined {
   const { projects } = useProjects()
-  return projects.find((p) => p.id === projectID)
+  if (!projectID) return undefined
+  const normalizedID = normalizeProjectID(projectID)
+  return projects.find((project) => normalizeProjectID(project.id) === normalizedID)
 }

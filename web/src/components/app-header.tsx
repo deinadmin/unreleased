@@ -12,7 +12,7 @@ export function AppHeader() {
   const initial = (displayName || "u").charAt(0).toUpperCase()
 
   return (
-    <header className="sticky top-0 z-30 border-b border-border/60 bg-background/80 backdrop-blur-xl">
+    <header className="sticky top-0 z-30 border-b border-border/60 bg-background">
       <div className="mx-auto flex h-14 w-full max-w-6xl items-center justify-between px-4 sm:px-6">
         <Link to="/" className="flex items-center gap-2.5">
           <AppMark className="size-7" />
@@ -34,7 +34,7 @@ export function AppHeader() {
             <Link
               to="/profile"
               aria-label="Profile"
-              className="rounded-full outline-none transition hover:opacity-85 focus-visible:ring-2 focus-visible:ring-ring"
+              className="cursor-default rounded-full outline-none transition hover:opacity-85 focus-visible:ring-2 focus-visible:ring-ring"
             >
               <Avatar className="size-8.5">
                 {user.photoURL && <AvatarImage src={user.photoURL} alt={displayName} />}

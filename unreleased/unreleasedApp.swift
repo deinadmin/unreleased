@@ -64,14 +64,7 @@ struct unreleasedApp: App {
     }
 
     private func handleIncomingURL(_ url: URL) {
-        // unreleased://project/{ownerUID}/{projectID}
-        if url.scheme == "unreleased", url.host == "project" {
-            let parts = url.pathComponents.filter { $0 != "/" }
-            if parts.count == 2, let projectID = UUID(uuidString: parts[1]) {
-                linkRouter.receive(ownerID: parts[0], projectID: projectID)
-            }
-            return
-        }
+        if linkRouter.receive(url: url) { return }
 
         if url.scheme == "unreleased", url.host == "import" {
             importManager.loadPendingImportIfNeeded()

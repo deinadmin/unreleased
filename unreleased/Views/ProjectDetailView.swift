@@ -109,7 +109,7 @@ struct ProjectDetailView: View {
                 .tint(.primary)
         } message: { project in
             if project.isShared {
-                Text("This will remove the project from your library.")
+                Text("This will remove the project from your library on every device.")
             } else {
                 Text("This will permanently delete the project and all of its tracks.")
             }
@@ -336,7 +336,11 @@ struct ProjectDetailView: View {
                             showDeleteConfirm = true
                         } label: {
                             if project.isShared {
-                                Label("Leave Project", systemImage: "person.fill.xmark")
+                                Label {
+                                    Text("Leave Project")
+                                } icon: {
+                                    RedProjectDetailLeaveMenuIcon()
+                                }
                             } else {
                                 Label {
                                     Text("Delete")
@@ -414,6 +418,15 @@ private struct ProjectHeaderDownloadState: Equatable {
 private struct RedProjectDetailTrashMenuIcon: View {
     var body: some View {
         if let image = UIImage(systemName: "trash")?
+            .withTintColor(.systemRed, renderingMode: .alwaysOriginal) {
+            Image(uiImage: image)
+        }
+    }
+}
+
+private struct RedProjectDetailLeaveMenuIcon: View {
+    var body: some View {
+        if let image = UIImage(systemName: "person.fill.xmark")?
             .withTintColor(.systemRed, renderingMode: .alwaysOriginal) {
             Image(uiImage: image)
         }

@@ -1,6 +1,7 @@
 import { Check, Copy, Search, X } from "lucide-react"
 import { useCallback, useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import {
   Dialog,
   DialogContent,
@@ -13,10 +14,10 @@ import { useAuth } from "@/hooks/use-auth"
 import {
   cancelInvite,
   ensurePreview,
-  fetchInvitees,
-  fetchPendingInvites,
   fetchPreview,
   inviteUser,
+  observeInvitees,
+  observePendingInvites,
   removeInvitee,
   searchUsers,
   setLinkEnabled as writeLinkEnabled,
@@ -64,15 +65,6 @@ export function ShareDialog({
     const preview = await fetchPreview(ownerUID, project.id)
     setLinkEnabled(preview?.linkEnabled ?? true)
     setLoadedLinkState(true)
-    if (isOwner) {
-      const [nextInvitees, nextPending] = await Promise.all([
-        fetchInvitees(ownerUID, project.id),
-        fetchPendingInvites(ownerUID, project.id),
-      ])
-      setInvitees(nextInvitees)
-      setPendingInvites(nextPending)
-      setLoadedListeners(true)
-    }
   }, [user, isOwner, project, ownerUID, displayUsername])
 
   useEffect(() => {
@@ -85,6 +77,39 @@ export function ShareDialog({
     setLoadedListeners(false)
     void load()
   }, [open, load])
+
+  useEffect(() => {
+    if (!open || !isOwner || !ownerUID) return
+    let inviteesLoaded = false
+    let pendingLoaded = false
+    const markLoaded = () => {
+      if (inviteesLoaded && pendingLoaded) setLoadedListeners(true)
+    }
+    const stopInvitees = observeInvitees(
+      ownerUID,
+      project.id,
+      (next) => {
+        inviteesLoaded = true
+        setInvitees(next)
+        markLoaded()
+      },
+      (error) => console.error("invitees listener failed", error),
+    )
+    const stopPending = observePendingInvites(
+      ownerUID,
+      project.id,
+      (next) => {
+        pendingLoaded = true
+        setPendingInvites(next)
+        markLoaded()
+      },
+      (error) => console.error("pending invites listener failed", error),
+    )
+    return () => {
+      stopInvitees()
+      stopPending()
+    }
+  }, [open, isOwner, ownerUID, project.id])
 
   const scheduleSearch = (text: string) => {
     setSearchText(text)
@@ -108,7 +133,6 @@ export function ShareDialog({
     try {
       await inviteUser(recipient, project, ownerUID, displayUsername)
       setInvitedUIDs((prev) => new Set(prev).add(recipient.id))
-      setPendingInvites(await fetchPendingInvites(ownerUID, project.id))
     } catch {
       toast(`Couldn't invite @${recipient.username}. Please try again.`)
     } finally {
@@ -151,8 +175,17 @@ export function ShareDialog({
 
   const withdrawInvite = async (pending: PendingInviteInfo) => {
     setConfirmingRemoval(null)
-    await cancelInvite(ownerUID, project.id, pending.id, pending.notificationID)
-    setPendingInvites((prev) => prev.filter((p) => p.id !== pending.id))
+    try {
+      await cancelInvite(ownerUID, project.id, pending.id, pending.notificationID)
+      setPendingInvites((prev) => prev.filter((p) => p.id !== pending.id))
+      setInvitedUIDs((prev) => {
+        const next = new Set(prev)
+        next.delete(pending.id)
+        return next
+      })
+    } catch {
+      toast(`Couldn't withdraw the invite for @${pending.username}.`)
+    }
   }
 
   const totalListeners = invitees.length + pendingInvites.length
@@ -195,11 +228,13 @@ export function ShareDialog({
               <div className="mt-2.5 overflow-hidden rounded-[14px] bg-secondary">
                 {searchResults.map((result) => (
                   <div key={result.id} className="flex items-center gap-3 px-4 py-2.5">
-                    <InitialCircle name={result.username} />
+                    <InitialCircle name={result.username} photoURL={result.avatarURL} />
                     <span className="min-w-0 flex-1 truncate text-[15px] font-medium">
                       @{result.username}
                     </span>
-                    {invitedUIDs.has(result.id) ? (
+                    {invitedUIDs.has(result.id) ||
+                    pendingInvites.some((pending) => pending.id === result.id) ||
+                    invitees.some((invitee) => invitee.id === result.id) ? (
                       <span className="flex items-center gap-1 text-[13px] font-semibold text-green-600 dark:text-green-500">
                         <Check className="size-3.5" /> Invited
                       </span>
@@ -279,17 +314,6 @@ export function ShareDialog({
             </SectionTitle>
             {totalListeners > 0 && (
               <div className="overflow-hidden rounded-[14px] bg-secondary">
-                {invitees.map((invitee) => (
-                  <ListenerRow
-                    key={invitee.id}
-                    name={invitee.username}
-                    detail={`joined ${formatRelativeDate(invitee.acceptedAt)}`}
-                    confirmLabel="Remove"
-                    confirming={confirmingRemoval === invitee.id}
-                    onConfirmChange={(next) => setConfirmingRemoval(next ? invitee.id : null)}
-                    onConfirm={() => void removeListener(invitee)}
-                  />
-                ))}
                 {pendingInvites.map((pending) => (
                   <ListenerRow
                     key={pending.id}
@@ -299,6 +323,17 @@ export function ShareDialog({
                     confirming={confirmingRemoval === pending.id}
                     onConfirmChange={(next) => setConfirmingRemoval(next ? pending.id : null)}
                     onConfirm={() => void withdrawInvite(pending)}
+                  />
+                ))}
+                {invitees.map((invitee) => (
+                  <ListenerRow
+                    key={invitee.id}
+                    name={invitee.username}
+                    detail={`joined ${formatRelativeDate(invitee.acceptedAt)}`}
+                    confirmLabel="Remove"
+                    confirming={confirmingRemoval === invitee.id}
+                    onConfirmChange={(next) => setConfirmingRemoval(next ? invitee.id : null)}
+                    onConfirm={() => void removeListener(invitee)}
                   />
                 ))}
               </div>
@@ -316,11 +351,14 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
   )
 }
 
-function InitialCircle({ name }: { name: string }) {
+function InitialCircle({ name, photoURL }: { name: string; photoURL?: string }) {
   return (
-    <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-background text-[13px] font-semibold">
-      {(name.charAt(0) || "?").toUpperCase()}
-    </span>
+    <Avatar className="size-8 border-0 after:hidden">
+      {photoURL && <AvatarImage src={photoURL} alt="" className="object-cover" />}
+      <AvatarFallback className="bg-background text-[13px] font-semibold">
+        {(name.charAt(0) || "?").toUpperCase()}
+      </AvatarFallback>
+    </Avatar>
   )
 }
 

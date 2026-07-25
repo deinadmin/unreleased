@@ -10,6 +10,7 @@ struct ProjectPreview {
     let ownerUsername: String
     let projectName: String
     let gradient: GradientTheme
+    let coverStoragePath: String?
     let accentColorHex: String?
     /// When false the general share link no longer accepts new joins.
     /// Existing listeners keep their access. Defaults to true for older docs.
@@ -45,6 +46,7 @@ struct PendingInviteInfo: Identifiable, Equatable {
 struct UserSearchResult: Identifiable, Hashable {
     let id: String      // user UID
     let username: String
+    let avatarURL: URL?
 }
 
 // MARK: - Notifications
@@ -67,6 +69,8 @@ struct AppNotification: Identifiable, Equatable {
     let fromUsername: String
     let projectID: UUID
     let projectName: String
+    let projectGradient: GradientTheme?
+    let coverStoragePath: String?
     let createdAt: Date
     var read: Bool
 }

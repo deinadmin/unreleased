@@ -140,9 +140,12 @@ struct ProjectInviteSheet: View {
 
     private func coverRow(_ preview: ProjectPreview) -> some View {
         VStack(spacing: 14) {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(preview.gradient.gradient)
-                .frame(width: 80, height: 80)
+            CloudProjectCoverThumbnail(
+                gradient: preview.gradient,
+                coverStoragePath: preview.coverStoragePath,
+                size: 80,
+                cornerRadius: 18
+            )
                 .shadow(color: .black.opacity(0.12), radius: 10, y: 4)
 
             VStack(spacing: 4) {

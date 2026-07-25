@@ -1,16 +1,26 @@
-import { ChevronLeft, Pause, Play, Plus, Share } from "lucide-react"
+import { ChevronLeft, LogOut, MoreHorizontal, Pause, Play, Plus, Share } from "lucide-react"
 import { useState } from "react"
-import { Link, useParams } from "react-router-dom"
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom"
 import { toast } from "sonner"
 import { AppHeader } from "@/components/app-header"
 import { CoverDialog } from "@/components/cover-dialog"
 import { ProjectCover } from "@/components/project-cover"
 import { ShareDialog } from "@/components/share-dialog"
 import { TrackRow } from "@/components/track-row"
+import { Button } from "@/components/ui/button"
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useAuth } from "@/hooks/use-auth"
 import { useProject, useProjects } from "@/hooks/use-projects"
 import { formatProjectDuration } from "@/lib/format"
+import { leaveSharedProject } from "@/lib/invites"
+import { projectBackLink } from "@/lib/project-navigation"
 import { updateProjectName } from "@/lib/project-edits"
 import { projectAccent, trackCountText, type Project } from "@/lib/types"
 import { usePlayer } from "@/player/player-provider"
@@ -19,12 +29,18 @@ import { useUploads } from "@/uploads/uploads-provider"
 
 export function ProjectPage() {
   const { projectId } = useParams()
+  const location = useLocation()
+  const navigate = useNavigate()
+  const { user } = useAuth()
   const { loading } = useProjects()
   const project = useProject(projectId)
   const player = usePlayer()
   const { importFiles, isImporting } = useUploads()
   const [shareOpen, setShareOpen] = useState(false)
   const [coverOpen, setCoverOpen] = useState(false)
+  const [leaveConfirmOpen, setLeaveConfirmOpen] = useState(false)
+  const [isLeaving, setIsLeaving] = useState(false)
+  const backLink = projectBackLink(location.state)
 
   if (loading && !project) {
     return (
@@ -47,8 +63,11 @@ export function ProjectPage() {
         <AppHeader />
         <main className="flex flex-col items-center pt-[20vh] text-muted-foreground">
           <p className="text-[15px]">Project not found</p>
-          <Link to="/" className="pt-3 text-[15px] font-semibold text-foreground hover:opacity-70">
-            Back to library
+          <Link
+            to={backLink.to}
+            className="pt-3 text-[15px] font-semibold text-foreground hover:opacity-70"
+          >
+            Back to {backLink.label.toLowerCase()}
           </Link>
         </main>
       </div>
@@ -75,6 +94,19 @@ export function ProjectPage() {
   const canUpload = isOwnProject
   const addFiles = (files: File[]) =>
     void importFiles(files, { kind: "existing", projectID: project.id })
+  const leaveProject = async () => {
+    if (!user || !project.ownerID || isLeaving) return
+    setIsLeaving(true)
+    try {
+      if (isActiveProject) player.stop()
+      await leaveSharedProject(project.ownerID, project.id, user.uid)
+      setLeaveConfirmOpen(false)
+      navigate("/", { replace: true })
+    } catch {
+      toast("Couldn't leave this project. Please try again.")
+      setIsLeaving(false)
+    }
+  }
 
   return (
     <AudioDropzone
@@ -89,11 +121,11 @@ export function ProjectPage() {
           <main className="mx-auto w-full max-w-2xl px-4 pb-40 sm:px-6">
             <div className="flex h-12 items-center">
               <Link
-                to="/"
+                to={backLink.to}
                 className="-ml-2 flex items-center gap-0.5 rounded-lg px-2 py-1.5 text-[15px] font-medium text-muted-foreground transition hover:text-foreground"
               >
                 <ChevronLeft className="size-4.5" />
-                Library
+                {backLink.label}
               </Link>
             </div>
 
@@ -103,7 +135,7 @@ export function ProjectPage() {
                   type="button"
                   aria-label="Edit cover"
                   onClick={() => setCoverOpen(true)}
-                  className="w-56 cursor-pointer transition duration-300 hover:opacity-95 active:scale-[0.99] sm:w-64"
+                  className="w-56 cursor-default transition duration-300 hover:opacity-95 active:scale-[0.99] sm:w-64"
                 >
                   <ProjectCover
                     project={project}
@@ -174,6 +206,29 @@ export function ProjectPage() {
                     <Plus className="size-4.5" />
                   </button>
                 )}
+
+                {!isOwnProject && (
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <button
+                        type="button"
+                        aria-label="More project actions"
+                        className="flex size-11 items-center justify-center rounded-full border border-foreground/6 bg-secondary shadow-sm transition hover:bg-secondary/70 active:scale-95"
+                      >
+                        <MoreHorizontal className="size-4.5" />
+                      </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-44">
+                      <DropdownMenuItem
+                        variant="destructive"
+                        onSelect={() => setLeaveConfirmOpen(true)}
+                      >
+                        <LogOut />
+                        Leave project
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                )}
               </div>
             </section>
 
@@ -202,6 +257,35 @@ export function ProjectPage() {
           {isOwnProject && (
             <CoverDialog project={project} open={coverOpen} onOpenChange={setCoverOpen} />
           )}
+
+          <Dialog open={leaveConfirmOpen} onOpenChange={setLeaveConfirmOpen}>
+            <DialogContent className="rounded-3xl p-6 sm:max-w-sm">
+              <DialogHeader className="min-w-0 pb-1">
+                <DialogTitle className="truncate">Leave “{project.name}”?</DialogTitle>
+              </DialogHeader>
+              <p className="text-[13px] leading-5 text-muted-foreground">
+                This removes the project from your library on every device.
+              </p>
+              <div className="flex justify-end gap-2 pt-5">
+                <Button
+                  variant="ghost"
+                  size="lg"
+                  disabled={isLeaving}
+                  onClick={() => setLeaveConfirmOpen(false)}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  variant="destructive"
+                  size="lg"
+                  disabled={isLeaving}
+                  onClick={() => void leaveProject()}
+                >
+                  {isLeaving ? "Leaving…" : "Leave"}
+                </Button>
+              </div>
+            </DialogContent>
+          </Dialog>
         </div>
       )}
     </AudioDropzone>

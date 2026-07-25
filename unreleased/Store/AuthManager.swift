@@ -96,14 +96,15 @@ final class AuthManager {
             )
         }
 
-        let avatar = image.resizedForProfilePhoto(maxDimension: 512)
-        guard let data = avatar.jpegData(compressionQuality: 0.72) else {
+        guard let optimized = PhotoUploadCompression.profile(image) else {
             throw NSError(
                 domain: "AuthManager",
                 code: 422,
                 userInfo: [NSLocalizedDescriptionKey: "The selected photo could not be processed."]
             )
         }
+        let avatar = optimized.image
+        let data = optimized.data
 
         let reference = CloudPaths.profilePhotoReference(userID: user.uid)
         let metadata = StorageMetadata()
@@ -398,22 +399,6 @@ private extension StorageReference {
             failureHandle = task.observe(.failure) { snapshot in
                 complete(.failure(snapshot.error ?? URLError(.badServerResponse)))
             }
-        }
-    }
-}
-
-private extension UIImage {
-    func resizedForProfilePhoto(maxDimension: CGFloat) -> UIImage {
-        let longestSide = max(size.width, size.height)
-        guard longestSide > maxDimension else { return self }
-
-        let scale = maxDimension / longestSide
-        let targetSize = CGSize(width: size.width * scale, height: size.height * scale)
-        let format = UIGraphicsImageRendererFormat()
-        format.scale = 1
-        format.opaque = true
-        return UIGraphicsImageRenderer(size: targetSize, format: format).image { _ in
-            draw(in: CGRect(origin: .zero, size: targetSize))
         }
     }
 }

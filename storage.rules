@@ -29,8 +29,8 @@ service firebase.storage {
 
       // Storage rules allow at most 2 firestore.get()/exists() calls per
       // request, so guests and signed-in users each take exactly one branch
-      // (each branch reads 2 documents). Signed-in listeners always play as
-      // invitees — the web client auto-joins before streaming via a link.
+      // (each branch reads 2 documents). Signed-in listeners play from their
+      // invitee grant; link previews use the public streaming endpoint.
       allow read: if request.auth != null
         && (
           request.auth.uid == userId
@@ -57,18 +57,32 @@ service firebase.storage {
       // Any authenticated user can download cover images for shared projects.
       allow read: if request.auth != null;
 
-      // Only the owner can upload or delete their own cover images.
-      allow write: if request.auth != null && request.auth.uid == userId;
+      // Only the owner can upload or delete their own cover images. Clients
+      // compress covers to <= 1.5 MB; the 2 MB ceiling rejects full-size photos.
+      allow write: if request.auth != null
+                   && request.auth.uid == userId
+                   && (
+                     request.resource == null
+                     || (
+                       request.resource.size < 2 * 1024 * 1024
+                       && request.resource.contentType == 'image/jpeg'
+                     )
+                   );
     }
 
     match /users/{userId}/profile/{fileName} {
       // Profile pictures are visible to signed-in collaborators. Only the
-      // account owner may upload an image, capped at 5 MB and JPEG-only.
+      // account owner may upload an image. Clients target <= 500 KB.
       allow read: if request.auth != null;
       allow write: if request.auth != null
                    && request.auth.uid == userId
-                   && request.resource.size < 5 * 1024 * 1024
-                   && request.resource.contentType == 'image/jpeg';
+                   && (
+                     request.resource == null
+                     || (
+                       request.resource.size < 1024 * 1024
+                       && request.resource.contentType == 'image/jpeg'
+                     )
+                   );
     }
   }
 }

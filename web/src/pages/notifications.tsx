@@ -1,8 +1,10 @@
-import { Bell, CheckCircle2, ChevronLeft, ChevronRight, Trash2, UserPlus } from "lucide-react"
+import { Bell, CheckCircle2, ChevronLeft, ChevronRight, Trash2 } from "lucide-react"
 import { Link, useNavigate } from "react-router-dom"
 import { AppHeader } from "@/components/app-header"
+import { CloudProjectCover } from "@/components/project-cover"
 import { useNotifications } from "@/hooks/use-notifications"
 import { formatRelativeDate } from "@/lib/format"
+import { notificationsProjectNavigationState } from "@/lib/project-navigation"
 import type { AppNotification } from "@/lib/types"
 
 export function NotificationsPage() {
@@ -12,7 +14,9 @@ export function NotificationsPage() {
   const open = (notification: AppNotification) => {
     markRead(notification)
     if (notification.kind === "projectInvite") {
-      navigate(`/shared/${notification.fromUID}/${notification.projectID.toLowerCase()}`)
+      navigate(`/shared/${notification.fromUID}/${notification.projectID.toLowerCase()}`, {
+        state: notificationsProjectNavigationState,
+      })
     }
   }
 
@@ -65,13 +69,26 @@ export function NotificationsPage() {
                   onClick={() => open(notification)}
                   className="flex w-full items-center gap-3 rounded-2xl bg-secondary p-3.5 text-left transition hover:bg-secondary/70"
                 >
-                  <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-background">
-                    {notification.kind === "projectInvite" ? (
-                      <UserPlus className="size-4.5" />
-                    ) : (
+                  {notification.kind === "projectInvite" ? (
+                    <CloudProjectCover
+                      name={notification.projectName}
+                      gradient={
+                        notification.projectGradient ?? {
+                          colors: ["#667EEA", "#764BA2"],
+                          startX: 0,
+                          startY: 0,
+                          endX: 1,
+                          endY: 1,
+                        }
+                      }
+                      coverStoragePath={notification.coverStoragePath}
+                      className="size-10 shrink-0 rounded-2xl"
+                    />
+                  ) : (
+                    <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-background">
                       <Bell className="size-4.5" />
-                    )}
-                  </span>
+                    </span>
+                  )}
 
                   <span className="flex min-w-0 flex-1 flex-col gap-0.5">
                     <span className="text-[15px] font-semibold leading-snug">

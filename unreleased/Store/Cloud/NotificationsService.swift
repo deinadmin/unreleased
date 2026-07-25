@@ -62,6 +62,7 @@ final class NotificationsService {
         else { return nil }
 
         let createdAt = (data["createdAt"] as? Timestamp)?.dateValue() ?? Date()
+        let projectGradient = (data["projectGradient"] as? [String: Any]).flatMap(decodeGradient)
         return AppNotification(
             id: doc.documentID,
             kind: AppNotification.Kind(raw: typeRaw),
@@ -69,8 +70,26 @@ final class NotificationsService {
             fromUsername: data["fromUsername"] as? String ?? "",
             projectID: projectID,
             projectName: data["projectName"] as? String ?? "a project",
+            projectGradient: projectGradient,
+            coverStoragePath: data["coverStoragePath"] as? String,
             createdAt: createdAt,
             read: data["read"] as? Bool ?? false
+        )
+    }
+
+    private nonisolated static func decodeGradient(_ data: [String: Any]) -> GradientTheme? {
+        guard let colors = data["colors"] as? [String],
+              let startX = data["startX"] as? Double,
+              let startY = data["startY"] as? Double,
+              let endX = data["endX"] as? Double,
+              let endY = data["endY"] as? Double
+        else { return nil }
+        return GradientTheme(
+            colors: colors,
+            startX: startX,
+            startY: startY,
+            endX: endX,
+            endY: endY
         )
     }
 }

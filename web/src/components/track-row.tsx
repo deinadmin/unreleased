@@ -1,4 +1,4 @@
-import { NotebookPen, Play, Trash2 } from "lucide-react"
+import { NotebookPen, NotebookText, Play, Trash2 } from "lucide-react"
 import { useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { toast } from "sonner"
@@ -7,6 +7,7 @@ import { PlayingBars } from "@/components/playing-bars"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { useAuth } from "@/hooks/use-auth"
+import { useProject } from "@/hooks/use-projects"
 import { formatDuration, formatFileSize, formatRelativeDate } from "@/lib/format"
 import { deleteTrack } from "@/lib/project-edits"
 import type { Project, Track } from "@/lib/types"
@@ -40,6 +41,9 @@ export function TrackRow({
 
   const play = () => (onPlay ? onPlay(track) : player.play(track, project))
   const isOwnProject = !project.ownerID
+  // Shared projects that aren't in the library yet (pre-join preview) have no
+  // notes route, so the "View notes" item only appears once they're saved.
+  const inLibrary = useProject(project.id) !== undefined
 
   const remove = async () => {
     if (!user) return
@@ -63,6 +67,12 @@ export function TrackRow({
         },
         { label: "Delete", icon: <Trash2 />, destructive: true, onSelect: () => setConfirmDelete(true) },
       )
+    } else if (inLibrary) {
+      items.push({
+        label: "View notes",
+        icon: <NotebookText />,
+        onSelect: () => navigate(`/project/${project.id}/notes/${track.id}`),
+      })
     }
     contextMenu.open(event, items)
   }

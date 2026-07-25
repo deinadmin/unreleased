@@ -1,28 +1,26 @@
 import { doc, onSnapshot } from "firebase/firestore"
 import { Pause, Play, Plus } from "lucide-react"
 import { useEffect, useState } from "react"
-import { Navigate, useNavigate, useParams } from "react-router-dom"
+import { Navigate, useLocation, useNavigate, useParams } from "react-router-dom"
 import { toast } from "sonner"
 import { AppHeader } from "@/components/app-header"
 import { AppMark } from "@/components/app-mark"
-import { ProjectCover } from "@/components/project-cover"
+import { CloudProjectCover, ProjectCover } from "@/components/project-cover"
 import { TrackRow } from "@/components/track-row"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useAuth } from "@/hooks/use-auth"
-import { useProject } from "@/hooks/use-projects"
+import { useProject, useProjects } from "@/hooks/use-projects"
 import { decodeProject } from "@/lib/codec"
 import { db } from "@/lib/firebase"
 import { formatProjectDuration } from "@/lib/format"
 import {
   acceptInvite,
-  addSharedRef,
-  clearPendingInvite,
   fetchPreview,
   hasPendingInvite,
   normalizeProjectID,
+  publicTrackURL,
 } from "@/lib/invites"
 import {
-  gradientCSS,
   projectAccent,
   sharedPlayableProject,
   trackCountText,
@@ -44,8 +42,10 @@ export function SharedProjectPage() {
   const { ownerId = "", projectId: rawProjectID = "" } = useParams()
   const projectID = normalizeProjectID(rawProjectID)
   const { user, initializing, isSignedIn, displayUsername, signInAsGuest } = useAuth()
+  const location = useLocation()
   const navigate = useNavigate()
   const player = usePlayer()
+  const { materializeSharedProject } = useProjects()
   const inLibrary = useProject(projectID) !== undefined
   const [state, setState] = useState<PageState>({ phase: "loading" })
   const [accepting, setAccepting] = useState(false)
@@ -75,9 +75,18 @@ export function SharedProjectPage() {
           }
           const decoded = await decodeProject(snapshot.data())
           if (cancelled || !decoded) return
+          const playable = sharedPlayableProject({ ...decoded, ownerID: ownerId })
           setState({
             phase: "ready",
-            project: sharedPlayableProject({ ...decoded, ownerID: ownerId }),
+            project: {
+              ...playable,
+              tracks: playable.tracks.map((track) => ({
+                ...track,
+                storagePath: track.storagePath
+                  ? publicTrackURL(ownerId, projectID, track.id)
+                  : undefined,
+              })),
+            },
           })
         },
         async () => {
@@ -106,49 +115,35 @@ export function SharedProjectPage() {
   }, [initializing, user, isSignedIn, ownerId, projectID, signInAsGuest])
 
   // Owner or already-accepted: the project view handles it.
-  if (inLibrary) return <Navigate to={`/project/${projectID}`} replace />
+  if (inLibrary) {
+    return <Navigate to={`/project/${projectID}`} replace state={location.state} />
+  }
 
   const join = async () => {
     if (!user || !isSignedIn) throw new Error("not signed in")
-    try {
-      await acceptInvite(ownerId, projectID, user.uid, displayUsername)
-    } catch (error) {
-      // Re-creating an existing invitee doc is denied — tolerate it so users
-      // who already accepted on iOS can still link the project on the web.
-      console.warn("acceptInvite failed (possibly already an invitee)", error)
-    }
-    await clearPendingInvite(ownerId, projectID, user.uid)
-    await addSharedRef(user.uid, { ownerID: ownerId, projectID })
+    await acceptInvite(ownerId, projectID, user.uid, displayUsername)
   }
 
   const saveToLibrary = async () => {
     setAccepting(true)
+    let joined = false
     try {
       await join()
-      navigate(`/project/${projectID}`, { replace: true })
+      joined = true
+      const loadedProject = await materializeSharedProject(ownerId, projectID)
+      if (!loadedProject) {
+        toast("You joined this project, but it is still syncing to your library.")
+        return
+      }
+      navigate(`/project/${projectID}`, { replace: true, state: location.state })
     } catch {
-      toast("Couldn't join this project. The invite may have been withdrawn.")
+      toast(
+        joined
+          ? "You joined this project, but it couldn't be loaded yet. Please refresh your library."
+          : "Couldn't join this project. The invite may have been withdrawn.",
+      )
     } finally {
       setAccepting(false)
-    }
-  }
-
-  /**
-   * Signed-in users join before streaming: version audio is only readable as
-   * an invitee (guests stream via the anonymous link rule instead). The page
-   * then morphs into the regular project view via the library redirect.
-   */
-  const joinThenPlay = async (play: () => void) => {
-    if (!isSignedIn) {
-      play()
-      return
-    }
-    try {
-      await join()
-      toast("Added to your library")
-      play()
-    } catch {
-      toast("Couldn't join this project. The invite may have been withdrawn.")
     }
   }
 
@@ -175,21 +170,9 @@ export function SharedProjectPage() {
 
         {state.phase === "auth-required" && (
           <CenteredMessage
-            title={state.preview ? "This link is turned off" : "Project not found"}
-            body={
-              state.preview
-                ? "The owner has disabled link sharing. Sign in if you've been given access."
-                : "This link may be turned off. Sign in if you've been given access."
-            }
-          >
-            <button
-              type="button"
-              onClick={() => navigate(signInPath)}
-              className="mt-6 flex h-11 items-center rounded-full bg-foreground px-7 text-[15px] font-bold text-background transition hover:opacity-90 active:scale-[0.98]"
-            >
-              Sign in
-            </button>
-          </CenteredMessage>
+            title="Project not found"
+            body="This link may be wrong, or the project is no longer shared."
+          />
         )}
 
         {state.phase === "invite" && (
@@ -208,7 +191,7 @@ export function SharedProjectPage() {
             isSignedIn={isSignedIn}
             accepting={accepting}
             onSave={() => (isSignedIn ? void saveToLibrary() : navigate(signInPath))}
-            onPlay={(play) => void joinThenPlay(play)}
+            onPlay={(play) => play()}
           />
         )}
       </main>
@@ -248,9 +231,11 @@ function InviteCard({
 }) {
   return (
     <div className="rise-in flex flex-col items-center pt-[10vh] text-center">
-      <div
+      <CloudProjectCover
+        name={preview.name}
+        gradient={preview.gradient}
+        coverStoragePath={preview.coverStoragePath}
         className="size-40 rounded-[26px] shadow-lg"
-        style={{ background: gradientCSS(preview.gradient) }}
       />
       <h1 className="max-w-full truncate pt-7 text-[22px] font-bold">{preview.name}</h1>
       {preview.ownerUsername && (

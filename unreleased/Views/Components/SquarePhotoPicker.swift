@@ -49,8 +49,8 @@ struct SquarePhotoPicker: UIViewControllerRepresentable {
 }
 
 private extension UIImage {
-    /// Center-crops, normalizes orientation, caps decode size, and removes alpha
-    /// before the image is cached, encoded as JPEG, or used as Now Playing art.
+    /// Center-crops, normalizes orientation, and caps the in-memory working copy.
+    /// Upload paths apply their final dimension and byte-budget compression.
     func opaqueSquareCropped(maxPixelDimension: CGFloat = 1_200) -> UIImage {
         let side = min(size.width, size.height)
         let outputSide = min(side, maxPixelDimension)

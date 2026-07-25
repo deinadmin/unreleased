@@ -8,6 +8,10 @@
 	<array>
 		<string>Default</string>
 	</array>
+	<key>com.apple.developer.associated-domains</key>
+	<array>
+		<string>applinks:unreleased.top</string>
+	</array>
 	<key>com.apple.security.application-groups</key>
 	<array>
 		<string>group.de.carlsteen.unreleased</string>

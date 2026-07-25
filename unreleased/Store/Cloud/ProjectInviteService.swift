@@ -26,6 +26,7 @@ enum ProjectInviteService {
             "ownerUID": ownerUID,
             "ownerUsername": ownerUsername,
             "gradient": encodeGradient(project.gradient),
+            "coverStoragePath": project.coverStoragePath ?? FieldValue.delete(),
             "updatedAt": Timestamp(date: Date()),
         ]
         if let hex = project.accentColorHex { data["accentColorHex"] = hex }
@@ -56,13 +57,24 @@ enum ProjectInviteService {
     static func fetchInvitees(ownerUID: String, projectID: UUID) async -> [InviteeInfo] {
         let ref = CloudPaths.inviteesCollection(ownerID: ownerUID, projectID: projectID)
         guard let snapshot = try? await ref.getDocuments() else { return [] }
-        return snapshot.documents.compactMap { doc in
-            let data = doc.data()
-            guard let username = data["username"] as? String,
-                  let ts = data["acceptedAt"] as? Timestamp
-            else { return nil }
-            return InviteeInfo(id: doc.documentID, username: username, acceptedAt: ts.dateValue())
-        }
+        return decodeInvitees(snapshot)
+    }
+
+    /// Keeps the owner's accepted-listener view synchronized across iOS and web.
+    static func observeInvitees(
+        ownerUID: String,
+        projectID: UUID,
+        onChange: @escaping ([InviteeInfo]) -> Void
+    ) -> ListenerRegistration {
+        CloudPaths.inviteesCollection(ownerID: ownerUID, projectID: projectID)
+            .addSnapshotListener { snapshot, error in
+                if let error {
+                    print("ProjectInviteService: invitees listener failed — \(error)")
+                    return
+                }
+                guard let snapshot else { return }
+                onChange(decodeInvitees(snapshot))
+            }
     }
 
     /// Writes the invitee document, granting read access to the full project.
@@ -72,18 +84,121 @@ enum ProjectInviteService {
         recipientUID: String,
         recipientUsername: String
     ) async throws {
-        let ref = CloudPaths.inviteeDocument(ownerID: ownerUID, projectID: projectID, inviteeID: recipientUID)
-        try await ref.setData([
+        let inviteeRef = CloudPaths.inviteeDocument(
+            ownerID: ownerUID,
+            projectID: projectID,
+            inviteeID: recipientUID
+        )
+        let sharedProjectsRef = CloudPaths.sharedProjectsDocument(userID: recipientUID)
+        let pendingRef = CloudPaths.pendingInviteDocument(
+            ownerID: ownerUID,
+            projectID: projectID,
+            inviteeID: recipientUID
+        )
+        let pendingSnapshot = try? await pendingRef.getDocument()
+        let notificationID = pendingSnapshot?.data()?["notificationID"] as? String
+        let batch = Firestore.firestore().batch()
+        batch.setData([
             "uid": recipientUID,
             "username": recipientUsername,
             "acceptedAt": Timestamp(date: Date()),
-        ])
+        ], forDocument: inviteeRef)
+        batch.setData([
+            "refs": [
+                projectID.uuidString: [
+                    "ownerID": ownerUID,
+                    "addedAt": Timestamp(date: Date()),
+                ],
+            ],
+        ], forDocument: sharedProjectsRef, merge: true)
+        batch.deleteDocument(pendingRef)
+        if let notificationID {
+            batch.deleteDocument(
+                CloudPaths.notificationDocument(
+                    userID: recipientUID,
+                    notificationID: notificationID
+                )
+            )
+        }
+        try await batch.commit()
     }
 
     /// Removes an invitee document (owner kicks or invitee leaves).
     static func removeInvitee(ownerUID: String, projectID: UUID, inviteeUID: String) async throws {
         let ref = CloudPaths.inviteeDocument(ownerID: ownerUID, projectID: projectID, inviteeID: inviteeUID)
         try await ref.delete()
+    }
+
+    /// Leaves a shared project everywhere by atomically removing both library
+    /// membership and the read-access grant owned by this account.
+    static func leaveSharedProject(
+        ownerUID: String,
+        projectID: UUID,
+        userID: String
+    ) async throws {
+        let sharedProjectsRef = CloudPaths.sharedProjectsDocument(userID: userID)
+        let inviteeRef = CloudPaths.inviteeDocument(
+            ownerID: ownerUID,
+            projectID: projectID,
+            inviteeID: userID
+        )
+        let pendingRef = CloudPaths.pendingInviteDocument(
+            ownerID: ownerUID,
+            projectID: projectID,
+            inviteeID: userID
+        )
+        let batch = Firestore.firestore().batch()
+        batch.setData([
+            "refs": [
+                projectID.uuidString: FieldValue.delete(),
+            ],
+        ], forDocument: sharedProjectsRef, merge: true)
+        batch.deleteDocument(inviteeRef)
+        batch.deleteDocument(pendingRef)
+        try await batch.commit()
+    }
+
+    /// Cleans a stale library reference after the owner deletes a project or
+    /// revokes this account's access.
+    static func removeSharedReference(userID: String, projectID: UUID) async {
+        let ref = CloudPaths.sharedProjectsDocument(userID: userID)
+        try? await ref.setData([
+            "refs": [
+                projectID.uuidString: FieldValue.delete(),
+            ],
+        ], merge: true)
+    }
+
+    /// One-time migration for iOS builds that predate the account-level shared
+    /// project index. An existing server document always wins, including an
+    /// intentionally empty one after the user left every shared project.
+    static func seedSharedReferencesIfNeeded(
+        userID: String,
+        references: [SharedProjectReference]
+    ) async -> Bool {
+        guard !references.isEmpty else { return true }
+        let ref = CloudPaths.sharedProjectsDocument(userID: userID)
+        do {
+            let snapshot = try await ref.getDocument(source: .server)
+            guard !snapshot.exists else { return true }
+            let values = Dictionary(uniqueKeysWithValues: references.map {
+                (
+                    $0.projectID.uuidString,
+                    [
+                        "ownerID": $0.ownerID,
+                        "addedAt": Timestamp(date: Date()),
+                    ] as [String: Any]
+                )
+            })
+            try await ref.setData(["refs": values], merge: true)
+            return true
+        } catch {
+            print("ProjectInviteService: shared-reference migration failed — \(error)")
+            // Keep legacy local projects intact while offline. A future signed-in
+            // session will retry the migration before treating the cloud index
+            // as authoritative.
+            return false
+        }
     }
 
     // MARK: - Username invites
@@ -104,30 +219,40 @@ enum ProjectInviteService {
         // Make sure the preview exists so the recipient's invite sheet can load.
         await writePreview(project: project, ownerUID: ownerUID, ownerUsername: ownerUsername)
 
-        // Create the notification first so we know its ID.
-        let noteRef = CloudPaths.notificationsCollection(userID: recipientUID).document()
-        let notificationID = noteRef.documentID
-        try await noteRef.setData([
+        // A stable ID makes re-inviting idempotent across iOS and web and
+        // guarantees there is only one notification to withdraw.
+        let notificationID = inviteNotificationID(ownerUID: ownerUID, projectID: project.id)
+        let noteRef = CloudPaths.notificationDocument(
+            userID: recipientUID,
+            notificationID: notificationID
+        )
+        let pendingRef = CloudPaths.pendingInviteDocument(
+            ownerID: ownerUID, projectID: project.id, inviteeID: recipientUID
+        )
+        let now = Timestamp(date: Date())
+        let batch = Firestore.firestore().batch()
+        var notificationData: [String: Any] = [
             "type": AppNotification.Kind.projectInvite.rawValue,
             "fromUID": ownerUID,
             "fromUsername": ownerUsername,
             "projectID": project.id.uuidString,
             "projectName": project.name,
-            "createdAt": Timestamp(date: Date()),
+            "projectGradient": encodeGradient(project.gradient),
+            "recipientUsername": recipientUsername,
+            "createdAt": now,
             "read": false,
-        ])
-
-        // Record the pending invite, storing the notification ID so it can be
-        // removed if the owner cancels the invite before the recipient accepts.
-        let pendingRef = CloudPaths.pendingInviteDocument(
-            ownerID: ownerUID, projectID: project.id, inviteeID: recipientUID
-        )
-        try await pendingRef.setData([
+        ]
+        if let coverStoragePath = project.coverStoragePath {
+            notificationData["coverStoragePath"] = coverStoragePath
+        }
+        batch.setData(notificationData, forDocument: noteRef)
+        batch.setData([
             "uid": recipientUID,
             "username": recipientUsername,
-            "invitedAt": Timestamp(date: Date()),
+            "invitedAt": now,
             "notificationID": notificationID,
-        ])
+        ], forDocument: pendingRef)
+        try await batch.commit()
 
         return notificationID
     }
@@ -148,18 +273,25 @@ enum ProjectInviteService {
     static func fetchPendingInvites(ownerUID: String, projectID: UUID) async -> [PendingInviteInfo] {
         let ref = CloudPaths.pendingInvitesCollection(ownerID: ownerUID, projectID: projectID)
         guard let snapshot = try? await ref.getDocuments() else { return [] }
-        return snapshot.documents.compactMap { doc in
-            let data = doc.data()
-            guard let username = data["username"] as? String,
-                  let ts = data["invitedAt"] as? Timestamp
-            else { return nil }
-            return PendingInviteInfo(
-                id: doc.documentID,
-                username: username,
-                invitedAt: ts.dateValue(),
-                notificationID: data["notificationID"] as? String
-            )
-        }
+        return decodePendingInvites(snapshot)
+    }
+
+    /// Keeps the owner's pending list live. This also lets server-side repair of
+    /// legacy orphan notifications appear without closing and reopening the sheet.
+    static func observePendingInvites(
+        ownerUID: String,
+        projectID: UUID,
+        onChange: @escaping ([PendingInviteInfo]) -> Void
+    ) -> ListenerRegistration {
+        CloudPaths.pendingInvitesCollection(ownerID: ownerUID, projectID: projectID)
+            .addSnapshotListener { snapshot, error in
+                if let error {
+                    print("ProjectInviteService: pending-invites listener failed — \(error)")
+                    return
+                }
+                guard let snapshot else { return }
+                onChange(decodePendingInvites(snapshot))
+            }
     }
 
     /// Cancels a pending username invite: deletes the recipient's in-app notification
@@ -169,14 +301,29 @@ enum ProjectInviteService {
         projectID: UUID,
         inviteeUID: String,
         notificationID: String?
-    ) async {
+    ) async throws {
+        let pendingRef = CloudPaths.pendingInviteDocument(
+            ownerID: ownerUID,
+            projectID: projectID,
+            inviteeID: inviteeUID
+        )
+        let batch = Firestore.firestore().batch()
         if let notificationID {
             let noteRef = CloudPaths.notificationDocument(
                 userID: inviteeUID, notificationID: notificationID
             )
-            try? await noteRef.delete()
+            batch.deleteDocument(noteRef)
         }
-        await clearPendingInvite(ownerUID: ownerUID, projectID: projectID, inviteeUID: inviteeUID)
+        batch.deleteDocument(pendingRef)
+        do {
+            try await batch.commit()
+        } catch {
+            // The recipient may already have deleted their notification. In
+            // that case its sender cannot authorize deleting a missing doc, but
+            // revoking the pending grant must still succeed. The delete trigger
+            // performs authoritative notification cleanup.
+            try await pendingRef.delete()
+        }
     }
 
     // MARK: - Private helpers
@@ -198,10 +345,42 @@ enum ProjectInviteService {
             ownerUsername: ownerUsername,
             projectName: name,
             gradient: gradient,
+            coverStoragePath: data["coverStoragePath"] as? String,
             accentColorHex: data["accentColorHex"] as? String,
             // Older preview docs predate this flag; treat them as enabled.
             linkEnabled: data["linkEnabled"] as? Bool ?? true
         )
+    }
+
+    private static func inviteNotificationID(ownerUID: String, projectID: UUID) -> String {
+        "projectInvite-\(ownerUID)-\(projectID.uuidString)"
+    }
+
+    private static func decodeInvitees(_ snapshot: QuerySnapshot) -> [InviteeInfo] {
+        snapshot.documents.compactMap { doc in
+            let data = doc.data()
+            guard let username = data["username"] as? String,
+                  let ts = data["acceptedAt"] as? Timestamp
+            else { return nil }
+            return InviteeInfo(id: doc.documentID, username: username, acceptedAt: ts.dateValue())
+        }
+        .sorted { $0.acceptedAt < $1.acceptedAt }
+    }
+
+    private static func decodePendingInvites(_ snapshot: QuerySnapshot) -> [PendingInviteInfo] {
+        snapshot.documents.compactMap { doc in
+            let data = doc.data()
+            guard let username = data["username"] as? String,
+                  let ts = data["invitedAt"] as? Timestamp
+            else { return nil }
+            return PendingInviteInfo(
+                id: doc.documentID,
+                username: username,
+                invitedAt: ts.dateValue(),
+                notificationID: data["notificationID"] as? String
+            )
+        }
+        .sorted { $0.invitedAt < $1.invitedAt }
     }
 
     private static func encodeGradient(_ gradient: GradientTheme) -> [String: Any] {

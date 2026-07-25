@@ -3,6 +3,7 @@ import { deleteObject, ref as storageRef, uploadBytes } from "firebase/storage"
 import { accentHexFromGradient, accentHexFromImage, gradientHexPairFromImage } from "./accent-color"
 import { encodeGradient, encodeProject, encodeTrack } from "./codec"
 import { db, storage } from "./firebase"
+import { compressedSquareJpeg, COVER_PHOTO_LIMITS } from "./photo-compression"
 import type { GradientTheme, Project } from "./types"
 
 /** Firestore edits for the user's own projects, mirroring the iOS `EditProjectSheet.save()`. */
@@ -107,9 +108,9 @@ export async function setProjectCoverImage(
   project: Project,
   file: File,
 ): Promise<void> {
-  const bitmap = await createImageBitmap(file)
+  const bitmap = await createImageBitmap(file, { imageOrientation: "from-image" })
   try {
-    const blob = await squareJpeg(bitmap)
+    const blob = await compressedSquareJpeg(bitmap, COVER_PHOTO_LIMITS)
     const accentColorHex = accentHexFromImage(bitmap)
     const coverGradientColors = gradientHexPairFromImage(bitmap)
 
@@ -131,33 +132,4 @@ export async function setProjectCoverImage(
   } finally {
     bitmap.close()
   }
-}
-
-/** Center-crops to a square, capped at 1024px, encoded as JPEG (quality 0.85). */
-async function squareJpeg(bitmap: ImageBitmap): Promise<Blob> {
-  const side = Math.min(bitmap.width, bitmap.height)
-  const target = Math.min(1024, side)
-  const canvas = document.createElement("canvas")
-  canvas.width = target
-  canvas.height = target
-  const ctx = canvas.getContext("2d")
-  if (!ctx) throw new Error("canvas unavailable")
-  ctx.drawImage(
-    bitmap,
-    (bitmap.width - side) / 2,
-    (bitmap.height - side) / 2,
-    side,
-    side,
-    0,
-    0,
-    target,
-    target,
-  )
-  return new Promise((resolve, reject) => {
-    canvas.toBlob(
-      (blob) => (blob ? resolve(blob) : reject(new Error("jpeg encode failed"))),
-      "image/jpeg",
-      0.85,
-    )
-  })
 }

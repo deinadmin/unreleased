@@ -1,0 +1,17 @@
+{
+  "applinks": {
+    "details": [
+      {
+        "appIDs": [
+          "3DHZRN7AYM.de.carlsteen.unreleased"
+        ],
+        "components": [
+          {
+            "/": "/shared/*/*",
+            "comment": "Open shared Unreleased projects in the iOS app."
+          }
+        ]
+      }
+    ]
+  }
+}

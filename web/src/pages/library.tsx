@@ -1,5 +1,5 @@
 import { Plus } from "lucide-react"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { AppHeader } from "@/components/app-header"
 import { AppMark } from "@/components/app-mark"
@@ -7,6 +7,7 @@ import { NewProjectDialog } from "@/components/new-project-dialog"
 import { ProjectCard } from "@/components/project-card"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useProjects } from "@/hooks/use-projects"
+import { isTypingTarget } from "@/lib/utils"
 import { AudioDropzone } from "@/uploads/dropzone"
 import { useUploads } from "@/uploads/uploads-provider"
 
@@ -20,6 +21,21 @@ export function LibraryPage() {
     const projectID = await importFiles(files, { kind: "new" })
     if (projectID) navigate(`/project/${projectID}`)
   }
+
+  // "N" opens the new-project dialog (mirrors the header button).
+  const showsNewProjectButton = !loading && projects.length > 0
+  useEffect(() => {
+    if (!showsNewProjectButton) return
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key.toLowerCase() !== "n" || event.repeat || event.defaultPrevented) return
+      if (event.metaKey || event.ctrlKey || event.altKey) return
+      if (isTypingTarget(event.target)) return
+      event.preventDefault()
+      setNewProjectOpen(true)
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [showsNewProjectButton])
 
   return (
     <AudioDropzone
@@ -42,6 +58,8 @@ export function LibraryPage() {
                   <button
                     type="button"
                     onClick={() => setNewProjectOpen(true)}
+                    title="New project (N)"
+                    aria-keyshortcuts="n"
                     className="flex h-9 items-center gap-1.5 rounded-full bg-brand px-4 text-[13px] font-semibold text-white transition hover:bg-brand/85 active:scale-[0.98]"
                   >
                     <Plus className="size-3.5" />

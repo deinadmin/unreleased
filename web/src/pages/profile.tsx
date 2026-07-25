@@ -1,18 +1,21 @@
 import {
   Bell,
   Calendar,
+  Camera,
   ChevronLeft,
   CircleHelp,
   CircleUser,
   Cloud,
   Infinity as InfinityIcon,
   Info,
+  Loader2,
   SlidersHorizontal,
   Star,
   User,
 } from "lucide-react"
-import { useState } from "react"
+import { useRef, useState, type DragEvent } from "react"
 import { Link, useNavigate } from "react-router-dom"
+import { toast } from "sonner"
 import { AppHeader } from "@/components/app-header"
 import { SettingsDivider, SettingsRow, SettingsSection } from "@/components/settings"
 import {
@@ -32,6 +35,7 @@ import {
   type PlanTier,
 } from "@/hooks/use-plan"
 import { supportMailto } from "@/lib/app-meta"
+import { InvalidProfilePhotoError, setProfilePhoto } from "@/lib/profile-photo"
 import { cn } from "@/lib/utils"
 import { usePlayer } from "@/player/player-provider"
 
@@ -59,6 +63,7 @@ export function ProfilePage() {
   const navigate = useNavigate()
   const plan = usePlan()
   const [confirmSignOut, setConfirmSignOut] = useState(false)
+  const [photoURL, setPhotoURL] = useState(user?.photoURL)
 
   const tier = effectiveTier(plan)
   const tierMeta = PLAN_TIERS[tier]
@@ -90,7 +95,16 @@ export function ProfilePage() {
 
         {/* ── Header ─────────────────────────────────────────────────── */}
         <div className="rise-in flex flex-col items-center pb-9 pt-6 text-center">
-          <ProfileAvatar photoURL={user?.photoURL} size={108} />
+          {user && (
+            <ProfilePhotoUpload
+              photoURL={photoURL}
+              size={108}
+              onUpload={async (file) => {
+                const nextURL = await setProfilePhoto(user, file)
+                setPhotoURL(nextURL)
+              }}
+            />
+          )}
           <h1 className="pt-4 text-[22px] font-bold">{primaryLabel}</h1>
           {username && user?.email && (
             <p className="pt-1 text-[15px] text-muted-foreground">{user.email}</p>
@@ -221,5 +235,124 @@ export function ProfileAvatar({ photoURL, size }: { photoURL?: string | null; si
         />
       )}
     </span>
+  )
+}
+
+function ProfilePhotoUpload({
+  photoURL,
+  size,
+  onUpload,
+}: {
+  photoURL?: string | null
+  size: number
+  onUpload: (file: File) => Promise<void>
+}) {
+  const inputRef = useRef<HTMLInputElement>(null)
+  const dragDepth = useRef(0)
+  const [isDragging, setIsDragging] = useState(false)
+  const [isUploading, setIsUploading] = useState(false)
+
+  const choosePhoto = async (file: File) => {
+    if (isUploading) return
+    setIsUploading(true)
+    try {
+      await onUpload(file)
+      toast.success("Profile photo updated")
+    } catch (error) {
+      console.error("profile photo upload failed", error)
+      toast.error(
+        error instanceof InvalidProfilePhotoError
+          ? error.message
+          : "Couldn't update your profile photo. Please try again.",
+      )
+    } finally {
+      setIsUploading(false)
+    }
+  }
+
+  const acceptDrop = (event: DragEvent<HTMLButtonElement>) => {
+    event.preventDefault()
+    dragDepth.current = 0
+    setIsDragging(false)
+    const file = [...event.dataTransfer.files].find((candidate) =>
+      candidate.type.startsWith("image/"),
+    )
+    if (file) {
+      void choosePhoto(file)
+    } else {
+      toast.error("Drop an image file to update your profile photo.")
+    }
+  }
+
+  return (
+    <>
+      <button
+        type="button"
+        aria-label={isUploading ? "Uploading profile photo" : "Change profile photo"}
+        disabled={isUploading}
+        onClick={() => inputRef.current?.click()}
+        onDragEnter={(event) => {
+          event.preventDefault()
+          dragDepth.current += 1
+          setIsDragging(true)
+        }}
+        onDragOver={(event) => {
+          event.preventDefault()
+          event.dataTransfer.dropEffect = "copy"
+        }}
+        onDragLeave={(event) => {
+          event.preventDefault()
+          dragDepth.current -= 1
+          if (dragDepth.current <= 0) {
+            dragDepth.current = 0
+            setIsDragging(false)
+          }
+        }}
+        onDrop={acceptDrop}
+        className={cn(
+          "group relative rounded-full outline-none transition duration-200 hover:scale-[1.02] focus-visible:ring-4 focus-visible:ring-brand/30 active:scale-[0.98]",
+          isDragging && "scale-[1.04] ring-4 ring-brand/35",
+        )}
+      >
+        <ProfileAvatar photoURL={photoURL} size={size} />
+        <span
+          className={cn(
+            "pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-1 rounded-full bg-black/58 text-white opacity-0 backdrop-blur-[2px] transition-opacity duration-200 group-hover:opacity-100 group-focus-visible:opacity-100",
+            (isDragging || isUploading) && "opacity-100",
+          )}
+        >
+          {isUploading ? (
+            <>
+              <Loader2 className="size-6 animate-spin" />
+              <span className="text-[11px] font-semibold">Uploading</span>
+            </>
+          ) : (
+            <>
+              <Camera className="size-6" strokeWidth={2.25} />
+              <span className="text-[11px] font-semibold">
+                {isDragging ? "Drop photo" : "Change photo"}
+              </span>
+            </>
+          )}
+        </span>
+        {!isUploading && (
+          <span className="pointer-events-none absolute bottom-0 right-0 flex size-8 items-center justify-center rounded-full border-[3px] border-background bg-foreground text-background shadow-sm transition-transform group-hover:scale-0 group-focus-visible:scale-0">
+            <Camera className="size-3.5" strokeWidth={2.5} />
+          </span>
+        )}
+      </button>
+
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={(event) => {
+          const file = event.target.files?.[0]
+          event.target.value = ""
+          if (file) void choosePhoto(file)
+        }}
+      />
+    </>
   )
 }

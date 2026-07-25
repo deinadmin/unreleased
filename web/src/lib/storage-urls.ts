@@ -34,6 +34,8 @@ export function cachedDownloadURL(storagePath: string): string | undefined {
 
 /** Resolves (and caches, in memory and across reloads) a download URL for a Cloud Storage object path. */
 export function downloadURL(storagePath: string): Promise<string> {
+  if (/^https?:\/\//.test(storagePath)) return Promise.resolve(storagePath)
+
   const cached = cachedDownloadURL(storagePath)
   if (cached) return Promise.resolve(cached)
 

@@ -54,6 +54,7 @@ export interface ProjectPreview {
   ownerUsername: string
   name: string
   gradient: GradientTheme
+  coverStoragePath?: string
   accentColorHex?: string
   linkEnabled: boolean
 }
@@ -74,6 +75,7 @@ export interface PendingInviteInfo {
 export interface UserSearchResult {
   id: string
   username: string
+  avatarURL?: string
 }
 
 export interface AppNotification {
@@ -83,6 +85,8 @@ export interface AppNotification {
   fromUsername: string
   projectID: string
   projectName: string
+  projectGradient?: GradientTheme
+  coverStoragePath?: string
   createdAt: Date
   read: boolean
 }

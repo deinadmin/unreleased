@@ -339,16 +339,24 @@ final class ProjectStore {
                 self?.applySharedProjectUpdate(project)
             },
             projectRemover: { [weak self] projectID in
-                self?.removeSharedProject(projectID)
+                self?.removeUnavailableSharedProject(projectID)
+            },
+            referencesUpdater: { [weak self] references in
+                self?.reconcileSharedProjectReferences(references)
             }
         )
         sharedSyncService = shared
 
-        // Reconnect listeners for shared projects already saved locally.
-        for project in projects where project.isShared {
-            if let ownerID = project.ownerID {
-                shared.subscribe(ownerID: ownerID, projectID: project.id)
-            }
+        let seedReferences = projects.compactMap { project -> SharedProjectReference? in
+            guard let ownerID = project.ownerID else { return nil }
+            shared.subscribe(ownerID: ownerID, projectID: project.id)
+            return SharedProjectReference(ownerID: ownerID, projectID: project.id)
+        }
+        Task {
+            await shared.startReferenceSync(
+                userID: userID,
+                seedReferences: seedReferences
+            )
         }
 
         updateSyncStatus()
@@ -458,20 +466,24 @@ final class ProjectStore {
     /// listener and lose read access to the project.
     func removeSharedProject(_ projectID: UUID) {
         guard let project = projects.first(where: { $0.id == projectID }), project.isShared else { return }
-        sharedSyncService?.unsubscribe(projectID: projectID)
-
-        // Revoke our own access on the owner's side (delete invitee + any pending invite).
         if let ownerID = project.ownerID, let myUID = currentUserID {
             Task {
-                try? await ProjectInviteService.removeInvitee(
-                    ownerUID: ownerID, projectID: projectID, inviteeUID: myUID
-                )
-                await ProjectInviteService.clearPendingInvite(
-                    ownerUID: ownerID, projectID: projectID, inviteeUID: myUID
+                try? await ProjectInviteService.leaveSharedProject(
+                    ownerUID: ownerID,
+                    projectID: projectID,
+                    userID: myUID
                 )
             }
         }
+        removeSharedProjectLocally(projectID)
+    }
 
+    private func removeSharedProjectLocally(_ projectID: UUID) {
+        guard let project = projects.first(where: { $0.id == projectID }), project.isShared else { return }
+        sharedSyncService?.unsubscribe(projectID: projectID)
+        if audioPlayer?.currentProject?.id == projectID {
+            audioPlayer?.stop()
+        }
         project.tracks.forEach { track in
             cancelDownload(trackID: track.id)
             for version in track.displayedVersions {
@@ -483,8 +495,52 @@ final class ProjectStore {
         persistLocalOnly()
     }
 
+    private func removeUnavailableSharedProject(_ projectID: UUID) {
+        removeSharedProjectLocally(projectID)
+        guard let userID = currentUserID else { return }
+        Task {
+            await ProjectInviteService.removeSharedReference(
+                userID: userID,
+                projectID: projectID
+            )
+        }
+    }
+
+    private func reconcileSharedProjectReferences(_ references: [SharedProjectReference]) {
+        let wanted = Dictionary(uniqueKeysWithValues: references.map { ($0.projectID, $0.ownerID) })
+        let removedIDs = projects.compactMap { project -> UUID? in
+            guard project.isShared, wanted[project.id] == nil else { return nil }
+            return project.id
+        }
+        removedIDs.forEach(removeSharedProjectLocally)
+
+        for reference in references {
+            sharedSyncService?.subscribe(
+                ownerID: reference.ownerID,
+                projectID: reference.projectID
+            )
+        }
+    }
+
     private func applySharedProjectUpdate(_ project: Project) {
-        guard let index = projects.firstIndex(where: { $0.id == project.id }) else { return }
+        guard let index = projects.firstIndex(where: { $0.id == project.id }) else {
+            projects.insert(project, at: 0)
+            persistLocalOnly()
+            if project.coverStoragePath != nil {
+                Task { await downloadSharedCoverIfNeeded(for: project) }
+            }
+            Task {
+                guard let ownerID = project.ownerID else { return }
+                let preview = await ProjectInviteService.fetchPreview(
+                    ownerUID: ownerID,
+                    projectID: project.id
+                )
+                if let enabled = preview?.linkEnabled {
+                    setLinkEnabled(enabled, forSharedProjectID: project.id)
+                }
+            }
+            return
+        }
         var updated = project
         let local = projects[index]
         // Preserve locally analyzed waveforms.
@@ -811,10 +867,10 @@ final class ProjectStore {
         let version = Int(Date().timeIntervalSince1970)
         let fileName = "\(projectID.uuidString)-\(version).jpg"
         let url = coverImagesURL.appendingPathComponent(fileName)
-        guard let data = image.jpegData(compressionQuality: 0.85) else { return nil }
+        guard let optimized = PhotoUploadCompression.cover(image) else { return nil }
         do {
-            try data.write(to: url, options: .atomic)
-            coverImageCache[fileName] = image
+            try optimized.data.write(to: url, options: .atomic)
+            coverImageCache[fileName] = optimized.image
             return fileName
         } catch {
             print("ProjectStore: cover save failed — \(error)")

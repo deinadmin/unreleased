@@ -1,5 +1,10 @@
 import { useStorageUrl } from "@/hooks/use-storage-url"
-import { gradientCSS, vinylGradientCSS, type Project } from "@/lib/types"
+import {
+  gradientCSS,
+  vinylGradientCSS,
+  type GradientTheme,
+  type Project,
+} from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { Vinyl } from "./vinyl"
 
@@ -55,16 +60,38 @@ export function ProjectCover({
 
 /** Small static cover thumbnail (lists / mini player). */
 export function CoverThumbnail({ project, className }: { project: Project; className?: string }) {
-  const coverUrl = useStorageUrl(project.coverStoragePath)
+  return (
+    <CloudProjectCover
+      name={project.name}
+      gradient={project.gradient}
+      coverStoragePath={project.coverStoragePath}
+      className={cn("rounded-xl", className)}
+    />
+  )
+}
+
+/** Cover artwork available from lightweight invite/notification metadata. */
+export function CloudProjectCover({
+  name,
+  gradient,
+  coverStoragePath,
+  className,
+}: {
+  name: string
+  gradient: GradientTheme
+  coverStoragePath?: string
+  className?: string
+}) {
+  const coverUrl = useStorageUrl(coverStoragePath)
   return (
     <div
-      className={cn("overflow-hidden rounded-xl", className)}
-      style={{ background: coverUrl ? "#1f1f1f" : gradientCSS(project.gradient) }}
+      className={cn("overflow-hidden", className)}
+      style={{ background: coverUrl ? "#1f1f1f" : gradientCSS(gradient) }}
     >
       {coverUrl && (
         <img
           src={coverUrl}
-          alt={project.name}
+          alt={name}
           draggable={false}
           className="h-full w-full select-none object-cover"
         />

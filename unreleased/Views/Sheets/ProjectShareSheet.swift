@@ -1,4 +1,5 @@
 import CoreImage.CIFilterBuiltins
+import FirebaseFirestore
 import SwiftUI
 
 struct ProjectShareSheet: View {
@@ -14,6 +15,10 @@ struct ProjectShareSheet: View {
     @State private var invitees: [InviteeInfo] = []
     @State private var pendingInvites: [PendingInviteInfo] = []
     @State private var loadedInvitees = false
+    @State private var loadedAcceptedInvitees = false
+    @State private var loadedPendingInvites = false
+    @State private var inviteesListener: ListenerRegistration?
+    @State private var pendingInvitesListener: ListenerRegistration?
 
     // Link enable/disable
     @State private var linkEnabled = true
@@ -39,7 +44,7 @@ struct ProjectShareSheet: View {
 
     private var deepLink: String {
         guard let ownerID = deepLinkOwnerID else { return "" }
-        return "unreleased://project/\(ownerID)/\(project.id.uuidString.lowercased())"
+        return ProjectLinkRouter.shareURL(ownerID: ownerID, projectID: project.id).absoluteString
     }
 
     private var isOwner: Bool { !project.isShared }
@@ -121,6 +126,12 @@ struct ProjectShareSheet: View {
         .presentationContentInteraction(.resizes)
         .presentationBackground(Color(.systemBackground))
         .task { await load() }
+        .onDisappear {
+            inviteesListener?.remove()
+            pendingInvitesListener?.remove()
+            inviteesListener = nil
+            pendingInvitesListener = nil
+        }
     }
 
     // MARK: - Invite by username
@@ -193,7 +204,11 @@ struct ProjectShareSheet: View {
 
     private func searchResultRow(_ user: UserSearchResult) -> some View {
         HStack(spacing: 12) {
-            avatarCircle(initial: user.username.first.map(String.init) ?? "?", size: 32)
+            avatarCircle(
+                initial: user.username.first.map(String.init) ?? "?",
+                size: 32,
+                photoURL: user.avatarURL
+            )
 
             Text("@\(user.username)")
                 .font(.system(size: 15, weight: .medium))
@@ -209,7 +224,9 @@ struct ProjectShareSheet: View {
 
     @ViewBuilder
     private func inviteButton(for user: UserSearchResult) -> some View {
-        if invitedUIDs.contains(user.id) {
+        if invitedUIDs.contains(user.id)
+            || pendingInvites.contains(where: { $0.id == user.id })
+            || invitees.contains(where: { $0.id == user.id }) {
             Label("Invited", systemImage: "checkmark")
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(.green)
@@ -517,7 +534,11 @@ struct ProjectShareSheet: View {
             .padding(.leading, 4)
     }
 
-    private func avatarCircle(initial: String, size: CGFloat) -> some View {
+    private func avatarCircle(
+        initial: String,
+        size: CGFloat,
+        photoURL: URL? = nil
+    ) -> some View {
         ZStack {
             Circle()
                 .fill(Color(.tertiarySystemBackground))
@@ -525,7 +546,23 @@ struct ProjectShareSheet: View {
             Text(initial.uppercased())
                 .font(.system(size: size * 0.42, weight: .semibold))
                 .foregroundStyle(.secondary)
+
+            if let photoURL {
+                AsyncImage(url: photoURL) { phase in
+                    if let image = phase.image {
+                        image
+                            .resizable()
+                            .scaledToFill()
+                            .transition(.opacity)
+                    } else {
+                        Color.clear
+                    }
+                }
+                .frame(width: size, height: size)
+                .clipShape(.circle)
+            }
         }
+        .accessibilityHidden(true)
     }
 
     private var trimmedQuery: String {
@@ -548,21 +585,40 @@ struct ProjectShareSheet: View {
             ownerUsername: username
         )
 
-        // Load current link state, accepted invitees, and pending invites in parallel.
-        async let previewTask = ProjectInviteService.fetchPreview(ownerUID: ownerID, projectID: project.id)
-        async let inviteesTask = ProjectInviteService.fetchInvitees(ownerUID: ownerID, projectID: project.id)
-        async let pendingTask = ProjectInviteService.fetchPendingInvites(ownerUID: ownerID, projectID: project.id)
+        inviteesListener?.remove()
+        pendingInvitesListener?.remove()
+        loadedInvitees = false
+        loadedAcceptedInvitees = false
+        loadedPendingInvites = false
+        inviteesListener = ProjectInviteService.observeInvitees(
+            ownerUID: ownerID,
+            projectID: project.id
+        ) { nextInvitees in
+            Task { @MainActor in
+                withAnimation {
+                    invitees = nextInvitees
+                    loadedAcceptedInvitees = true
+                    loadedInvitees = loadedPendingInvites
+                }
+            }
+        }
+        pendingInvitesListener = ProjectInviteService.observePendingInvites(
+            ownerUID: ownerID,
+            projectID: project.id
+        ) { nextPending in
+            Task { @MainActor in
+                withAnimation {
+                    pendingInvites = nextPending
+                    loadedPendingInvites = true
+                    loadedInvitees = loadedAcceptedInvitees
+                }
+            }
+        }
 
-        let preview = await previewTask
-        let list = await inviteesTask
-        let pending = await pendingTask
-
+        let preview = await ProjectInviteService.fetchPreview(ownerUID: ownerID, projectID: project.id)
         withAnimation {
             linkEnabled = preview?.linkEnabled ?? true
             loadedLinkState = true
-            invitees = list
-            pendingInvites = pending
-            loadedInvitees = true
         }
     }
 
@@ -614,7 +670,9 @@ struct ProjectShareSheet: View {
             )
             withAnimation {
                 _ = invitedUIDs.insert(user.id)
-                pendingInvites.append(newPending)
+                if !pendingInvites.contains(where: { $0.id == newPending.id }) {
+                    pendingInvites.append(newPending)
+                }
             }
         } catch {
             print("ProjectShareSheet: invite failed — \(error)")
@@ -624,26 +682,34 @@ struct ProjectShareSheet: View {
 
     private func cancelInvite(_ pending: PendingInviteInfo) async {
         guard let ownerID = auth.signedInUserID else { return }
-        await ProjectInviteService.cancelInvite(
-            ownerUID: ownerID,
-            projectID: project.id,
-            inviteeUID: pending.id,
-            notificationID: pending.notificationID
-        )
-        withAnimation {
-            pendingInvites.removeAll { $0.id == pending.id }
-            invitedUIDs.remove(pending.id)
+        do {
+            try await ProjectInviteService.cancelInvite(
+                ownerUID: ownerID,
+                projectID: project.id,
+                inviteeUID: pending.id,
+                notificationID: pending.notificationID
+            )
+            withAnimation {
+                pendingInvites.removeAll { $0.id == pending.id }
+                invitedUIDs.remove(pending.id)
+            }
+        } catch {
+            print("ProjectShareSheet: cancel invite failed — \(error)")
         }
     }
 
     private func removeInvitee(_ invitee: InviteeInfo) async {
         guard let ownerID = auth.signedInUserID else { return }
-        try? await ProjectInviteService.removeInvitee(
-            ownerUID: ownerID,
-            projectID: project.id,
-            inviteeUID: invitee.id
-        )
-        withAnimation { invitees.removeAll { $0.id == invitee.id } }
+        do {
+            try await ProjectInviteService.removeInvitee(
+                ownerUID: ownerID,
+                projectID: project.id,
+                inviteeUID: invitee.id
+            )
+            withAnimation { invitees.removeAll { $0.id == invitee.id } }
+        } catch {
+            print("ProjectShareSheet: remove listener failed — \(error)")
+        }
     }
 
     // MARK: - QR generation

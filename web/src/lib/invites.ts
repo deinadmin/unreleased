@@ -9,13 +9,18 @@ import {
   getDoc,
   getDocs,
   limit,
+  onSnapshot,
   orderBy,
   query,
   setDoc,
   startAt,
+  writeBatch,
+  type QuerySnapshot,
+  type Unsubscribe,
 } from "firebase/firestore"
 import { decodeGradient, encodeGradient } from "./codec"
 import { db } from "./firebase"
+import { fetchProfilePhotoURL } from "./profile-photo"
 import type {
   InviteeInfo,
   PendingInviteInfo,
@@ -24,6 +29,8 @@ import type {
   UserSearchResult,
 } from "./types"
 
+const publicWebOrigin = "https://unreleased.top"
+
 /** Firestore stores project doc IDs as uppercase UUIDs (iOS `uuidString`). */
 export function normalizeProjectID(raw: string): string {
   return raw.toUpperCase()
@@ -31,7 +38,20 @@ export function normalizeProjectID(raw: string): string {
 
 /** Web share URL for a project (works for guests while link sharing is on). */
 export function shareLink(ownerUID: string, projectID: string): string {
-  return `${window.location.origin}/shared/${ownerUID}/${projectID.toLowerCase()}`
+  return `${publicWebOrigin}/shared/${encodeURIComponent(ownerUID)}/${encodeURIComponent(projectID.toLowerCase())}`
+}
+
+/** Public proxy URL for link-preview playback without accepting the project. */
+export function publicTrackURL(ownerUID: string, projectID: string, trackID: string): string {
+  const firebaseProjectID = import.meta.env.VITE_FIREBASE_PROJECT_ID
+  const url = new URL(
+    `https://us-central1-${firebaseProjectID}.cloudfunctions.net/getPublicProject`,
+  )
+  url.searchParams.set("ownerId", ownerUID)
+  url.searchParams.set("projectId", projectID.toLowerCase())
+  url.searchParams.set("media", "track")
+  url.searchParams.set("trackId", trackID)
+  return url.toString()
 }
 
 const previewDoc = (ownerUID: string, projectID: string) =>
@@ -40,6 +60,11 @@ const inviteesCol = (ownerUID: string, projectID: string) =>
   collection(db, "users", ownerUID, "projects", projectID, "invitees")
 const pendingCol = (ownerUID: string, projectID: string) =>
   collection(db, "users", ownerUID, "projects", projectID, "pendingInvites")
+/** Doc holding the shared projects this user accepted: `users/{uid}/private/sharedProjects`. */
+const sharedRefsDoc = (uid: string) => doc(db, "users", uid, "private", "sharedProjects")
+
+const inviteNotificationID = (ownerUID: string, projectID: string) =>
+  `projectInvite-${ownerUID}-${normalizeProjectID(projectID)}`
 
 // MARK: - Invite preview
 
@@ -58,6 +83,7 @@ export async function ensurePreview(
     ownerUID,
     ownerUsername,
     gradient: encodeGradient(project.gradient),
+    coverStoragePath: project.coverStoragePath ?? deleteField(),
     updatedAt: Timestamp.now(),
   }
   if (project.accentColorHex) data.accentColorHex = project.accentColorHex
@@ -81,6 +107,8 @@ export async function fetchPreview(
     ownerUsername: typeof data.ownerUsername === "string" ? data.ownerUsername : "",
     name: data.name,
     gradient,
+    coverStoragePath:
+      typeof data.coverStoragePath === "string" ? data.coverStoragePath : undefined,
     accentColorHex: typeof data.accentColorHex === "string" ? data.accentColorHex : undefined,
     linkEnabled: data.linkEnabled === true,
   }
@@ -99,11 +127,61 @@ export async function setLinkEnabled(
 export async function fetchInvitees(ownerUID: string, projectID: string): Promise<InviteeInfo[]> {
   const snapshot = await getDocs(inviteesCol(ownerUID, projectID)).catch(() => null)
   if (!snapshot) return []
-  return snapshot.docs.flatMap((docSnap) => {
-    const data = docSnap.data()
-    if (typeof data.username !== "string" || !(data.acceptedAt instanceof Timestamp)) return []
-    return [{ id: docSnap.id, username: data.username, acceptedAt: data.acceptedAt.toDate() }]
-  })
+  return decodeInvitees(snapshot)
+}
+
+function decodeInvitees(snapshot: QuerySnapshot): InviteeInfo[] {
+  return snapshot.docs
+    .flatMap((docSnap) => {
+      const data = docSnap.data()
+      if (typeof data.username !== "string" || !(data.acceptedAt instanceof Timestamp)) return []
+      return [{ id: docSnap.id, username: data.username, acceptedAt: data.acceptedAt.toDate() }]
+    })
+    .sort((a, b) => a.acceptedAt.getTime() - b.acceptedAt.getTime())
+}
+
+export function observeInvitees(
+  ownerUID: string,
+  projectID: string,
+  onChange: (invitees: InviteeInfo[]) => void,
+  onError?: (error: Error) => void,
+): Unsubscribe {
+  return onSnapshot(
+    inviteesCol(ownerUID, projectID),
+    (snapshot) => onChange(decodeInvitees(snapshot)),
+    (error) => onError?.(error),
+  )
+}
+
+function decodePendingInvites(snapshot: QuerySnapshot): PendingInviteInfo[] {
+  return snapshot.docs
+    .flatMap((docSnap) => {
+      const data = docSnap.data()
+      if (typeof data.username !== "string" || !(data.invitedAt instanceof Timestamp)) return []
+      return [
+        {
+          id: docSnap.id,
+          username: data.username,
+          invitedAt: data.invitedAt.toDate(),
+          notificationID:
+            typeof data.notificationID === "string" ? data.notificationID : undefined,
+        },
+      ]
+    })
+    .sort((a, b) => a.invitedAt.getTime() - b.invitedAt.getTime())
+}
+
+export function observePendingInvites(
+  ownerUID: string,
+  projectID: string,
+  onChange: (pending: PendingInviteInfo[]) => void,
+  onError?: (error: Error) => void,
+): Unsubscribe {
+  return onSnapshot(
+    pendingCol(ownerUID, projectID),
+    (snapshot) => onChange(decodePendingInvites(snapshot)),
+    (error) => onError?.(error),
+  )
 }
 
 export async function acceptInvite(
@@ -112,11 +190,25 @@ export async function acceptInvite(
   recipientUID: string,
   recipientUsername: string,
 ): Promise<void> {
-  await setDoc(doc(inviteesCol(ownerUID, projectID), recipientUID), {
+  const pendingRef = doc(pendingCol(ownerUID, projectID), recipientUID)
+  const pendingSnapshot = await getDoc(pendingRef).catch(() => null)
+  const pendingNotificationID = pendingSnapshot?.data()?.notificationID
+  const batch = writeBatch(db)
+  batch.set(doc(inviteesCol(ownerUID, projectID), recipientUID), {
     uid: recipientUID,
     username: recipientUsername,
     acceptedAt: Timestamp.now(),
   })
+  batch.set(
+    sharedRefsDoc(recipientUID),
+    { refs: { [projectID]: { ownerID: ownerUID, addedAt: Timestamp.now() } } },
+    { merge: true },
+  )
+  batch.delete(pendingRef)
+  if (typeof pendingNotificationID === "string" && pendingNotificationID) {
+    batch.delete(doc(db, "users", recipientUID, "notifications", pendingNotificationID))
+  }
+  await batch.commit()
 }
 
 export async function removeInvitee(
@@ -125,6 +217,19 @@ export async function removeInvitee(
   inviteeUID: string,
 ): Promise<void> {
   await deleteDoc(doc(inviteesCol(ownerUID, projectID), inviteeUID))
+}
+
+/** Removes shared-library membership and access for this account on every device. */
+export async function leaveSharedProject(
+  ownerUID: string,
+  projectID: string,
+  userID: string,
+): Promise<void> {
+  const batch = writeBatch(db)
+  batch.set(sharedRefsDoc(userID), { refs: { [projectID]: deleteField() } }, { merge: true })
+  batch.delete(doc(inviteesCol(ownerUID, projectID), userID))
+  batch.delete(doc(pendingCol(ownerUID, projectID), userID))
+  await batch.commit()
 }
 
 // MARK: - Username invites
@@ -138,23 +243,36 @@ export async function inviteUser(
 ): Promise<void> {
   await ensurePreview(project, ownerUID, ownerUsername)
 
-  const noteRef = doc(collection(db, "users", recipient.id, "notifications"))
-  await setDoc(noteRef, {
+  const normalizedProjectID = normalizeProjectID(project.id)
+  const noteRef = doc(
+    db,
+    "users",
+    recipient.id,
+    "notifications",
+    inviteNotificationID(ownerUID, normalizedProjectID),
+  )
+  const pendingRef = doc(pendingCol(ownerUID, normalizedProjectID), recipient.id)
+  const now = Timestamp.now()
+  const batch = writeBatch(db)
+  batch.set(noteRef, {
     type: "projectInvite",
     fromUID: ownerUID,
     fromUsername: ownerUsername,
-    projectID: project.id,
+    projectID: normalizedProjectID,
     projectName: project.name,
-    createdAt: Timestamp.now(),
+    projectGradient: encodeGradient(project.gradient),
+    ...(project.coverStoragePath ? { coverStoragePath: project.coverStoragePath } : {}),
+    recipientUsername: recipient.username,
+    createdAt: now,
     read: false,
   })
-
-  await setDoc(doc(pendingCol(ownerUID, project.id), recipient.id), {
+  batch.set(pendingRef, {
     uid: recipient.id,
     username: recipient.username,
-    invitedAt: Timestamp.now(),
+    invitedAt: now,
     notificationID: noteRef.id,
   })
+  await batch.commit()
 }
 
 export async function hasPendingInvite(
@@ -180,18 +298,7 @@ export async function fetchPendingInvites(
 ): Promise<PendingInviteInfo[]> {
   const snapshot = await getDocs(pendingCol(ownerUID, projectID)).catch(() => null)
   if (!snapshot) return []
-  return snapshot.docs.flatMap((docSnap) => {
-    const data = docSnap.data()
-    if (typeof data.username !== "string" || !(data.invitedAt instanceof Timestamp)) return []
-    return [
-      {
-        id: docSnap.id,
-        username: data.username,
-        invitedAt: data.invitedAt.toDate(),
-        notificationID: typeof data.notificationID === "string" ? data.notificationID : undefined,
-      },
-    ]
-  })
+  return decodePendingInvites(snapshot)
 }
 
 /** Withdraws a pending invite and best-effort deletes the recipient's notification. */
@@ -201,10 +308,20 @@ export async function cancelInvite(
   inviteeUID: string,
   notificationID: string | undefined,
 ): Promise<void> {
+  const batch = writeBatch(db)
   if (notificationID) {
-    await deleteDoc(doc(db, "users", inviteeUID, "notifications", notificationID)).catch(() => {})
+    batch.delete(doc(db, "users", inviteeUID, "notifications", notificationID))
   }
-  await clearPendingInvite(ownerUID, projectID, inviteeUID)
+  const pendingRef = doc(pendingCol(ownerUID, projectID), inviteeUID)
+  batch.delete(pendingRef)
+  try {
+    await batch.commit()
+  } catch {
+    // The recipient may already have deleted the notification, making the
+    // cross-user delete unauthorizable. Revoke join access regardless; the
+    // pending-delete trigger handles notification cleanup.
+    await deleteDoc(pendingRef)
+  }
 }
 
 // MARK: - User search
@@ -226,19 +343,22 @@ export async function searchUsers(
   )
   const snapshot = await getDocs(usersQuery).catch(() => null)
   if (!snapshot) return []
-  return snapshot.docs
+  const matches = snapshot.docs
     .flatMap((docSnap) => {
       const uid = docSnap.data().uid
       if (typeof uid !== "string" || uid === excludingUID) return []
       return [{ id: uid, username: docSnap.id }]
     })
     .slice(0, maxResults)
+  return Promise.all(
+    matches.map(async (match) => ({
+      ...match,
+      avatarURL: await fetchProfilePhotoURL(match.id),
+    })),
+  )
 }
 
 // MARK: - Accepted shared-project refs (web library persistence)
-
-/** Doc holding the shared projects this user accepted: `users/{uid}/private/sharedProjects`. */
-const sharedRefsDoc = (uid: string) => doc(db, "users", uid, "private", "sharedProjects")
 
 export interface SharedRef {
   ownerID: string

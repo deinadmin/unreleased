@@ -83,7 +83,7 @@ export function Waveform({
   return (
     <canvas
       ref={canvasRef}
-      className={cn("h-11 w-full touch-none", onSeek && "cursor-pointer", className)}
+      className={cn("h-11 w-full touch-none", onSeek && "cursor-default", className)}
       onPointerDown={(event) => {
         if (!onSeek) return
         event.currentTarget.setPointerCapture(event.pointerId)

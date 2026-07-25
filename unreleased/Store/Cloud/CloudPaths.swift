@@ -33,6 +33,12 @@ enum CloudPaths {
         userDocument(userID: userID).collection("private").document(docID)
     }
 
+    /// Cross-device source of truth for projects this account has added from
+    /// other owners: `users/{userID}/private/sharedProjects`.
+    static func sharedProjectsDocument(userID: String) -> DocumentReference {
+        userPrivateDocument(userID: userID, docID: "sharedProjects")
+    }
+
     /// Server-maintained storage usage/quota state, written only by the
     /// storage-limit Cloud Functions. `users/{userID}/storage/state`.
     static func storageStateDocument(userID: String) -> DocumentReference {

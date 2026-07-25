@@ -1,4 +1,5 @@
 import FirebaseFirestore
+import FirebaseStorage
 import Foundation
 
 /// Manages the current user's profile (username) and provides lookup helpers.
@@ -108,12 +109,58 @@ final class UserProfileService {
             .limit(to: limit + 1)   // fetch one extra in case we filter ourselves out
 
         guard let snapshot = try? await query.getDocuments() else { return [] }
-        return snapshot.documents.compactMap { doc -> UserSearchResult? in
+        let matches = snapshot.documents.compactMap { doc -> (uid: String, username: String)? in
             guard let uid = doc.data()["uid"] as? String else { return nil }
             if let excludingUID, uid == excludingUID { return nil }
-            return UserSearchResult(id: uid, username: doc.documentID)
+            return (uid, doc.documentID)
         }
         .prefix(limit)
-        .map { $0 }
+        return await withTaskGroup(of: UserSearchResult.self) { group in
+            for match in matches {
+                group.addTask {
+                    UserSearchResult(
+                        id: match.uid,
+                        username: match.username,
+                        avatarURL: await fetchAvatarURL(forUID: match.uid)
+                    )
+                }
+            }
+
+            var resultsByID: [String: UserSearchResult] = [:]
+            for await result in group {
+                resultsByID[result.id] = result
+            }
+            return matches.compactMap { resultsByID[$0.uid] }
+        }
+    }
+
+    /// Resolves the public profile URL first, then checks the stable Storage
+    /// object for photos uploaded by older web builds.
+    private static func fetchAvatarURL(forUID uid: String) async -> URL? {
+        let profile = try? await CloudPaths.userProfileDocument(userID: uid).getDocument()
+        if let rawURL = profile?.data()?["avatarURL"] as? String,
+           let url = URL(string: rawURL) {
+            return url
+        }
+
+        let reference = CloudPaths.profilePhotoReference(userID: uid)
+        do {
+            async let url = reference.downloadURL()
+            async let metadata = reference.getMetadata()
+            let (downloadURL, objectMetadata) = try await (url, metadata)
+            guard let updated = objectMetadata.updated else { return downloadURL }
+
+            var components = URLComponents(url: downloadURL, resolvingAgainstBaseURL: false)
+            var queryItems = components?.queryItems ?? []
+            queryItems.removeAll { $0.name == "v" }
+            queryItems.append(URLQueryItem(
+                name: "v",
+                value: String(Int(updated.timeIntervalSince1970 * 1_000))
+            ))
+            components?.queryItems = queryItems
+            return components?.url ?? downloadURL
+        } catch {
+            return nil
+        }
     }
 }

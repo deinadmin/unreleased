@@ -1,4 +1,8 @@
-import { onDocumentCreated } from "firebase-functions/v2/firestore";
+import {
+  onDocumentCreated,
+  onDocumentDeleted,
+  onDocumentWritten,
+} from "firebase-functions/v2/firestore";
 import { onObjectFinalized, onObjectDeleted } from "firebase-functions/v2/storage";
 import { onRequest } from "firebase-functions/v2/https";
 import { initializeApp } from "firebase-admin/app";
@@ -8,6 +12,105 @@ import { getMessaging } from "firebase-admin/messaging";
 import { logger } from "firebase-functions";
 
 initializeApp();
+
+const PROJECT_INVITE_TYPE = "projectInvite";
+
+async function ensureAcceptedSharedProjectReference(
+  ownerId,
+  projectId,
+  inviteeId,
+  acceptedAt = Timestamp.now()
+) {
+  await getFirestore()
+    .doc(`users/${inviteeId}/private/sharedProjects`)
+    .set(
+      {
+        refs: {
+          [projectId]: {
+            ownerID: ownerId,
+            addedAt: acceptedAt instanceof Timestamp ? acceptedAt : Timestamp.now(),
+          },
+        },
+      },
+      { merge: true }
+    );
+}
+
+/**
+ * Makes the pending-invite document match an invite notification.
+ *
+ * A transaction is important here: an owner can withdraw an invite while this
+ * trigger is starting. Re-reading the notification in the transaction prevents
+ * a delayed function invocation from resurrecting a cancelled invite.
+ */
+async function ensurePendingInviteForNotification(notificationRef, recipientId) {
+  const db = getFirestore();
+  await db.runTransaction(async (transaction) => {
+    const notificationSnap = await transaction.get(notificationRef);
+    if (!notificationSnap.exists) return;
+
+    const data = notificationSnap.data();
+    const ownerId = data.fromUID;
+    const projectId = data.projectID;
+    if (
+      data.type !== PROJECT_INVITE_TYPE ||
+      typeof ownerId !== "string" ||
+      !ownerId ||
+      typeof projectId !== "string" ||
+      !projectId
+    ) {
+      return;
+    }
+
+    const inviteeRef = db.doc(
+      `users/${ownerId}/projects/${projectId}/invitees/${recipientId}`
+    );
+    const projectRef = db.doc(`users/${ownerId}/projects/${projectId}`);
+    const pendingRef = db.doc(
+      `users/${ownerId}/projects/${projectId}/pendingInvites/${recipientId}`
+    );
+    const profileRef = db.doc(`userProfiles/${recipientId}`);
+    const [projectSnap, inviteeSnap, profileSnap] = await Promise.all([
+      transaction.get(projectRef),
+      transaction.get(inviteeRef),
+      transaction.get(profileRef),
+    ]);
+
+    if (!projectSnap.exists) {
+      transaction.delete(notificationRef);
+      transaction.delete(pendingRef);
+      return;
+    }
+
+    // Accepted users are listeners, not pending invitees. Remove any stale
+    // invite notification instead of recreating pending state for them.
+    if (inviteeSnap.exists) {
+      transaction.delete(notificationRef);
+      transaction.delete(pendingRef);
+      return;
+    }
+
+    const profileUsername = profileSnap.get("username");
+    const username =
+      typeof data.recipientUsername === "string" && data.recipientUsername
+        ? data.recipientUsername
+        : typeof profileUsername === "string" && profileUsername
+          ? profileUsername
+          : "listener";
+
+    transaction.set(
+      pendingRef,
+      {
+        uid: recipientId,
+        username,
+        invitedAt:
+          data.createdAt instanceof Timestamp ? data.createdAt : Timestamp.now(),
+        notificationID: notificationRef.id,
+      },
+      { merge: true }
+    );
+  });
+}
 
 /**
  * Sends a push notification whenever a notification document is created at
@@ -24,6 +127,10 @@ export const sendNotificationPush = onDocumentCreated(
 
     const data = snap.data();
     const userId = event.params.userId;
+
+    if (data.type === PROJECT_INVITE_TYPE) {
+      await ensurePendingInviteForNotification(snap.ref, userId);
+    }
 
     // Look up the recipient's push token.
     const tokenSnap = await getFirestore()
@@ -69,6 +176,125 @@ export const sendNotificationPush = onDocumentCreated(
     } catch (error) {
       logger.error(`Failed to send push to ${userId}:`, error);
     }
+  }
+);
+
+/**
+ * Opening either share sheet refreshes its preview. Use that write to repair
+ * legacy orphan notifications created by older clients before invite creation
+ * became atomic.
+ */
+export const reconcileProjectInvites = onDocumentWritten(
+  "users/{ownerId}/projectPreviews/{projectId}",
+  async (event) => {
+    if (!event.data?.after.exists) return;
+
+    const { ownerId, projectId } = event.params;
+    const notifications = await getFirestore()
+      .collectionGroup("notifications")
+      .where("type", "==", PROJECT_INVITE_TYPE)
+      .where("fromUID", "==", ownerId)
+      .where("projectID", "==", projectId)
+      .get();
+    const invitees = await getFirestore()
+      .collection(`users/${ownerId}/projects/${projectId}/invitees`)
+      .get();
+
+    await Promise.all([
+      ...notifications.docs.map((notification) => {
+        const recipientId = notification.ref.parent.parent?.id;
+        if (!recipientId) return Promise.resolve();
+        return ensurePendingInviteForNotification(notification.ref, recipientId);
+      }),
+      ...invitees.docs.map((invitee) =>
+        ensureAcceptedSharedProjectReference(
+          ownerId,
+          projectId,
+          invitee.id,
+          invitee.get("acceptedAt")
+        )
+      ),
+    ]);
+  }
+);
+
+/**
+ * Membership and library visibility are one invariant. Clients write both in
+ * one batch, while this trigger repairs references created by older builds or
+ * removed by a transient client-side listener failure.
+ */
+export const ensureAcceptedSharedProjectIsIndexed = onDocumentWritten(
+  "users/{ownerId}/projects/{projectId}/invitees/{inviteeId}",
+  async (event) => {
+    if (!event.data?.after.exists) return;
+    await ensureAcceptedSharedProjectReference(
+      event.params.ownerId,
+      event.params.projectId,
+      event.params.inviteeId,
+      event.data.after.get("acceptedAt")
+    );
+  }
+);
+
+/**
+ * Deleting pending state always withdraws its notification, including deletes
+ * performed by older app versions after acceptance.
+ */
+export const removeWithdrawnInviteNotification = onDocumentDeleted(
+  "users/{ownerId}/projects/{projectId}/pendingInvites/{inviteeId}",
+  async (event) => {
+    const { ownerId, projectId, inviteeId } = event.params;
+    const notifications = await getFirestore()
+      .collection(`users/${inviteeId}/notifications`)
+      .get();
+    const matching = notifications.docs.filter((notification) => {
+      const data = notification.data();
+      return (
+        data.type === PROJECT_INVITE_TYPE &&
+        data.fromUID === ownerId &&
+        data.projectID === projectId
+      );
+    });
+    await Promise.all(matching.map((notification) => notification.ref.delete()));
+  }
+);
+
+/**
+ * Removing a listener also removes the shared-project reference on every
+ * device. If link sharing remains enabled, the user can still rejoin via link.
+ */
+export const removeRevokedSharedProjectReference = onDocumentDeleted(
+  "users/{ownerId}/projects/{projectId}/invitees/{inviteeId}",
+  async (event) => {
+    const { projectId, inviteeId } = event.params;
+    const db = getFirestore();
+    const notifications = await db
+      .collection(`users/${inviteeId}/notifications`)
+      .get();
+    const batch = db.batch();
+    batch.set(
+      db.doc(`users/${inviteeId}/private/sharedProjects`),
+      { refs: { [projectId]: FieldValue.delete() } },
+      { merge: true }
+    );
+    batch.delete(
+      db.doc(
+        `users/${event.params.ownerId}/projects/${projectId}/pendingInvites/${inviteeId}`
+      )
+    );
+    await batch.commit();
+    await Promise.all(
+      notifications.docs
+        .filter((notification) => {
+          const data = notification.data();
+          return (
+            data.type === PROJECT_INVITE_TYPE &&
+            data.fromUID === event.params.ownerId &&
+            data.projectID === projectId
+          );
+        })
+        .map((notification) => notification.ref.delete())
+    );
   }
 );
 

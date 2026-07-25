@@ -117,6 +117,7 @@ struct NotificationsView: View {
 
 private struct NotificationRow: View {
     let notification: AppNotification
+    private let cardCornerRadius: CGFloat = 16
 
     var body: some View {
         HStack(spacing: 12) {
@@ -146,25 +147,33 @@ private struct NotificationRow: View {
                 .foregroundStyle(.tertiary)
         }
         .padding(14)
-        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .background(
+            Color(.secondarySystemBackground),
+            in: RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous)
+        )
     }
 
     private var avatar: some View {
-        ZStack {
-            Circle()
-                .fill(Color(.tertiarySystemBackground))
-                .frame(width: 40, height: 40)
-            Image(systemName: iconName)
-                .font(.system(size: 17, weight: .medium))
-                .foregroundStyle(.primary)
+        Group {
+            if notification.kind == .projectInvite {
+                CloudProjectCoverThumbnail(
+                    gradient: notification.projectGradient ?? GradientTheme.presets[4],
+                    coverStoragePath: notification.coverStoragePath,
+                    size: 48,
+                    cornerRadius: cardCornerRadius
+                )
+            } else {
+                ZStack {
+                    Circle()
+                        .fill(Color(.tertiarySystemBackground))
+                        .frame(width: 40, height: 40)
+                    Image(systemName: "bell")
+                        .font(.system(size: 17, weight: .medium))
+                        .foregroundStyle(.primary)
+                }
+            }
         }
-    }
-
-    private var iconName: String {
-        switch notification.kind {
-        case .projectInvite: return "person.badge.plus"
-        case .unknown: return "bell"
-        }
+        .accessibilityHidden(true)
     }
 
     private var title: AttributedString {
