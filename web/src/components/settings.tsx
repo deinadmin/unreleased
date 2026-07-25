@@ -6,16 +6,22 @@ import { cn } from "@/lib/utils"
 /** Grouped settings card with an uppercase-ish caption, like iOS inset sections. */
 export function SettingsSection({
   title,
+  trailing,
   children,
   className,
 }: {
   title: string
+  /** Optional caption-level accessory on the right of the section title. */
+  trailing?: ReactNode
   children: ReactNode
   className?: string
 }) {
   return (
     <section className={cn("min-w-0", className)}>
-      <h3 className="pb-2.5 pl-1 text-[13px] font-semibold text-muted-foreground">{title}</h3>
+      <div className="flex items-baseline justify-between gap-3 pb-2.5 pl-1 pr-1">
+        <h3 className="text-[13px] font-semibold text-muted-foreground">{title}</h3>
+        {trailing}
+      </div>
       <div className="overflow-hidden rounded-[14px] bg-secondary">{children}</div>
     </section>
   )

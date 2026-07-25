@@ -239,6 +239,51 @@ body {
   }
 }
 
+/* Custom EQ preset rows follow the same rule: the menu button is permanently
+   available to touch and reveals on hover for mice, while the checkmark slides
+   aside to make room and returns once the pointer leaves. */
+.preset-row-check,
+.preset-row-action {
+  transition:
+    transform 130ms var(--ease-snappy),
+    opacity 100ms ease-out,
+    color 100ms ease-out,
+    background-color 100ms ease-out;
+}
+
+.preset-row-check {
+  transform: translateX(-2rem);
+}
+
+.preset-row-action {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .preset-row-check {
+    transform: translateX(0);
+  }
+
+  .preset-row-action {
+    pointer-events: none;
+    opacity: 0;
+    transform: translateX(0.5rem);
+  }
+
+  .preset-row:hover .preset-row-check,
+  .preset-row:has(.preset-row-action:focus-visible) .preset-row-check {
+    transform: translateX(-2rem);
+  }
+
+  .preset-row:hover .preset-row-action,
+  .preset-row-action:focus-visible {
+    pointer-events: auto;
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
 /* ── Motion ──────────────────────────────────────────────────────────── */
 
 @keyframes vinyl-spin {

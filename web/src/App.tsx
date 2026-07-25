@@ -9,6 +9,7 @@ import { AuthProvider, useAuth } from "@/hooks/use-auth"
 import { NotificationsProvider } from "@/hooks/use-notifications"
 import { ProjectsProvider } from "@/hooks/use-projects"
 import { ChooseUsernamePage } from "@/pages/choose-username"
+import { EqualizerProvider } from "@/player/equalizer-provider"
 import { PlayerProvider } from "@/player/player-provider"
 import { UploadsCard } from "@/uploads/uploads-card"
 import { UploadsProvider } from "@/uploads/uploads-provider"
@@ -30,6 +31,9 @@ const ProfilePage = lazy(() =>
 )
 const ProfileAboutPage = lazy(() =>
   import("@/pages/profile-about").then((module) => ({ default: module.ProfileAboutPage })),
+)
+const ProfileEqPage = lazy(() =>
+  import("@/pages/profile-eq").then((module) => ({ default: module.ProfileEqPage })),
 )
 const ProfileNotificationsPage = lazy(() =>
   import("@/pages/profile-notifications").then((module) => ({
@@ -85,6 +89,7 @@ export default function App() {
       <ProjectsProvider>
         <NotificationsProvider>
           <PlayerProvider>
+            <EqualizerProvider>
             <UploadsProvider>
               <TooltipProvider>
                 <BrowserRouter>
@@ -144,6 +149,14 @@ export default function App() {
                     }
                   />
                   <Route
+                    path="/profile/eq"
+                    element={
+                      <RequireAuth>
+                        <ProfileEqPage />
+                      </RequireAuth>
+                    }
+                  />
+                  <Route
                     path="/profile/storage"
                     element={
                       <RequireAuth>
@@ -177,6 +190,7 @@ export default function App() {
               <Toaster position="top-center" />
               </TooltipProvider>
             </UploadsProvider>
+            </EqualizerProvider>
           </PlayerProvider>
         </NotificationsProvider>
       </ProjectsProvider>

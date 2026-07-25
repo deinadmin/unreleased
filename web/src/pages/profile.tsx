@@ -156,12 +156,7 @@ export function ProfilePage() {
             to="/profile/notifications"
           />
           <SettingsDivider />
-          <SettingsRow
-            icon={<SlidersHorizontal className="size-4" />}
-            title="EQ"
-            chevron
-            disabled
-          />
+          <SettingsRow icon={<SlidersHorizontal className="size-4" />} title="EQ" chevron to="/profile/eq" />
           <SettingsDivider />
           <SettingsRow
             icon={<Cloud className="size-4" />}

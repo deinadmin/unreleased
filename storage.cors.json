@@ -1,0 +1,16 @@
+[
+  {
+    "origin": [
+      "https://unreleased.top",
+      "https://www.unreleased.top",
+      "https://ancient-tractor-267017.web.app",
+      "https://ancient-tractor-267017.firebaseapp.com",
+      "http://localhost:5173",
+      "http://localhost:5174",
+      "http://localhost:4173"
+    ],
+    "method": ["GET", "HEAD"],
+    "responseHeader": ["Content-Type", "Content-Length", "Content-Range", "Accept-Ranges", "Range"],
+    "maxAgeSeconds": 3600
+  }
+]

@@ -10,6 +10,7 @@ import {
 } from "react"
 import { toast } from "sonner"
 import { downloadURL } from "@/lib/storage-urls"
+import { equalizerRouting } from "@/player/equalizer"
 import type { Project, Track } from "@/lib/types"
 
 interface PlayerContextValue {
@@ -81,9 +82,19 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       downloadURL(nextTrack.storagePath)
         .then((url) => {
           if (loadToken.current !== token) return
+          // The equalizer decides whether this load has to be a CORS request.
+          equalizerRouting.prepare(audio)
           audio.src = url
           audio.currentTime = 0
-          return audio.play()
+          return audio.play().catch((error) => {
+            // A CORS load the storage bucket refuses is recoverable: retry the
+            // same source plainly, leaving the equalizer switched out.
+            if (loadToken.current !== token) return
+            if (!equalizerRouting.recoverFromLoadFailure(audio)) throw error
+            audio.src = url
+            audio.currentTime = 0
+            return audio.play()
+          })
         })
         .catch((error) => {
           if (loadToken.current !== token) return
