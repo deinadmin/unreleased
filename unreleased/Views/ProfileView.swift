@@ -507,7 +507,9 @@ struct ProfileView: View {
         player.stop()
         store.configureSync(userID: nil)
         store.clearLocalLibrary()
-        auth.signOut()
+        Task {
+            await auth.signOut()
+        }
     }
 
     private var placeholderSettings: [ProfileSettingsRowLabel.Model] {

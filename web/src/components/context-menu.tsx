@@ -20,9 +20,9 @@ export interface ContextMenuItem {
 
 interface ContextMenuContextValue {
   /** Opens the custom menu at the pointer position of a `contextmenu` event. */
-  open: (event: React.MouseEvent, items: ContextMenuItem[]) => void
+  open: (event: React.MouseEvent, items: ContextMenuItem[], onClose?: () => void) => void
   /** Opens the custom menu at explicit viewport coordinates. */
-  openAt: (x: number, y: number, items: ContextMenuItem[]) => void
+  openAt: (x: number, y: number, items: ContextMenuItem[], onClose?: () => void) => void
 }
 
 const ContextMenuContext = createContext<ContextMenuContextValue | null>(null)
@@ -34,6 +34,24 @@ const ContextMenuContext = createContext<ContextMenuContextValue | null>(null)
 export function ContextMenuProvider({ children }: { children: ReactNode }) {
   const [menu, setMenu] = useState<{ x: number; y: number; items: ContextMenuItem[] } | null>(null)
   const menuRef = useRef<HTMLDivElement>(null)
+  const onCloseRef = useRef<(() => void) | null>(null)
+
+  const close = useCallback(() => {
+    const onClose = onCloseRef.current
+    onCloseRef.current = null
+    setMenu(null)
+    onClose?.()
+  }, [])
+
+  const show = useCallback(
+    (x: number, y: number, items: ContextMenuItem[], onClose?: () => void) => {
+      if (items.length === 0) return
+      onCloseRef.current?.()
+      onCloseRef.current = onClose ?? null
+      setMenu({ x, y, items })
+    },
+    [],
+  )
 
   // No right-click menu by default.
   useEffect(() => {
@@ -42,14 +60,20 @@ export function ContextMenuProvider({ children }: { children: ReactNode }) {
     return () => window.removeEventListener("contextmenu", suppress)
   }, [])
 
-  const open = useCallback((event: React.MouseEvent, items: ContextMenuItem[]) => {
-    event.preventDefault()
-    if (items.length > 0) setMenu({ x: event.clientX, y: event.clientY, items })
-  }, [])
+  const open = useCallback(
+    (event: React.MouseEvent, items: ContextMenuItem[], onClose?: () => void) => {
+      event.preventDefault()
+      show(event.clientX, event.clientY, items, onClose)
+    },
+    [show],
+  )
 
-  const openAt = useCallback((x: number, y: number, items: ContextMenuItem[]) => {
-    if (items.length > 0) setMenu({ x, y, items })
-  }, [])
+  const openAt = useCallback(
+    (x: number, y: number, items: ContextMenuItem[], onClose?: () => void) => {
+      show(x, y, items, onClose)
+    },
+    [show],
+  )
 
   // Keep the menu inside the viewport.
   useLayoutEffect(() => {
@@ -64,7 +88,6 @@ export function ContextMenuProvider({ children }: { children: ReactNode }) {
   // Dismiss on outside press, Escape, scroll, or resize.
   useEffect(() => {
     if (!menu) return
-    const close = () => setMenu(null)
     const onPointerDown = (event: PointerEvent) => {
       if (!menuRef.current?.contains(event.target as Node)) close()
     }
@@ -81,7 +104,9 @@ export function ContextMenuProvider({ children }: { children: ReactNode }) {
       window.removeEventListener("scroll", close, true)
       window.removeEventListener("resize", close)
     }
-  }, [menu])
+  }, [close, menu])
+
+  useEffect(() => () => onCloseRef.current?.(), [])
 
   return (
     <ContextMenuContext.Provider value={{ open, openAt }}>
@@ -100,7 +125,7 @@ export function ContextMenuProvider({ children }: { children: ReactNode }) {
               role="menuitem"
               disabled={item.disabled}
               onClick={() => {
-                setMenu(null)
+                close()
                 item.onSelect()
               }}
               className={cn(

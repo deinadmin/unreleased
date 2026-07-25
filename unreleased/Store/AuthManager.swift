@@ -70,14 +70,15 @@ final class AuthManager {
         errorMessage = nil
     }
 
-    func signOut() {
+    func signOut() async {
+        await PushNotificationManager.shared.detachFromCurrentUser()
         do {
             try Auth.auth().signOut()
             GIDSignIn.sharedInstance.signOut()
-            PushNotificationManager.shared.clearApplicationBadge()
             user = nil
         } catch {
             errorMessage = error.localizedDescription
+            PushNotificationManager.shared.registerForPushNotifications()
         }
     }
 

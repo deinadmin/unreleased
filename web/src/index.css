@@ -179,6 +179,54 @@ body {
   }
 }
 
+/* ── Project detail layout ───────────────────────────────────────────── */
+
+/*
+ * This container shrinks with the page when the maximized player adds its
+ * body inset. That makes the project fall back to its compact layout based on
+ * usable content width rather than the browser's full viewport width.
+ */
+.project-detail-page {
+  container: project-detail / inline-size;
+}
+
+@container project-detail (min-width: 70rem) {
+  .project-detail-main {
+    height: calc(100dvh - 3.5rem);
+    max-width: 72rem;
+    overflow: hidden;
+    padding-bottom: 0;
+  }
+
+  .project-detail-layout {
+    display: grid;
+    grid-template-columns: minmax(22rem, 25rem) minmax(0, 1fr);
+    column-gap: clamp(3rem, 6cqi, 7rem);
+    height: 100%;
+    margin-top: -3rem;
+    min-height: 0;
+  }
+
+  .project-detail-summary {
+    min-width: 0;
+    padding-top: 4rem;
+  }
+
+  .project-detail-cover {
+    width: min(18rem, 100%);
+  }
+
+  .project-detail-tracks {
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding-top: 4rem;
+    padding-right: 0.5rem;
+    padding-bottom: 10rem;
+    scrollbar-gutter: stable;
+  }
+}
+
 /* Card actions stay discoverable on touch devices and reveal on hover for mice. */
 .project-card-action {
   opacity: 1;
@@ -190,6 +238,7 @@ body {
   }
 
   .group:hover .project-card-action,
+  .project-card-menu-open .project-card-action,
   .project-card-action:focus-visible,
   .project-card-action[data-active="true"] {
     opacity: 1;
@@ -198,12 +247,18 @@ body {
 
 /* Track metadata and actions share one quick, synchronized hover transition. */
 .track-row-duration,
-.track-row-action {
+.track-row-action,
+.track-row-copy {
   transition:
     transform 130ms var(--ease-snappy),
     opacity 100ms ease-out,
+    padding-right 130ms var(--ease-snappy),
     color 100ms ease-out,
     background-color 100ms ease-out;
+}
+
+.track-row-copy {
+  padding-right: 3rem;
 }
 
 .track-row-duration {
@@ -216,6 +271,10 @@ body {
 }
 
 @media (hover: hover) and (pointer: fine) {
+  .track-row-copy {
+    padding-right: 0;
+  }
+
   .track-row-duration {
     transform: translateX(0);
   }
@@ -227,11 +286,19 @@ body {
   }
 
   .track-row:hover .track-row-duration,
+  .track-row-menu-open .track-row-duration,
   .track-row:has(.track-row-action:focus-visible) .track-row-duration {
     transform: translateX(-3rem);
   }
 
+  .track-row:hover .track-row-copy,
+  .track-row-menu-open .track-row-copy,
+  .track-row:has(.track-row-action:focus-visible) .track-row-copy {
+    padding-right: 3rem;
+  }
+
   .track-row:hover .track-row-action,
+  .track-row-menu-open .track-row-action,
   .track-row-action:focus-visible {
     pointer-events: auto;
     opacity: 1;
@@ -246,6 +313,7 @@ body {
 .preset-row-action {
   transition:
     transform 130ms var(--ease-snappy),
+    scale 130ms var(--ease-snappy),
     opacity 100ms ease-out,
     color 100ms ease-out,
     background-color 100ms ease-out;

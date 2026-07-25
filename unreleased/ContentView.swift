@@ -235,6 +235,7 @@ struct ContentView: View {
         .animation(.smooth(duration: 0.35), value: player.currentTrack?.id)
         .task(id: auth.signedInUserID) {
             store.configureSync(userID: auth.signedInUserID)
+            player.configureEqualizerSync(userID: auth.signedInUserID)
             if auth.signedInUserID != nil {
                 PushNotificationManager.shared.registerForPushNotifications()
                 // Drain an invite tapped before we were ready (cold launch / pre-sign-in).

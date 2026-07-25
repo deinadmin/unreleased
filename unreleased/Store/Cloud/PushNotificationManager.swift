@@ -28,6 +28,9 @@ enum PushUserInfoKey {
 final class PushNotificationManager: NSObject {
     static let shared = PushNotificationManager()
 
+    private let tokenStateLock = NSLock()
+    private var tokenUploadsEnabled = true
+
     /// A project invite tapped while the app wasn't ready to route it yet
     /// (e.g. cold launch, or before sign-in). `ContentView` drains this when it appears.
     private var pendingProjectLink: (ownerID: String, projectID: String)?
@@ -41,6 +44,11 @@ final class PushNotificationManager: NSObject {
     /// Requests notification permission and registers for remote notifications.
     /// Safe to call multiple times (e.g. after sign-in).
     func registerForPushNotifications() {
+        setTokenUploadsEnabled(true)
+        #if canImport(FirebaseMessaging)
+        Messaging.messaging().isAutoInitEnabled = true
+        #endif
+
         let center = UNUserNotificationCenter.current()
         center.delegate = self
         center.requestAuthorization(options: [.alert, .badge, .sound]) { granted, error in
@@ -48,7 +56,52 @@ final class PushNotificationManager: NSObject {
             guard granted else { return }
             DispatchQueue.main.async {
                 UIApplication.shared.registerForRemoteNotifications()
+                #if canImport(FirebaseMessaging)
+                Messaging.messaging().token { [weak self] token, error in
+                    if let error {
+                        print("PushNotificationManager: token refresh failed — \(error)")
+                        return
+                    }
+                    guard let self, let token else { return }
+                    self.uploadToken(token)
+                }
+                #endif
             }
+        }
+    }
+
+    /// Detaches this installation from the current account before Firebase Auth
+    /// signs out. The compare-and-delete transaction avoids clearing a token that
+    /// a different device may have uploaded more recently.
+    func detachFromCurrentUser() async {
+        setTokenUploadsEnabled(false)
+
+        let center = UNUserNotificationCenter.current()
+        center.removeAllDeliveredNotifications()
+        center.removeAllPendingNotificationRequests()
+        pendingProjectLink = nil
+        clearApplicationBadge()
+
+        #if canImport(FirebaseMessaging)
+        let messaging = Messaging.messaging()
+        messaging.isAutoInitEnabled = false
+        let token = messaging.fcmToken
+
+        if let userID = Auth.auth().currentUser?.uid, let token {
+            await removeToken(token, fromUserID: userID)
+        }
+
+        do {
+            try await messaging.deleteToken()
+        } catch {
+            // If local invalidation fails, the server removes the stale token the
+            // next time FCM reports it as invalid or unregistered.
+            print("PushNotificationManager: token deletion failed — \(error)")
+        }
+        #endif
+
+        await MainActor.run {
+            UIApplication.shared.unregisterForRemoteNotifications()
         }
     }
 
@@ -68,6 +121,7 @@ final class PushNotificationManager: NSObject {
     /// Persists the current push token to the signed-in user's private doc so the
     /// Cloud Function can look it up. No-op until a token and a signed-in user exist.
     func uploadToken(_ token: String) {
+        guard areTokenUploadsEnabled else { return }
         guard let uid = Auth.auth().currentUser?.uid else { return }
         let ref = CloudPaths.userPrivateDocument(userID: uid, docID: "push")
         ref.setData([
@@ -75,6 +129,44 @@ final class PushNotificationManager: NSObject {
             "platform": "ios",
             "updatedAt": Timestamp(date: Date()),
         ], merge: true)
+    }
+
+    private var areTokenUploadsEnabled: Bool {
+        tokenStateLock.withLock { tokenUploadsEnabled }
+    }
+
+    private func setTokenUploadsEnabled(_ enabled: Bool) {
+        tokenStateLock.withLock {
+            tokenUploadsEnabled = enabled
+        }
+    }
+
+    private func removeToken(_ token: String, fromUserID userID: String) async {
+        let ref = CloudPaths.userPrivateDocument(userID: userID, docID: "push")
+        do {
+            _ = try await Firestore.firestore().runTransaction { transaction, errorPointer in
+                let snapshot: DocumentSnapshot
+                do {
+                    snapshot = try transaction.getDocument(ref)
+                } catch {
+                    errorPointer?.pointee = error as NSError
+                    return nil
+                }
+
+                guard snapshot.get("fcmToken") as? String == token else {
+                    return nil
+                }
+
+                transaction.updateData([
+                    "fcmToken": FieldValue.delete(),
+                    "platform": FieldValue.delete(),
+                    "updatedAt": Timestamp(date: Date()),
+                ], forDocument: ref)
+                return nil
+            }
+        } catch {
+            print("PushNotificationManager: server token removal failed — \(error)")
+        }
     }
 
     struct Preferences {

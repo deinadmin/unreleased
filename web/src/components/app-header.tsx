@@ -4,12 +4,17 @@ import { AppMark } from "@/components/app-mark"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { useAuth } from "@/hooks/use-auth"
 import { useNotifications } from "@/hooks/use-notifications"
+import { useProject } from "@/hooks/use-projects"
 
 export function AppHeader() {
   const { user, isSignedIn, username } = useAuth()
   const location = useLocation()
+  const projectRoute = location.pathname.match(/^\/project\/([^/]+)/)
+  const sharedProjectRoute = location.pathname.match(/^\/shared\/[^/]+\/([^/]+)/)
+  const project = useProject(projectRoute?.[1] ?? sharedProjectRoute?.[1])
   const displayName = username ?? user?.displayName ?? user?.email ?? ""
   const initial = (displayName || "u").charAt(0).toUpperCase()
+  const returnLabel = routeLabel(location.pathname, project?.name)
 
   return (
     <header className="sticky top-0 z-30 border-b border-border/60 bg-background">
@@ -33,6 +38,7 @@ export function AppHeader() {
             <NotificationBell />
             <Link
               to="/profile"
+              state={{ profileReturnLabel: returnLabel }}
               aria-label="Profile"
               className="cursor-default rounded-full outline-none transition hover:opacity-85 focus-visible:ring-2 focus-visible:ring-ring"
             >
@@ -48,6 +54,19 @@ export function AppHeader() {
       </div>
     </header>
   )
+}
+
+function routeLabel(pathname: string, projectName?: string): string {
+  if (pathname === "/") return "Library"
+  if (pathname === "/notifications") return "Notifications"
+  if (pathname.startsWith("/project/")) return projectName ?? "Project"
+  if (pathname.startsWith("/shared/")) return projectName ?? "Shared Project"
+  if (pathname === "/profile/notifications") return "Notification Settings"
+  if (pathname === "/profile/eq") return "EQ"
+  if (pathname.startsWith("/profile/storage")) return "Storage & Sync"
+  if (pathname === "/profile/about") return "About"
+  if (pathname.startsWith("/welcome")) return "Welcome"
+  return "Library"
 }
 
 function NotificationBell() {

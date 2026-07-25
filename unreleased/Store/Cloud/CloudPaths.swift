@@ -39,6 +39,12 @@ enum CloudPaths {
         userPrivateDocument(userID: userID, docID: "sharedProjects")
     }
 
+    /// Cross-device custom equalizer presets.
+    /// `users/{userID}/private/equalizerPresets`.
+    static func equalizerPresetsDocument(userID: String) -> DocumentReference {
+        userPrivateDocument(userID: userID, docID: "equalizerPresets")
+    }
+
     /// Server-maintained storage usage/quota state, written only by the
     /// storage-limit Cloud Functions. `users/{userID}/storage/state`.
     static func storageStateDocument(userID: String) -> DocumentReference {

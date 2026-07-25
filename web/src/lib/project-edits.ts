@@ -17,6 +17,7 @@ import {
   cacheUploadedProjectCover,
   invalidateProjectCover,
 } from "./project-cover-cache"
+import { invalidatePlayedTrackCache } from "./track-cache"
 import type { GradientTheme, Project, Track } from "./types"
 
 /** Firestore edits for the user's own projects, mirroring the iOS `EditProjectSheet.save()`. */
@@ -63,6 +64,27 @@ export async function updateTrackNotes(
   if (!current || current.notes === notes) return
   const tracks = await Promise.all(
     project.tracks.map((t) => encodeTrack(t.id === trackID ? { ...t, notes } : t)),
+  )
+  await updateDoc(projectDoc(uid, project.id), {
+    tracks,
+    updatedDate: Timestamp.now(),
+  })
+}
+
+/** Renames a single track by rewriting the project's embedded tracks array. */
+export async function updateTrackTitle(
+  uid: string,
+  project: Project,
+  trackID: string,
+  rawTitle: string,
+): Promise<void> {
+  const title = rawTitle.trim()
+  const current = project.tracks.find((track) => track.id === trackID)
+  if (!title || !current || current.title === title) return
+  const tracks = await Promise.all(
+    project.tracks.map((track) =>
+      encodeTrack(track.id === trackID ? { ...track, title } : track),
+    ),
   )
   await updateDoc(projectDoc(uid, project.id), {
     tracks,
@@ -138,6 +160,7 @@ function audioPaths(track: Track): string[] {
 
 function deleteAudioObjects(paths: string[]): void {
   for (const path of new Set(paths)) {
+    invalidatePlayedTrackCache(path)
     deleteObject(storageRef(storage, path)).catch(() => {})
   }
 }
@@ -248,6 +271,9 @@ export async function deleteProject(uid: string, project: Project): Promise<void
     for (const version of track.versions) {
       if (version.storagePath) storagePaths.add(version.storagePath)
     }
+  }
+  for (const storagePath of storagePaths) {
+    invalidatePlayedTrackCache(storagePath)
   }
   await Promise.allSettled(
     [...storagePaths].map((path) => deleteObject(storageRef(storage, path))),

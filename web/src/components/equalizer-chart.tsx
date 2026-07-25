@@ -47,6 +47,8 @@ export function EqualizerChart({
 }) {
   const containerRef = useRef<HTMLDivElement>(null)
   const svgRef = useRef<SVGSVGElement>(null)
+  /** Ignores any second pointer that shows up mid-drag. */
+  const dragPointerRef = useRef<number | null>(null)
   const { width, plotInset } = useChartGeometry(containerRef)
   const [activeBand, setActiveBand] = useState<number | null>(null)
   const [hoveredBand, setHoveredBand] = useState<number | null>(null)
@@ -73,15 +75,51 @@ export function EqualizerChart({
   )
 
   const onPointerDown = (event: React.PointerEvent<SVGSVGElement>) => {
+    if (event.pointerType === "mouse" && event.button !== 0) return
     const rect = svgRef.current?.getBoundingClientRect()
     if (!rect) return
-    event.currentTarget.setPointerCapture(event.pointerId)
     if (!enabled) onActivate()
+    dragPointerRef.current = event.pointerId
     const progress = Math.min(1, Math.max(0, (event.clientX - rect.left - plotInset) / plotWidth))
     const index = Math.round(progress * LAST_BAND)
     setActiveBand(index)
     adjust(index, event.clientY)
   }
+
+  /**
+   * The drag is followed on the window rather than through pointer capture: a
+   * release outside the chart, a pointer lost to a context menu, or a window
+   * that loses focus mid-drag all have to end it. Otherwise the curve keeps
+   * tracking the pointer when it wanders back in with no button held.
+   */
+  useEffect(() => {
+    if (activeBand === null) return
+    const isDragPointer = (event: PointerEvent) =>
+      dragPointerRef.current === null || event.pointerId === dragPointerRef.current
+    const stop = () => {
+      dragPointerRef.current = null
+      setActiveBand(null)
+    }
+    const onMove = (event: PointerEvent) => {
+      if (!isDragPointer(event)) return
+      // A mouse that reappears with no button down was released off-chart.
+      if (event.pointerType === "mouse" && event.buttons === 0) return stop()
+      adjust(activeBand, event.clientY)
+    }
+    const onRelease = (event: PointerEvent) => {
+      if (isDragPointer(event)) stop()
+    }
+    window.addEventListener("pointermove", onMove)
+    window.addEventListener("pointerup", onRelease)
+    window.addEventListener("pointercancel", onRelease)
+    window.addEventListener("blur", stop)
+    return () => {
+      window.removeEventListener("pointermove", onMove)
+      window.removeEventListener("pointerup", onRelease)
+      window.removeEventListener("pointercancel", onRelease)
+      window.removeEventListener("blur", stop)
+    }
+  }, [activeBand, adjust])
 
   /** Nearest handle within `HOVER_RADIUS` of the pointer, if any. */
   const handleUnder = (event: React.PointerEvent<SVGSVGElement>): number | null => {
@@ -103,17 +141,8 @@ export function EqualizerChart({
   }
 
   const onPointerMove = (event: React.PointerEvent<SVGSVGElement>) => {
-    if (activeBand !== null) {
-      adjust(activeBand, event.clientY)
-      return
-    }
-    setHoveredBand(handleUnder(event))
-  }
-
-  const endDrag = (event: React.PointerEvent<SVGSVGElement>) => {
-    setActiveBand(null)
-    // The pointer often ends up resting on the handle it just moved.
-    setHoveredBand(handleUnder(event))
+    // While dragging, the window listener owns the pointer.
+    if (activeBand === null) setHoveredBand(handleUnder(event))
   }
 
   const nudge = (index: number, delta: number) => {
@@ -140,8 +169,8 @@ export function EqualizerChart({
         style={{ cursor: hoveredBand === null ? undefined : "ns-resize" }}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
-        onPointerUp={endDrag}
-        onPointerCancel={endDrag}
+        // The pointer often ends up resting on the handle it just moved.
+        onPointerUp={(event) => setHoveredBand(handleUnder(event))}
         onPointerLeave={() => setHoveredBand(null)}
       >
         <defs>

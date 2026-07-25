@@ -14,6 +14,22 @@ import { logger } from "firebase-functions";
 initializeApp();
 
 const PROJECT_INVITE_TYPE = "projectInvite";
+const STALE_MESSAGING_TOKEN_CODES = new Set([
+  "messaging/invalid-registration-token",
+  "messaging/registration-token-not-registered",
+]);
+
+async function removePushTokenIfCurrent(pushRef, token) {
+  await getFirestore().runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(pushRef);
+    if (snapshot.get("fcmToken") !== token) return;
+    transaction.update(pushRef, {
+      fcmToken: FieldValue.delete(),
+      platform: FieldValue.delete(),
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+  });
+}
 
 async function ensureAcceptedSharedProjectReference(
   ownerId,
@@ -133,9 +149,8 @@ export const sendNotificationPush = onDocumentCreated(
     }
 
     // Look up the recipient's push token.
-    const tokenSnap = await getFirestore()
-      .doc(`users/${userId}/private/push`)
-      .get();
+    const pushRef = getFirestore().doc(`users/${userId}/private/push`);
+    const tokenSnap = await pushRef.get();
     const fcmToken = tokenSnap.get("fcmToken");
     if (!fcmToken) {
       logger.info(`No FCM token for user ${userId}; skipping push.`);
@@ -174,6 +189,15 @@ export const sendNotificationPush = onDocumentCreated(
       });
       logger.info(`Sent push to ${userId}.`);
     } catch (error) {
+      if (STALE_MESSAGING_TOKEN_CODES.has(error?.code)) {
+        try {
+          await removePushTokenIfCurrent(pushRef, fcmToken);
+          logger.info(`Removed stale push token for ${userId}.`);
+        } catch (cleanupError) {
+          logger.error(`Failed to remove stale push token for ${userId}:`, cleanupError);
+        }
+        return;
+      }
       logger.error(`Failed to send push to ${userId}:`, error);
     }
   }

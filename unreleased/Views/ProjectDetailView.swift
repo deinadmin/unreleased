@@ -9,8 +9,6 @@ struct ProjectDetailView: View {
     @Environment(AppSearchState.self) private var searchState
     @Environment(AuthManager.self) private var auth
     @Environment(\.navigateToTrackNotes) private var navigateToTrackNotes
-    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
-
     let projectID: UUID
     var projectZoomNamespace: Namespace.ID
 
@@ -219,12 +217,6 @@ struct ProjectDetailView: View {
     @ViewBuilder
     private func trackListSection(project: Project) -> some View {
         VStack(spacing: 0) {
-            // Regular width (iPad): the add-tracks button lives in the header's info column.
-            if !project.isShared, horizontalSizeClass != .regular {
-                AddTracksButton(isImporting: isImporting, action: requestAddTracks)
-                    .padding(.horizontal, 20)
-            }
-
             let tracks = filteredTracks(for: project)
             if searchState.isActive,
                searchState.scope == .project(projectID),
@@ -242,10 +234,11 @@ struct ProjectDetailView: View {
                             accentColor: store.accentColor(for: project),
                             onShowInfo: { trackForInfo = track }
                         )
-
-                        if index < tracks.count - 1 {
-                            Divider()
-                                .padding(.leading, 20 + 28 + 12)
+                        .overlay(alignment: .bottomLeading) {
+                            if index < tracks.count - 1 {
+                                Divider()
+                                    .padding(.leading, 20 + 28 + 12)
+                            }
                         }
                     }
                 }
@@ -434,6 +427,7 @@ private struct RedProjectDetailLeaveMenuIcon: View {
 
 private struct ProjectDetailHeaderSection: View, Equatable {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     let project: Project
     let coverImage: UIImage?
@@ -447,14 +441,16 @@ private struct ProjectDetailHeaderSection: View, Equatable {
     var onAddTracks: (() -> Void)? = nil
 
     @State private var longPressHapticTick = 0
+    @ScaledMetric(relativeTo: .body) private var actionSpacing = 12.0
 
-    /// Fixed cover size for the regular-width (iPad) side-by-side layout.
+    /// Fixed cover size for the centered regular-width (iPad) layout.
     private static let regularCoverSize: CGFloat = 260
 
     static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.project.id == rhs.project.id
             && lhs.isPlaying == rhs.isPlaying
             && lhs.project.name == rhs.project.name
+            && lhs.project.isShared == rhs.project.isShared
             && lhs.project.trackCountText == rhs.project.trackCountText
             && lhs.project.formattedDuration == rhs.project.formattedDuration
             && lhs.project.gradient == rhs.project.gradient
@@ -466,66 +462,43 @@ private struct ProjectDetailHeaderSection: View, Equatable {
     }
 
     var body: some View {
-        Group {
-            if horizontalSizeClass == .regular {
-                regularBody
-            } else {
-                compactBody
-            }
-        }
+        centeredBody
         .sensoryFeedback(.increase, trigger: longPressHapticTick)
     }
 
-    // MARK: Compact (iPhone) — cover on top, info below
+    // MARK: Centered project summary
 
-    private var compactBody: some View {
+    private var centeredBody: some View {
         VStack(spacing: 0) {
-            // Total visual width when playing = size × 1.375, so:
-            //   size = availableWidth / 1.375
-            // This keeps the cover + vinyl within the padded container in both states.
-            GeometryReader { geo in
-                let coverSize = geo.size.width / 1.375
-                cover(size: coverSize)
-                    .frame(width: geo.size.width, height: coverSize, alignment: .center)
-            }
-            .aspectRatio(1.375, contentMode: .fit)
-
-            HStack(alignment: .center) {
-                titleAndStats
-
-                Spacer()
-
-                playbackButtons
-            }
-            .padding(.top, 16)
-        }
-    }
-
-    // MARK: Regular (iPad) — cover on the left, info column on the right
-
-    private var regularBody: some View {
-        HStack(alignment: .center, spacing: 28) {
-            // Reserve the cover's full visual extent (size × 1.375) so the
-            // vinyl slide-out never overlaps the info column.
-            cover(size: Self.regularCoverSize)
-                .frame(
-                    width: Self.regularCoverSize * 1.375,
-                    height: Self.regularCoverSize,
-                    alignment: .center
-                )
-
-            VStack(alignment: .leading, spacing: 20) {
-                titleAndStats
-
-                playbackButtons
-
-                if let onAddTracks {
-                    AddTracksButton(isImporting: isImporting, action: onAddTracks)
-                        .frame(maxWidth: 280)
+            if horizontalSizeClass == .regular {
+                cover(size: Self.regularCoverSize)
+                    .frame(
+                        width: Self.regularCoverSize * 1.375,
+                        height: Self.regularCoverSize,
+                        alignment: .center
+                    )
+            } else {
+                // Total visual width when playing = size × 1.375. Keeping that
+                // extent inside the container prevents the vinyl from clipping.
+                GeometryReader { geometry in
+                    let coverSize = geometry.size.width / 1.375
+                    cover(size: coverSize)
+                        .frame(
+                            width: geometry.size.width,
+                            height: coverSize,
+                            alignment: .center
+                        )
                 }
+                .aspectRatio(1.375, contentMode: .fit)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+
+            titleAndStats
+                .padding(.top, 24)
+
+            projectActions
+                .padding(.top, 20)
         }
+        .frame(maxWidth: .infinity)
     }
 
     // MARK: Shared pieces
@@ -548,52 +521,112 @@ private struct ProjectDetailHeaderSection: View, Equatable {
     }
 
     private var titleAndStats: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(spacing: 4) {
             Text(project.name)
                 .font(.system(size: 26, weight: .bold))
                 .foregroundStyle(.primary)
+                .multilineTextAlignment(.center)
+                .lineLimit(2)
 
-            HStack(spacing: 4) {
-                Text("\(ownerLabel.isEmpty ? "…" : "@\(ownerLabel)") • \(project.trackCountText) • \(project.formattedDuration)")
-                    .font(.system(size: 14))
-                    .foregroundStyle(.secondary)
-            }
+            Text("\(project.trackCountText) • \(project.formattedDuration) • by \(ownerLabel.isEmpty ? "…" : "@\(ownerLabel)")")
+                .font(.system(size: 14))
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .lineLimit(2)
         }
+        .frame(maxWidth: .infinity)
+        .accessibilityElement(children: .combine)
     }
 
-    private var playbackButtons: some View {
-        HStack(spacing: 8) {
-            ProjectDownloadButton(project: project, downloadState: downloadState)
-            PlayButton(project: project)
+    private var projectActions: some View {
+        let layout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(spacing: actionSpacing))
+            : AnyLayout(HStackLayout(spacing: actionSpacing))
+        let isEmptyOwnedProject = !project.isShared && project.tracks.isEmpty
+
+        return layout {
+            if !isEmptyOwnedProject {
+                PlayButton(project: project)
+                    .transition(.scale(scale: 0.72, anchor: .trailing).combined(with: .opacity))
+                ProjectDownloadButton(project: project, downloadState: downloadState)
+                    .transition(.scale(scale: 0.72, anchor: .trailing).combined(with: .opacity))
+            }
+
+            if !project.isShared {
+                if let onAddTracks {
+                    AddTracksCircleButton(
+                        isImporting: isImporting,
+                        showsFirstTrackLabel: isEmptyOwnedProject,
+                        action: onAddTracks
+                    )
+                }
+            }
         }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Project actions")
+        .animation(
+            .spring(response: 0.42, dampingFraction: 0.82),
+            value: isEmptyOwnedProject
+        )
     }
 }
 
 // MARK: - Add tracks button
 
-struct AddTracksButton: View {
+private struct AddTracksCircleButton: View {
     var isImporting: Bool
+    var showsFirstTrackLabel: Bool
     var action: () -> Void
+
+    @ScaledMetric(relativeTo: .body) private var controlDiameter = 48.0
+    @ScaledMetric(relativeTo: .body) private var horizontalPadding = 20.0
+    @ScaledMetric(relativeTo: .body) private var labelSpacing = 8.0
+    @ScaledMetric(relativeTo: .body) private var spinnerDiameter = 18.0
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 8) {
+            HStack(spacing: labelSpacing) {
                 if isImporting {
-                    ProgressView()
-                        .scaleEffect(0.8)
+                    TwoToneCircleSpinner(
+                        diameter: spinnerDiameter,
+                        lineWidth: max(1.5, spinnerDiameter * 0.11)
+                    )
                 } else {
                     Image(systemName: "plus")
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(.body.weight(.semibold))
                 }
-                Text(isImporting ? "Importing…" : "Add tracks")
-                    .font(.system(size: 15, weight: .medium))
+
+                if showsFirstTrackLabel {
+                    Text(isImporting ? "Importing…" : "Add your first track")
+                        .font(.subheadline.weight(.semibold))
+                        .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)
+                        .transition(.move(edge: .leading).combined(with: .opacity))
+                }
             }
-            .frame(maxWidth: .infinity)
-            .frame(height: 48)
-            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .padding(.horizontal, showsFirstTrackLabel ? horizontalPadding : 0)
+            .frame(
+                minWidth: max(44, controlDiameter),
+                minHeight: max(44, controlDiameter)
+            )
+            .frame(height: max(44, controlDiameter))
+            .background {
+                SecondaryActionButtonBackground()
+            }
             .foregroundStyle(.primary)
+            .contentShape(Capsule())
         }
+        .buttonStyle(ProjectActionButtonStyle())
         .disabled(isImporting)
+        .accessibilityLabel(
+            isImporting
+                ? "Importing tracks"
+                : (showsFirstTrackLabel ? "Add your first track" : "Add tracks")
+        )
+        .animation(
+            .spring(response: 0.42, dampingFraction: 0.82),
+            value: showsFirstTrackLabel
+        )
     }
 }
 
@@ -607,8 +640,10 @@ private struct ProjectDownloadButton: View {
 
     @State private var showRemoveDownloadConfirm = false
     @State private var showCancelDownloadConfirm = false
+    @ScaledMetric(relativeTo: .body) private var controlDiameter = 48.0
+    @ScaledMetric(relativeTo: .body) private var symbolPointSize = 19.0
 
-    private var isVisible: Bool {
+    private var canDownload: Bool {
         !project.tracks.isEmpty
             && (downloadState.isDownloading
                 || downloadState.isFullyDownloaded
@@ -616,37 +651,44 @@ private struct ProjectDownloadButton: View {
     }
 
     var body: some View {
-        if isVisible {
-            Button(action: tap) {
+        Button(action: tap) {
+            ZStack {
+                SecondaryActionButtonBackground()
+
                 DownloadCircleIndicator(
-                    symbolPointSize: 22,
+                    symbolPointSize: symbolPointSize,
                     isDownloading: downloadState.isDownloading,
                     isFilled: downloadState.isFullyDownloaded
                 )
-                .frame(width: 44, height: 44)
-                .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel(downloadAccessibilityLabel)
-            .accessibilityHint(downloadState.isDownloading ? "Shows a confirmation to cancel the download" : "")
-            .neutralAlert("Cancel Download?", isPresented: $showCancelDownloadConfirm) {
-                Button("Cancel Download", role: .destructive) {
-                    store.cancelProjectDownload(project.id)
-                }
-                Button("Keep Downloading", role: .cancel) {}
-                    .tint(.primary)
-            } message: {
-                Text("The download will stop and all downloaded tracks from this project will be removed from your device.")
+            .frame(
+                width: max(44, controlDiameter),
+                height: max(44, controlDiameter)
+            )
+            .contentShape(Circle())
+        }
+        .buttonStyle(ProjectActionButtonStyle())
+        .disabled(!canDownload)
+        .opacity(canDownload ? 1 : 0.45)
+        .accessibilityLabel(downloadAccessibilityLabel)
+        .accessibilityHint(downloadState.isDownloading ? "Shows a confirmation to cancel the download" : "")
+        .neutralAlert("Cancel Download?", isPresented: $showCancelDownloadConfirm) {
+            Button("Cancel Download", role: .destructive) {
+                store.cancelProjectDownload(project.id)
             }
-            .neutralAlert("Remove Downloads?", isPresented: $showRemoveDownloadConfirm) {
-                Button("Remove", role: .destructive) {
-                    store.removeProjectDownloads(project.id)
-                }
-                Button("Cancel", role: .cancel) {}
-                    .tint(.primary)
-            } message: {
-                Text("All offline copies for this project will be deleted from your device.")
+            Button("Keep Downloading", role: .cancel) {}
+                .tint(.primary)
+        } message: {
+            Text("The download will stop and all downloaded tracks from this project will be removed from your device.")
+        }
+        .neutralAlert("Remove Downloads?", isPresented: $showRemoveDownloadConfirm) {
+            Button("Remove", role: .destructive) {
+                store.removeProjectDownloads(project.id)
             }
+            Button("Cancel", role: .cancel) {}
+                .tint(.primary)
+        } message: {
+            Text("All offline copies for this project will be deleted from your device.")
         }
     }
 
@@ -667,6 +709,28 @@ private struct ProjectDownloadButton: View {
     }
 }
 
+private struct SecondaryActionButtonBackground: View {
+    var body: some View {
+        Capsule()
+            .fill(Color(.secondarySystemBackground))
+            .overlay {
+                Capsule()
+                    .stroke(Color.primary.opacity(0.1), lineWidth: 1)
+            }
+    }
+}
+
+private struct ProjectActionButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.94 : 1)
+            .animation(
+                .spring(response: 0.2, dampingFraction: 0.78),
+                value: configuration.isPressed
+            )
+    }
+}
+
 // MARK: - Play Button
 
 private struct PlayButton: View {
@@ -674,6 +738,10 @@ private struct PlayButton: View {
     @Environment(ProjectStore.self) private var store
 
     let project: Project
+
+    @ScaledMetric(relativeTo: .body) private var controlHeight = 48.0
+    @ScaledMetric(relativeTo: .body) private var horizontalPadding = 24.0
+    @ScaledMetric(relativeTo: .body) private var labelSpacing = 8.0
 
     private var isActiveProject: Bool {
         player.currentProject?.id == project.id
@@ -686,19 +754,30 @@ private struct PlayButton: View {
         Button {
             playOrPause()
         } label: {
-            ZStack {
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .fill(buttonFill)
-                    .frame(width: 56, height: 56)
+            HStack(spacing: labelSpacing) {
                 Image(systemName: isActiveProject && player.isPlaying ? "pause.fill" : "play.fill")
-                    .font(.system(size: 22, weight: .bold))
+                    .font(.subheadline.weight(.bold))
                     .coverControlContrast(
                         for: nil,
                         backgroundHex: buttonFillHex
                     )
                     .animation(nil, value: player.isPlaying)
+
+                Text(isActiveProject && player.isPlaying ? "Pause" : "Play")
+                    .font(.subheadline.weight(.bold))
+                    .coverControlContrast(
+                        for: nil,
+                        backgroundHex: buttonFillHex
+                    )
             }
+            .padding(.horizontal, horizontalPadding)
+            .frame(height: max(44, controlHeight))
+            .background(buttonFill, in: Capsule())
+            .contentShape(Capsule())
         }
+        .buttonStyle(ProjectActionButtonStyle())
+        .disabled(project.tracks.isEmpty)
+        .opacity(project.tracks.isEmpty ? 0.45 : 1)
         .sensoryFeedback(.impact(weight: .medium), trigger: player.isPlaying)
     }
 

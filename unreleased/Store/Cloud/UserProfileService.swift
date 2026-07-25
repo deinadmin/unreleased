@@ -136,7 +136,7 @@ final class UserProfileService {
 
     /// Resolves the public profile URL first, then checks the stable Storage
     /// object for photos uploaded by older web builds.
-    private static func fetchAvatarURL(forUID uid: String) async -> URL? {
+    static func fetchAvatarURL(forUID uid: String) async -> URL? {
         let profile = try? await CloudPaths.userProfileDocument(userID: uid).getDocument()
         if let rawURL = profile?.data()?["avatarURL"] as? String,
            let url = URL(string: rawURL) {

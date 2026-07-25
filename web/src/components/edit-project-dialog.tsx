@@ -79,7 +79,7 @@ export function EditProjectDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[85vh] overflow-y-auto overflow-x-hidden rounded-3xl p-6 sm:max-w-md [--dialog-close-inset:calc(var(--radius-3xl)-0.875rem)]">
+      <DialogContent className="max-h-[85vh] overflow-y-auto overflow-x-hidden rounded-3xl p-6 sm:max-w-md">
         <DialogTitle className="sr-only">Edit project</DialogTitle>
         <form
           onSubmit={(event) => {

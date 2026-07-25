@@ -62,6 +62,7 @@ final class AudioPlayer {
     private let audioEngine = AVAudioEngine()
     private let playerNode = AVAudioPlayerNode()
     private let equalizer = AVAudioUnitEQ(numberOfBands: EqualizerBand.all.count)
+    private let equalizerSyncService = EqualizerSyncService()
     private var audioFile: AVAudioFile?
     private var playbackTimer: Timer?
     private var scheduledStartFrame: AVAudioFramePosition = 0
@@ -85,6 +86,7 @@ final class AudioPlayer {
     private static let equalizerEnabledKey = "audio.equalizer.enabled"
     private static let equalizerGainsKey = "audio.equalizer.gains"
     private static let customEqualizerPresetsKey = "audio.equalizer.customPresets"
+    private static let equalizerPresetsOwnerIDKey = "audio.equalizer.presetsOwnerID"
 
     private struct PlaybackTarget {
         let track: Track
@@ -96,13 +98,28 @@ final class AudioPlayer {
         self.store = store
         let savedGains = (UserDefaults.standard.array(forKey: Self.equalizerGainsKey) as? [NSNumber])?
             .map(\.floatValue)
-        self.equalizerGains = savedGains?.count == EqualizerBand.all.count
-            ? savedGains!
-            : EqualizerPreset.flat.gains
+        if let savedGains,
+           savedGains.count == EqualizerBand.all.count,
+           savedGains.allSatisfy(\.isFinite) {
+            self.equalizerGains = savedGains.map { min(max($0, -12), 12) }
+        } else {
+            self.equalizerGains = EqualizerPreset.flat.gains
+        }
         self.isEqualizerEnabled = UserDefaults.standard.object(forKey: Self.equalizerEnabledKey) as? Bool ?? false
         let savedCustomPresets = UserDefaults.standard.data(forKey: Self.customEqualizerPresetsKey)
             .flatMap { try? JSONDecoder().decode([CustomEqualizerPreset].self, from: $0) }
-        self.customEqualizerPresets = savedCustomPresets ?? []
+        self.customEqualizerPresets = (savedCustomPresets ?? []).compactMap { preset in
+            let title = preset.title.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !title.isEmpty,
+                  preset.gains.count == EqualizerBand.all.count,
+                  preset.gains.allSatisfy(\.isFinite)
+            else { return nil }
+
+            var validatedPreset = preset
+            validatedPreset.title = title
+            validatedPreset.gains = preset.gains.map { min(max($0, -12), 12) }
+            return validatedPreset
+        }
 
         audioEngine.attach(playerNode)
         audioEngine.attach(equalizer)
@@ -135,12 +152,15 @@ final class AudioPlayer {
     }
 
     func setEqualizerEnabled(_ enabled: Bool) {
+        guard isEqualizerEnabled != enabled else { return }
         isEqualizerEnabled = enabled
     }
 
     func setEqualizerGain(_ gain: Float, at index: Int) {
         guard equalizerGains.indices.contains(index) else { return }
-        equalizerGains[index] = min(max(gain, -12), 12)
+        let clampedGain = min(max(gain, -12), 12)
+        guard abs(equalizerGains[index] - clampedGain) >= 0.05 else { return }
+        equalizerGains[index] = clampedGain
     }
 
     func applyEqualizerPreset(_ preset: EqualizerPreset) {
@@ -160,6 +180,7 @@ final class AudioPlayer {
         customEqualizerPresets.append(
             CustomEqualizerPreset(title: trimmedTitle, gains: equalizerGains)
         )
+        syncCustomEqualizerPresets()
     }
 
     func renameCustomEqualizerPreset(id: CustomEqualizerPreset.ID, to title: String) {
@@ -168,14 +189,52 @@ final class AudioPlayer {
               let index = customEqualizerPresets.firstIndex(where: { $0.id == id })
         else { return }
         customEqualizerPresets[index].title = trimmedTitle
+        syncCustomEqualizerPresets()
     }
 
     func deleteCustomEqualizerPreset(id: CustomEqualizerPreset.ID) {
+        guard customEqualizerPresets.contains(where: { $0.id == id }) else { return }
         customEqualizerPresets.removeAll { $0.id == id }
+        syncCustomEqualizerPresets()
     }
 
     func resetEqualizer() {
         equalizerGains = EqualizerPreset.flat.gains
+    }
+
+    func configureEqualizerSync(userID: String?) {
+        guard let userID else {
+            equalizerSyncService.stop()
+            return
+        }
+
+        let defaults = UserDefaults.standard
+        if let previousOwnerID = defaults.string(forKey: Self.equalizerPresetsOwnerIDKey),
+           previousOwnerID != userID {
+            customEqualizerPresets = []
+        }
+        defaults.set(userID, forKey: Self.equalizerPresetsOwnerIDKey)
+
+        equalizerSyncService.start(
+            userID: userID,
+            localState: equalizerSyncState
+        ) { [weak self] state in
+            self?.applySyncedEqualizerState(state)
+        }
+    }
+
+    private var equalizerSyncState: EqualizerSyncService.State {
+        EqualizerSyncService.State(
+            customPresets: customEqualizerPresets
+        )
+    }
+
+    private func syncCustomEqualizerPresets() {
+        equalizerSyncService.stateDidChange(equalizerSyncState)
+    }
+
+    private func applySyncedEqualizerState(_ state: EqualizerSyncService.State) {
+        customEqualizerPresets = state.customPresets
     }
 
     // MARK: - Playback Control

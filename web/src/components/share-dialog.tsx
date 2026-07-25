@@ -24,6 +24,7 @@ import {
   shareLink,
 } from "@/lib/invites"
 import { formatRelativeDate } from "@/lib/format"
+import { fetchProfilePhotoURL } from "@/lib/profile-photo"
 import type { InviteeInfo, PendingInviteInfo, Project, UserSearchResult } from "@/lib/types"
 
 /** Web port of the iOS `ProjectShareSheet`: username invites, link toggle, listeners. */
@@ -192,7 +193,7 @@ export function ShareDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[85vh] gap-0 overflow-y-auto overflow-x-hidden rounded-3xl p-6 sm:max-w-md [--dialog-close-inset:calc(var(--radius-3xl)-0.875rem)]">
+      <DialogContent className="max-h-[85vh] gap-0 overflow-y-auto overflow-x-hidden rounded-3xl p-6 sm:max-w-md">
         <DialogHeader className="min-w-0 pb-5">
           <DialogTitle>Share Project</DialogTitle>
           <DialogDescription className="truncate">{project.name}</DialogDescription>
@@ -228,7 +229,11 @@ export function ShareDialog({
               <div className="mt-2.5 overflow-hidden rounded-[14px] bg-secondary">
                 {searchResults.map((result) => (
                   <div key={result.id} className="flex items-center gap-3 px-4 py-2.5">
-                    <InitialCircle name={result.username} photoURL={result.avatarURL} />
+                    <InitialCircle
+                      userID={result.id}
+                      name={result.username}
+                      photoURL={result.avatarURL}
+                    />
                     <span className="min-w-0 flex-1 truncate text-[15px] font-medium">
                       @{result.username}
                     </span>
@@ -317,6 +322,7 @@ export function ShareDialog({
                 {pendingInvites.map((pending) => (
                   <ListenerRow
                     key={pending.id}
+                    userID={pending.id}
                     name={pending.username}
                     detail={`invited ${formatRelativeDate(pending.invitedAt)} · pending`}
                     confirmLabel="Cancel invite"
@@ -328,6 +334,7 @@ export function ShareDialog({
                 {invitees.map((invitee) => (
                   <ListenerRow
                     key={invitee.id}
+                    userID={invitee.id}
                     name={invitee.username}
                     detail={`joined ${formatRelativeDate(invitee.acceptedAt)}`}
                     confirmLabel="Remove"
@@ -351,10 +358,35 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
   )
 }
 
-function InitialCircle({ name, photoURL }: { name: string; photoURL?: string }) {
+function InitialCircle({
+  userID,
+  name,
+  photoURL,
+}: {
+  userID: string
+  name: string
+  photoURL?: string
+}) {
+  const [resolvedPhotoURL, setResolvedPhotoURL] = useState(photoURL)
+
+  useEffect(() => {
+    let active = true
+    setResolvedPhotoURL(photoURL)
+    if (!photoURL) {
+      void fetchProfilePhotoURL(userID).then((url) => {
+        if (active) setResolvedPhotoURL(url)
+      })
+    }
+    return () => {
+      active = false
+    }
+  }, [photoURL, userID])
+
   return (
     <Avatar className="size-8 border-0 after:hidden">
-      {photoURL && <AvatarImage src={photoURL} alt="" className="object-cover" />}
+      {resolvedPhotoURL && (
+        <AvatarImage src={resolvedPhotoURL} alt="" className="object-cover" />
+      )}
       <AvatarFallback className="bg-background text-[13px] font-semibold">
         {(name.charAt(0) || "?").toUpperCase()}
       </AvatarFallback>
@@ -363,6 +395,7 @@ function InitialCircle({ name, photoURL }: { name: string; photoURL?: string }) 
 }
 
 function ListenerRow({
+  userID,
   name,
   detail,
   confirmLabel,
@@ -370,6 +403,7 @@ function ListenerRow({
   onConfirmChange,
   onConfirm,
 }: {
+  userID: string
   name: string
   detail: string
   confirmLabel: string
@@ -379,7 +413,7 @@ function ListenerRow({
 }) {
   return (
     <div className="flex items-center gap-3 px-4 py-2.5">
-      <InitialCircle name={name} />
+      <InitialCircle userID={userID} name={name} />
       <span className="flex min-w-0 flex-1 flex-col">
         <span className="truncate text-[15px] font-medium">@{name}</span>
         <span className="truncate text-xs text-muted-foreground">{detail}</span>

@@ -211,6 +211,7 @@ struct ProjectShareSheet: View {
     private func searchResultRow(_ user: UserSearchResult) -> some View {
         HStack(spacing: 12) {
             avatarCircle(
+                userID: user.id,
                 initial: user.username.first.map(String.init) ?? "?",
                 size: 32,
                 photoURL: user.avatarURL
@@ -474,7 +475,11 @@ struct ProjectShareSheet: View {
 
     private func pendingInviteRow(_ pending: PendingInviteInfo) -> some View {
         HStack(spacing: 12) {
-            avatarCircle(initial: String(pending.username.prefix(1)), size: 28)
+            avatarCircle(
+                userID: pending.id,
+                initial: String(pending.username.prefix(1)),
+                size: 28
+            )
 
             VStack(alignment: .leading, spacing: 1) {
                 Text("@\(pending.username)")
@@ -503,7 +508,11 @@ struct ProjectShareSheet: View {
 
     private func inviteeRow(_ invitee: InviteeInfo) -> some View {
         HStack(spacing: 12) {
-            avatarCircle(initial: String(invitee.username.prefix(1)), size: 28)
+            avatarCircle(
+                userID: invitee.id,
+                initial: String(invitee.username.prefix(1)),
+                size: 28
+            )
 
             VStack(alignment: .leading, spacing: 1) {
                 Text("@\(invitee.username)")
@@ -541,34 +550,17 @@ struct ProjectShareSheet: View {
     }
 
     private func avatarCircle(
+        userID: String,
         initial: String,
         size: CGFloat,
         photoURL: URL? = nil
     ) -> some View {
-        ZStack {
-            Circle()
-                .fill(Color(.tertiarySystemBackground))
-                .frame(width: size, height: size)
-            Text(initial.uppercased())
-                .font(.system(size: size * 0.42, weight: .semibold))
-                .foregroundStyle(.secondary)
-
-            if let photoURL {
-                AsyncImage(url: photoURL) { phase in
-                    if let image = phase.image {
-                        image
-                            .resizable()
-                            .scaledToFill()
-                            .transition(.opacity)
-                    } else {
-                        Color.clear
-                    }
-                }
-                .frame(width: size, height: size)
-                .clipShape(.circle)
-            }
-        }
-        .accessibilityHidden(true)
+        ShareUserAvatar(
+            userID: userID,
+            initial: initial,
+            size: size,
+            photoURL: photoURL
+        )
     }
 
     private var trimmedQuery: String {
@@ -730,5 +722,56 @@ struct ProjectShareSheet: View {
         let scaled = output.transformed(by: CGAffineTransform(scaleX: 10, y: 10))
         guard let cgImage = context.createCGImage(scaled, from: scaled.extent) else { return nil }
         return UIImage(cgImage: cgImage)
+    }
+}
+
+private struct ShareUserAvatar: View {
+    let userID: String
+    let initial: String
+    let size: CGFloat
+    let photoURL: URL?
+
+    @State private var resolvedPhotoURL: URL?
+
+    init(userID: String, initial: String, size: CGFloat, photoURL: URL? = nil) {
+        self.userID = userID
+        self.initial = initial
+        self.size = size
+        self.photoURL = photoURL
+        _resolvedPhotoURL = State(initialValue: photoURL)
+    }
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .fill(Color(.tertiarySystemBackground))
+                .frame(width: size, height: size)
+            Text(initial.uppercased())
+                .font(.system(size: size * 0.42, weight: .semibold))
+                .foregroundStyle(.secondary)
+
+            if let resolvedPhotoURL {
+                AsyncImage(url: resolvedPhotoURL) { phase in
+                    if let image = phase.image {
+                        image
+                            .resizable()
+                            .scaledToFill()
+                            .transition(.opacity)
+                    } else {
+                        Color.clear
+                    }
+                }
+                .frame(width: size, height: size)
+                .clipShape(.circle)
+            }
+        }
+        .task(id: userID) {
+            guard photoURL == nil else {
+                resolvedPhotoURL = photoURL
+                return
+            }
+            resolvedPhotoURL = await UserProfileService.fetchAvatarURL(forUID: userID)
+        }
+        .accessibilityHidden(true)
     }
 }

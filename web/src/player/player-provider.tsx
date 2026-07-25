@@ -10,6 +10,7 @@ import {
 } from "react"
 import { toast } from "sonner"
 import { downloadURL } from "@/lib/storage-urls"
+import { preparePlayedTrackCache } from "@/lib/track-cache"
 import { equalizerRouting } from "@/player/equalizer"
 import type { Project, Track } from "@/lib/types"
 
@@ -63,7 +64,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
   const play = useCallback(
     (nextTrack: Track, nextProject: Project) => {
-      if (!nextTrack.storagePath) {
+      const storagePath = nextTrack.storagePath
+      if (!storagePath) {
         showUploadPendingToast(nextTrack.title)
         return
       }
@@ -79,9 +81,10 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       projectRef.current = nextProject
       setDuration(nextTrack.duration)
       setProgress(0)
-      downloadURL(nextTrack.storagePath)
+      downloadURL(storagePath)
         .then((url) => {
           if (loadToken.current !== token) return
+          preparePlayedTrackCache(storagePath, nextTrack.fileSize)
           // The equalizer decides whether this load has to be a CORS request.
           equalizerRouting.prepare(audio)
           audio.src = url

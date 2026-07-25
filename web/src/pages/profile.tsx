@@ -14,7 +14,7 @@ import {
   User,
 } from "lucide-react"
 import { useRef, useState, type DragEvent } from "react"
-import { Link, useNavigate } from "react-router-dom"
+import { useLocation, useNavigate } from "react-router-dom"
 import { toast } from "sonner"
 import { AppHeader } from "@/components/app-header"
 import { SettingsDivider, SettingsRow, SettingsSection } from "@/components/settings"
@@ -60,6 +60,7 @@ const TIER_STYLE: Record<PlanTier, { icon: React.ReactNode; text: string; badge:
 export function ProfilePage() {
   const { user, username, signOut } = useAuth()
   const player = usePlayer()
+  const location = useLocation()
   const navigate = useNavigate()
   const plan = usePlan()
   const [confirmSignOut, setConfirmSignOut] = useState(false)
@@ -71,6 +72,19 @@ export function ProfilePage() {
   const expiry = expiryDescription(plan)
 
   const primaryLabel = username ? `@${username}` : (user?.email ?? user?.displayName ?? "")
+  const returnLabel =
+    typeof location.state?.profileReturnLabel === "string"
+      ? location.state.profileReturnLabel
+      : "Library"
+
+  const navigateBack = () => {
+    if (typeof location.state?.profileReturnLabel === "string") {
+      navigate(-1)
+      return
+    }
+
+    navigate("/", { replace: true })
+  }
 
   const performSignOut = () => {
     player.stop()
@@ -84,13 +98,14 @@ export function ProfilePage() {
 
       <main className="mx-auto w-full max-w-lg px-5 pb-40">
         <div className="flex h-12 items-center">
-          <Link
-            to="/"
+          <button
+            type="button"
+            onClick={navigateBack}
             className="-ml-2 flex items-center gap-0.5 rounded-lg px-2 py-1.5 text-[15px] font-medium text-muted-foreground transition hover:text-foreground"
           >
             <ChevronLeft className="size-4.5" />
-            Library
-          </Link>
+            {returnLabel}
+          </button>
         </div>
 
         {/* ── Header ─────────────────────────────────────────────────── */}

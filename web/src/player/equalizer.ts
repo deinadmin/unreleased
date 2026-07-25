@@ -102,11 +102,12 @@ export function makeupGainDecibels(gains: number[], enabled: boolean): number {
   return -Math.min(Math.max(highestBoost * 0.55, 0), 6)
 }
 
-// MARK: - Persistence (iOS stores the same three values in UserDefaults)
+// MARK: - Local cache (mirrors the iOS UserDefaults representation)
 
 const ENABLED_KEY = "audio.equalizer.enabled"
 const GAINS_KEY = "audio.equalizer.gains"
 const CUSTOM_PRESETS_KEY = "audio.equalizer.customPresets"
+const PRESETS_OWNER_ID_KEY = "audio.equalizer.presetsOwnerID"
 
 function read(key: string): string | null {
   try {
@@ -148,14 +149,20 @@ export function loadCustomPresets(): CustomEqualizerPreset[] {
   try {
     const stored = JSON.parse(read(CUSTOM_PRESETS_KEY) ?? "null")
     if (!Array.isArray(stored)) return []
-    return stored.filter(
-      (preset): preset is CustomEqualizerPreset =>
-        !!preset &&
-        typeof preset.id === "string" &&
-        typeof preset.title === "string" &&
-        Array.isArray(preset.gains) &&
-        preset.gains.length === EQUALIZER_BANDS.length,
-    )
+    return stored.flatMap((preset): CustomEqualizerPreset[] => {
+      const title = typeof preset?.title === "string" ? preset.title.trim() : ""
+      if (
+        !preset ||
+        typeof preset.id !== "string" ||
+        !title ||
+        !Array.isArray(preset.gains) ||
+        preset.gains.length !== EQUALIZER_BANDS.length ||
+        preset.gains.some((gain: unknown) => typeof gain !== "number" || !Number.isFinite(gain))
+      ) {
+        return []
+      }
+      return [{ id: preset.id, title, gains: preset.gains.map(clampGain) }]
+    })
   } catch {
     return []
   }
@@ -171,6 +178,14 @@ export function persistGains(gains: number[]) {
 
 export function persistCustomPresets(presets: CustomEqualizerPreset[]) {
   write(CUSTOM_PRESETS_KEY, JSON.stringify(presets))
+}
+
+export function loadEqualizerPresetsOwnerID(): string | null {
+  return read(PRESETS_OWNER_ID_KEY)
+}
+
+export function persistEqualizerPresetsOwnerID(userID: string) {
+  write(PRESETS_OWNER_ID_KEY, userID)
 }
 
 // MARK: - Audio graph

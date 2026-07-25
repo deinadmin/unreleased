@@ -17,13 +17,17 @@ import {
   findPreset,
   loadCustomPresets,
   loadEnabled,
+  loadEqualizerPresetsOwnerID,
   loadGains,
   persistCustomPresets,
   persistEnabled,
+  persistEqualizerPresetsOwnerID,
   persistGains,
   type CustomEqualizerPreset,
   type EqualizerPreset,
 } from "@/player/equalizer"
+import { EqualizerSyncSession } from "@/player/equalizer-sync"
+import { useAuth } from "@/hooks/use-auth"
 import { usePlayer } from "@/player/player-provider"
 
 interface EqualizerContextValue {
@@ -89,11 +93,50 @@ function reloadInPlace(audio: HTMLAudioElement) {
  */
 export function EqualizerProvider({ children }: { children: ReactNode }) {
   const { audio } = usePlayer()
+  const { user } = useAuth()
   const [enabled, setEnabledState] = useState(loadEnabled)
   const [gains, setGains] = useState(loadGains)
   const [customPresets, setCustomPresets] = useState(loadCustomPresets)
-  const settingsRef = useRef({ gains, enabled })
-  settingsRef.current = { gains, enabled }
+  const settingsRef = useRef({ gains, enabled, customPresets })
+  const syncSessionRef = useRef<EqualizerSyncSession | null>(null)
+  settingsRef.current = { gains, enabled, customPresets }
+  const syncUserID = user && !user.isAnonymous ? user.uid : null
+
+  useEffect(() => {
+    syncSessionRef.current?.stop()
+    syncSessionRef.current = null
+    if (!syncUserID) return
+
+    const previousOwnerID = loadEqualizerPresetsOwnerID()
+    let initialPresets = settingsRef.current.customPresets
+
+    // Migrate the old local preset cache to the first account that uses it,
+    // while keeping the current device-local curve completely untouched.
+    if (previousOwnerID && previousOwnerID !== syncUserID) {
+      initialPresets = []
+      settingsRef.current = { ...settingsRef.current, customPresets: [] }
+      setCustomPresets([])
+      persistCustomPresets([])
+    }
+    persistEqualizerPresetsOwnerID(syncUserID)
+
+    const session = new EqualizerSyncSession(
+      syncUserID,
+      { customPresets: initialPresets },
+      (state) => {
+        settingsRef.current = { ...settingsRef.current, customPresets: state.customPresets }
+        setCustomPresets(state.customPresets)
+        persistCustomPresets(state.customPresets)
+      },
+    )
+    syncSessionRef.current = session
+    session.start()
+
+    return () => {
+      session.stop()
+      if (syncSessionRef.current === session) syncSessionRef.current = null
+    }
+  }, [syncUserID])
 
   // The graph is built on first use: while the EQ has never been switched on,
   // playback stays on the plain element path.
@@ -129,28 +172,33 @@ export function EqualizerProvider({ children }: { children: ReactNode }) {
   }, [audio, enabled])
 
   const setEnabled = useCallback((next: boolean) => {
+    if (settingsRef.current.enabled === next) return
+    settingsRef.current = { ...settingsRef.current, enabled: next }
     setEnabledState(next)
     persistEnabled(next)
   }, [])
 
   const commitGains = useCallback((next: number[]) => {
+    settingsRef.current = { ...settingsRef.current, gains: next }
     setGains(next)
     persistGains(next)
   }, [])
 
   const commitCustomPresets = useCallback((next: CustomEqualizerPreset[]) => {
+    settingsRef.current = { ...settingsRef.current, customPresets: next }
     setCustomPresets(next)
     persistCustomPresets(next)
+    syncSessionRef.current?.stateDidChange({ customPresets: next })
   }, [])
 
   const setGain = useCallback(
     (gain: number, index: number) => {
       if (index < 0 || index >= EQUALIZER_BANDS.length) return
-      const next = [...gains]
+      const next = [...settingsRef.current.gains]
       next[index] = clampGain(gain)
       commitGains(next)
     },
-    [commitGains, gains],
+    [commitGains],
   )
 
   // Applying a preset also switches the EQ on, like iOS.
@@ -175,9 +223,13 @@ export function EqualizerProvider({ children }: { children: ReactNode }) {
     (title: string) => {
       const trimmed = title.trim()
       if (!trimmed) return
-      commitCustomPresets([...customPresets, { id: newPresetID(), title: trimmed, gains: [...gains] }])
+      const current = settingsRef.current
+      commitCustomPresets([
+        ...current.customPresets,
+        { id: newPresetID(), title: trimmed, gains: [...current.gains] },
+      ])
     },
-    [commitCustomPresets, customPresets, gains],
+    [commitCustomPresets],
   )
 
   const renameCustomPreset = useCallback(
@@ -185,17 +237,21 @@ export function EqualizerProvider({ children }: { children: ReactNode }) {
       const trimmed = title.trim()
       if (!trimmed) return
       commitCustomPresets(
-        customPresets.map((preset) => (preset.id === id ? { ...preset, title: trimmed } : preset)),
+        settingsRef.current.customPresets.map((preset) =>
+          preset.id === id ? { ...preset, title: trimmed } : preset,
+        ),
       )
     },
-    [commitCustomPresets, customPresets],
+    [commitCustomPresets],
   )
 
   const deleteCustomPreset = useCallback(
     (id: string) => {
-      commitCustomPresets(customPresets.filter((preset) => preset.id !== id))
+      commitCustomPresets(
+        settingsRef.current.customPresets.filter((preset) => preset.id !== id),
+      )
     },
-    [commitCustomPresets, customPresets],
+    [commitCustomPresets],
   )
 
   const reset = useCallback(() => commitGains([...FLAT_GAINS]), [commitGains])

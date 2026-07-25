@@ -1,8 +1,9 @@
 import {
   ChevronLeft,
+  Ellipsis,
   LogOut,
-  MoreHorizontal,
   Pause,
+  Pencil,
   Play,
   Plus,
   Share,
@@ -12,18 +13,14 @@ import { useState } from "react"
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom"
 import { toast } from "sonner"
 import { AppHeader } from "@/components/app-header"
+import { useContextMenu, type ContextMenuItem } from "@/components/context-menu"
 import { CoverDialog } from "@/components/cover-dialog"
+import { EditProjectDialog } from "@/components/edit-project-dialog"
 import { ProjectCover } from "@/components/project-cover"
 import { ShareDialog } from "@/components/share-dialog"
 import { TrackRow } from "@/components/track-row"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useAuth } from "@/hooks/use-auth"
 import { useProject, useProjects } from "@/hooks/use-projects"
@@ -44,9 +41,11 @@ export function ProjectPage() {
   const { loading } = useProjects()
   const project = useProject(projectId)
   const player = usePlayer()
+  const contextMenu = useContextMenu()
   const { importFiles, isImporting } = useUploads()
   const [shareOpen, setShareOpen] = useState(false)
   const [coverOpen, setCoverOpen] = useState(false)
+  const [editOpen, setEditOpen] = useState(false)
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
   const [leaveConfirmOpen, setLeaveConfirmOpen] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
@@ -133,6 +132,31 @@ export function ProjectPage() {
     }
   }
 
+  const menuItems = (): ContextMenuItem[] =>
+    isOwnProject
+      ? [
+          { label: "Edit", icon: <Pencil />, onSelect: () => setEditOpen(true) },
+          {
+            label: "Delete",
+            icon: <Trash2 />,
+            destructive: true,
+            onSelect: () => setDeleteConfirmOpen(true),
+          },
+        ]
+      : [
+          {
+            label: "Leave Project",
+            icon: <LogOut />,
+            destructive: true,
+            onSelect: () => setLeaveConfirmOpen(true),
+          },
+        ]
+
+  const openActionsAtButton = (event: React.MouseEvent<HTMLButtonElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect()
+    contextMenu.openAt(rect.left, rect.bottom + 6, menuItems())
+  }
+
   return (
     <AudioDropzone
       disabled={!canUpload}
@@ -140,170 +164,145 @@ export function ProjectPage() {
       onFiles={addFiles}
     >
       {(openPicker) => (
-        <div className="min-h-dvh">
+        <div className="project-detail-page min-h-dvh">
           <AppHeader />
 
-          <main className="mx-auto w-full max-w-2xl px-4 pb-40 sm:px-6">
+          <main className="project-detail-main mx-auto w-full max-w-2xl px-4 pb-40 sm:px-6">
             <div className="flex h-12 items-center">
               <Link
                 to={backLink.to}
-                className="-ml-2 flex items-center gap-0.5 rounded-lg px-2 py-1.5 text-[15px] font-medium text-muted-foreground transition hover:text-foreground"
+                className="relative z-10 -ml-2 flex items-center gap-0.5 rounded-lg px-2 py-1.5 text-[15px] font-medium text-muted-foreground transition hover:text-foreground"
               >
                 <ChevronLeft className="size-4.5" />
                 {backLink.label}
               </Link>
             </div>
 
-            <section className="rise-in flex flex-col items-center pt-4">
-              {isOwnProject ? (
-                <button
-                  type="button"
-                  aria-label="Edit cover"
-                  onClick={() => setCoverOpen(true)}
-                  className="w-56 cursor-default transition duration-300 hover:opacity-95 active:scale-[0.99] sm:w-64"
-                >
+            <div className="project-detail-layout">
+              <section className="project-detail-summary rise-in flex flex-col items-center pt-4">
+                {isOwnProject ? (
+                  <button
+                    type="button"
+                    aria-label="Edit cover"
+                    onClick={() => setCoverOpen(true)}
+                    className="project-detail-cover w-56 cursor-default transition duration-300 hover:opacity-95 active:scale-[0.99] sm:w-64"
+                  >
+                    <ProjectCover
+                      project={project}
+                      isPlaying={isProjectPlaying}
+                      className="w-full"
+                    />
+                  </button>
+                ) : (
                   <ProjectCover
                     project={project}
                     isPlaying={isProjectPlaying}
-                    className="w-full"
+                    className="project-detail-cover w-56 sm:w-64"
                   />
-                </button>
-              ) : (
-                <ProjectCover
-                  project={project}
-                  isPlaying={isProjectPlaying}
-                  className="w-56 sm:w-64"
-                />
-              )}
-
-              {isOwnProject ? (
-                <EditableTitle project={project} />
-              ) : (
-                <h1 className="max-w-full truncate pt-7 text-center text-[22px] font-bold">
-                  {project.name}
-                </h1>
-              )}
-              <p className="pt-1 text-[13px] text-muted-foreground">
-                {trackCountText(project)} •{" "}
-                {formatProjectDuration(totalDuration, project.tracks.length)}
-                {project.ownerUsername ? ` • by @${project.ownerUsername}` : ""}
-              </p>
-
-              <div className="mt-5 flex items-center gap-3">
-                {hasPlayableTracks && (
-                  <button
-                    type="button"
-                    onClick={playOrPause}
-                    className="flex h-11 items-center gap-2 rounded-full px-7 text-[15px] font-bold text-white shadow-md transition hover:brightness-105 active:scale-[0.98]"
-                    style={{ background: accent }}
-                  >
-                    {isProjectPlaying ? (
-                      <>
-                        <Pause className="size-4 fill-current" strokeWidth={0} />
-                        Pause
-                      </>
-                    ) : (
-                      <>
-                        <Play className="size-4 fill-current" strokeWidth={0} />
-                        Play
-                      </>
-                    )}
-                  </button>
                 )}
 
-                <button
-                  type="button"
-                  aria-label="Share project"
-                  onClick={() => setShareOpen(true)}
-                  className="flex size-11 items-center justify-center rounded-full border border-foreground/6 bg-secondary shadow-sm transition hover:bg-secondary/70 active:scale-95"
-                >
-                  <Share className="size-4.5" />
-                </button>
-
-                {canUpload && (
-                  <button
-                    type="button"
-                    aria-label="Add tracks"
-                    disabled={isImporting}
-                    onClick={openPicker}
-                    className="flex size-11 items-center justify-center rounded-full border border-foreground/6 bg-secondary shadow-sm transition hover:bg-secondary/70 active:scale-95 disabled:opacity-50"
-                  >
-                    <Plus className="size-4.5" />
-                  </button>
+                {isOwnProject ? (
+                  <EditableTitle project={project} />
+                ) : (
+                  <h1 className="max-w-full truncate pt-7 text-center text-[22px] font-bold">
+                    {project.name}
+                  </h1>
                 )}
-
-                {isOwnProject && (
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <button
-                        type="button"
-                        aria-label="More project actions"
-                        className="flex size-11 items-center justify-center rounded-full border border-foreground/6 bg-secondary shadow-sm transition hover:bg-secondary/70 active:scale-95"
-                      >
-                        <MoreHorizontal className="size-4.5" />
-                      </button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" className="w-44">
-                      <DropdownMenuItem
-                        variant="destructive"
-                        onSelect={() => setDeleteConfirmOpen(true)}
-                      >
-                        <Trash2 />
-                        Delete
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                )}
-
-                {!isOwnProject && (
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <button
-                        type="button"
-                        aria-label="More project actions"
-                        className="flex size-11 items-center justify-center rounded-full border border-foreground/6 bg-secondary shadow-sm transition hover:bg-secondary/70 active:scale-95"
-                      >
-                        <MoreHorizontal className="size-4.5" />
-                      </button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" className="w-44">
-                      <DropdownMenuItem
-                        variant="destructive"
-                        onSelect={() => setLeaveConfirmOpen(true)}
-                      >
-                        <LogOut />
-                        Leave project
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                )}
-              </div>
-            </section>
-
-            <section className="rise-in pt-8" style={{ animationDelay: "0.08s" }}>
-              {project.tracks.length === 0 ? (
-                <p className="pt-8 text-center text-[15px] text-muted-foreground">
-                  No tracks yet — drop audio files here or tap + to add some.
+                <p className="pt-1 text-[13px] text-muted-foreground">
+                  {trackCountText(project)} •{" "}
+                  {formatProjectDuration(totalDuration, project.tracks.length)}
+                  {project.ownerUsername ? ` • by @${project.ownerUsername}` : ""}
                 </p>
-              ) : (
-                <div className="flex flex-col">
-                  {project.tracks.map((track, index) => (
-                    <TrackRow
-                      key={track.id}
-                      track={track}
-                      index={index + 1}
-                      project={project}
-                      accent={accent}
-                    />
-                  ))}
+
+                <div className="mt-5 flex items-center gap-3">
+                  {hasPlayableTracks && (
+                    <button
+                      type="button"
+                      onClick={playOrPause}
+                      className="flex h-11 items-center gap-2 rounded-full px-7 text-[15px] font-bold text-white shadow-md transition hover:brightness-105 active:scale-[0.98]"
+                      style={{ background: accent }}
+                    >
+                      {isProjectPlaying ? (
+                        <>
+                          <Pause className="size-4 fill-current" strokeWidth={0} />
+                          Pause
+                        </>
+                      ) : (
+                        <>
+                          <Play className="size-4 fill-current" strokeWidth={0} />
+                          Play
+                        </>
+                      )}
+                    </button>
+                  )}
+
+                  <button
+                    type="button"
+                    aria-label="Share project"
+                    onClick={() => setShareOpen(true)}
+                    className="flex size-11 items-center justify-center rounded-full border border-foreground/6 bg-secondary shadow-sm transition hover:bg-secondary/70 active:scale-95"
+                  >
+                    <Share className="size-4.5" />
+                  </button>
+
+                  {canUpload && (
+                    <button
+                      type="button"
+                      aria-label="Add tracks"
+                      disabled={isImporting}
+                      onClick={openPicker}
+                      className="flex size-11 items-center justify-center rounded-full border border-foreground/6 bg-secondary shadow-sm transition hover:bg-secondary/70 active:scale-95 disabled:opacity-50"
+                    >
+                      <Plus className="size-4.5" />
+                    </button>
+                  )}
+
+                  <button
+                    type="button"
+                    aria-label="More project actions"
+                    onClick={openActionsAtButton}
+                    className="flex size-11 items-center justify-center rounded-full border border-foreground/6 bg-secondary shadow-sm transition hover:bg-secondary/70 active:scale-95"
+                  >
+                    <Ellipsis className="size-4.5" />
+                  </button>
                 </div>
-              )}
-            </section>
+              </section>
+
+              <section
+                className="project-detail-tracks rise-in pt-8"
+                style={{ animationDelay: "0.08s" }}
+              >
+                {project.tracks.length === 0 ? (
+                  <p className="pt-8 text-center text-[15px] text-muted-foreground">
+                    No tracks yet — drop audio files here or tap + to add some.
+                  </p>
+                ) : (
+                  <div className="flex flex-col">
+                    {project.tracks.map((track, index) => (
+                      <TrackRow
+                        key={track.id}
+                        track={track}
+                        index={index + 1}
+                        project={project}
+                        accent={accent}
+                      />
+                    ))}
+                  </div>
+                )}
+              </section>
+            </div>
           </main>
 
           <ShareDialog project={project} open={shareOpen} onOpenChange={setShareOpen} />
           {isOwnProject && (
-            <CoverDialog project={project} open={coverOpen} onOpenChange={setCoverOpen} />
+            <>
+              <CoverDialog project={project} open={coverOpen} onOpenChange={setCoverOpen} />
+              <EditProjectDialog
+                project={project}
+                open={editOpen}
+                onOpenChange={setEditOpen}
+              />
+            </>
           )}
 
           <Dialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>

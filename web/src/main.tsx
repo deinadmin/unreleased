@@ -3,8 +3,9 @@ import { createRoot } from "react-dom/client"
 import "./index.css"
 import App from "./App"
 
-// Project covers are immutable and cached by their full Firebase URL. Register
-// before rendering so returning visits are cache-controlled immediately.
+// The media worker keeps immutable project covers and songs that have actually
+// been played in browser storage. Register before rendering so returning visits
+// are cache-controlled immediately.
 if ("serviceWorker" in navigator) {
   void navigator.serviceWorker.register("/project-cover-cache-sw.js").catch(() => {})
 }

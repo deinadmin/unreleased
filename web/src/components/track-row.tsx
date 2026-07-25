@@ -1,4 +1,4 @@
-import { MoreHorizontal, NotebookPen, NotebookText, Play, Trash2 } from "lucide-react"
+import { MoreHorizontal, NotebookPen, NotebookText, Pencil, Play, Trash2 } from "lucide-react"
 import { useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { toast } from "sonner"
@@ -8,8 +8,9 @@ import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { useAuth } from "@/hooks/use-auth"
 import { useProject } from "@/hooks/use-projects"
+import { cn } from "@/lib/utils"
 import { formatDuration, formatFileSize, formatRelativeDate } from "@/lib/format"
-import { deleteTrack } from "@/lib/project-edits"
+import { deleteTrack, updateTrackTitle } from "@/lib/project-edits"
 import type { Project, Track } from "@/lib/types"
 import { usePlayer } from "@/player/player-provider"
 
@@ -31,6 +32,10 @@ export function TrackRow({
   const { user } = useAuth()
   const navigate = useNavigate()
   const contextMenu = useContextMenu()
+  const [contextMenuOpen, setContextMenuOpen] = useState(false)
+  const [renameOpen, setRenameOpen] = useState(false)
+  const [renameTitle, setRenameTitle] = useState(track.title)
+  const [renaming, setRenaming] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const isActive = player.track?.id === track.id && player.project?.id === project.id
   const versionNumber =
@@ -56,10 +61,35 @@ export function TrackRow({
     }
   }
 
+  const beginRename = () => {
+    setRenameTitle(track.title)
+    setRenaming(false)
+    setRenameOpen(true)
+  }
+
+  const rename = async () => {
+    const title = renameTitle.trim()
+    if (!user || !title || renaming) return
+    if (title === track.title) {
+      setRenameOpen(false)
+      return
+    }
+    setRenaming(true)
+    try {
+      await updateTrackTitle(user.uid, project, track.id, title)
+      setRenameOpen(false)
+    } catch (error) {
+      console.error("renaming track failed", error)
+      toast("Couldn't rename this track. Please try again.")
+      setRenaming(false)
+    }
+  }
+
   const contextMenuItems = (): ContextMenuItem[] => {
     const items: ContextMenuItem[] = [{ label: "Play", icon: <Play />, onSelect: play }]
     if (isOwnProject && user) {
       items.push(
+        { label: "Rename", icon: <Pencil />, onSelect: beginRename },
         {
           label: "Edit notes",
           icon: <NotebookPen />,
@@ -78,20 +108,30 @@ export function TrackRow({
   }
 
   const openContextMenu = (event: React.MouseEvent) => {
-    contextMenu.open(event, contextMenuItems())
+    contextMenu.open(event, contextMenuItems(), () => setContextMenuOpen(false))
+    setContextMenuOpen(true)
   }
 
   const openMobileMenu = (event: React.MouseEvent<HTMLButtonElement>) => {
     event.stopPropagation()
     const rect = event.currentTarget.getBoundingClientRect()
-    contextMenu.openAt(rect.right, rect.bottom + 4, contextMenuItems())
+    contextMenu.openAt(
+      rect.left,
+      rect.bottom + 4,
+      contextMenuItems(),
+      () => setContextMenuOpen(false),
+    )
+    setContextMenuOpen(true)
   }
 
   return (
     <>
     <div
       onContextMenu={openContextMenu}
-      className="track-row group relative flex w-full items-center overflow-hidden rounded-xl transition-colors hover:bg-muted/60"
+      className={cn(
+        "track-row group relative flex w-full items-center overflow-hidden rounded-xl transition-colors hover:bg-muted/60",
+        contextMenuOpen && "track-row-menu-open bg-muted/60",
+      )}
     >
       <button
         type="button"
@@ -107,10 +147,10 @@ export function TrackRow({
           )}
         </span>
 
-        <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-          <span className="flex items-center gap-1.5">
+        <span className="track-row-copy flex min-w-0 flex-1 flex-col gap-0.5">
+          <span className="flex min-w-0 items-center gap-1.5">
             <span
-              className="truncate text-[15px] font-semibold"
+              className="min-w-0 truncate text-[15px] font-semibold"
               style={isActive ? { color: accent } : undefined}
             >
               {track.title}
@@ -136,12 +176,61 @@ export function TrackRow({
       <button
         type="button"
         aria-label={`More options for ${track.title}`}
+        aria-expanded={contextMenuOpen}
         onClick={openMobileMenu}
         className="track-row-action absolute right-2.5 flex size-10 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"
       >
         <MoreHorizontal className="size-5" />
       </button>
     </div>
+
+    <Dialog
+      open={renameOpen}
+      onOpenChange={(open) => {
+        setRenameOpen(open)
+        if (!open) setRenaming(false)
+      }}
+    >
+      <DialogContent className="rounded-3xl p-6 sm:max-w-sm">
+        <form
+          onSubmit={(event) => {
+            event.preventDefault()
+            void rename()
+          }}
+        >
+          <DialogHeader className="min-w-0 pb-1">
+            <DialogTitle>Rename track</DialogTitle>
+          </DialogHeader>
+          <input
+            autoFocus
+            value={renameTitle}
+            onChange={(event) => setRenameTitle(event.target.value)}
+            placeholder="Track name"
+            aria-label="Track name"
+            maxLength={120}
+            className="mt-4 h-11 w-full rounded-xl bg-secondary px-3.5 text-[15px] outline-none ring-brand/60 transition placeholder:text-muted-foreground/60 focus:ring-2"
+          />
+          <div className="flex justify-end gap-2 pt-5">
+            <Button
+              type="button"
+              variant="ghost"
+              size="lg"
+              disabled={renaming}
+              onClick={() => setRenameOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              size="lg"
+              disabled={!renameTitle.trim() || renaming}
+            >
+              {renaming ? "Renaming…" : "Rename"}
+            </Button>
+          </div>
+        </form>
+      </DialogContent>
+    </Dialog>
 
     <Dialog open={confirmDelete} onOpenChange={setConfirmDelete}>
       <DialogContent className="rounded-3xl p-6 sm:max-w-sm">

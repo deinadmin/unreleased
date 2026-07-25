@@ -7,7 +7,7 @@ import {
   Share,
   Trash2,
 } from "lucide-react"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { Link } from "react-router-dom"
 import { toast } from "sonner"
 import { useContextMenu, type ContextMenuItem } from "@/components/context-menu"
@@ -26,14 +26,35 @@ export function ProjectCard({ project }: { project: Project }) {
   const { user } = useAuth()
   const contextMenu = useContextMenu()
   const player = usePlayer()
+  const [contextMenuOpen, setContextMenuOpen] = useState(false)
   const [editOpen, setEditOpen] = useState(false)
   const [shareOpen, setShareOpen] = useState(false)
   const [confirmAction, setConfirmAction] = useState<"delete" | "leave" | null>(null)
   const [performingAction, setPerformingAction] = useState(false)
+  const [pressed, setPressed] = useState(false)
   const isOwnProject = !project.ownerID
   const isActiveProject = player.project?.id === project.id
   const showsPause = isActiveProject && player.isPlaying
   const firstPlayableTrack = project.tracks.find((track) => track.storagePath)
+
+  // Only the cover itself scales on press; presses that start on an action
+  // button leave the card at rest so just the small button reacts.
+  const beginPress = (event: React.PointerEvent) => {
+    if (event.button !== 0) return
+    if ((event.target as HTMLElement).closest("button")) return
+    setPressed(true)
+  }
+
+  useEffect(() => {
+    if (!pressed) return
+    const endPress = () => setPressed(false)
+    window.addEventListener("pointerup", endPress)
+    window.addEventListener("pointercancel", endPress)
+    return () => {
+      window.removeEventListener("pointerup", endPress)
+      window.removeEventListener("pointercancel", endPress)
+    }
+  }, [pressed])
 
   const playOrPause = (event: React.MouseEvent) => {
     event.preventDefault()
@@ -89,7 +110,18 @@ export function ProjectCard({ project }: { project: Project }) {
     event.preventDefault()
     event.stopPropagation()
     const rect = event.currentTarget.getBoundingClientRect()
-    contextMenu.openAt(rect.right, rect.bottom + 6, menuItems())
+    contextMenu.openAt(
+      rect.left,
+      rect.bottom + 6,
+      menuItems(),
+      () => setContextMenuOpen(false),
+    )
+    setContextMenuOpen(true)
+  }
+
+  const openActionsAtPointer = (event: React.MouseEvent) => {
+    contextMenu.open(event, menuItems(), () => setContextMenuOpen(false))
+    setContextMenuOpen(true)
   }
 
   const performConfirmedAction = async () => {
@@ -118,16 +150,26 @@ export function ProjectCard({ project }: { project: Project }) {
     <>
       <Link
         to={`/project/${project.id}`}
-        className="group block cursor-default select-none"
-        onContextMenu={(event) => contextMenu.open(event, menuItems())}
+        className={`group block cursor-default select-none ${contextMenuOpen ? "project-card-menu-open" : ""}`}
+        onContextMenu={openActionsAtPointer}
+        onPointerDown={beginPress}
       >
-        <div className="relative aspect-square overflow-hidden rounded-[7.7%] transition-transform duration-300 ease-out group-hover:scale-[1.015] group-active:scale-[0.98]">
+        <div
+          className={`relative aspect-square overflow-hidden rounded-[7.7%] transition-transform duration-300 ease-out ${
+            pressed
+              ? "scale-[0.98]"
+              : contextMenuOpen
+                ? "scale-[1.015]"
+                : "group-hover:scale-[1.015]"
+          }`}
+        >
           <CoverThumbnail project={project} className="h-full w-full rounded-[7.7%]" />
 
           <button
             type="button"
             onClick={openActionsAtButton}
             aria-label={`More actions for ${project.name}`}
+            aria-expanded={contextMenuOpen}
             className="project-card-action absolute bottom-2.5 left-2.5 flex size-8 items-center justify-center rounded-full bg-black/25 text-white shadow-sm backdrop-blur-md transition hover:bg-black/40 active:scale-90"
           >
             <Ellipsis className="size-4" />

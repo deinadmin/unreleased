@@ -279,9 +279,9 @@ function PresetRow({
           aria-label={`Actions for ${title}`}
           onClick={(event) => {
             const rect = event.currentTarget.getBoundingClientRect()
-            onOpenMenu(rect.right, rect.bottom + 4)
+            onOpenMenu(rect.left, rect.bottom + 4)
           }}
-          className="preset-row-action absolute right-2.5 flex size-7 items-center justify-center rounded-lg text-muted-foreground hover:bg-foreground/8 hover:text-foreground"
+          className="preset-row-action absolute right-2.5 flex size-7 items-center justify-center rounded-lg text-muted-foreground hover:bg-foreground/8 hover:text-foreground active:scale-90"
         >
           <MoreHorizontal className="size-4" />
         </button>
