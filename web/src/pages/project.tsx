@@ -1,0 +1,258 @@
+import { ChevronLeft, Pause, Play, Plus, Share } from "lucide-react"
+import { useState } from "react"
+import { Link, useParams } from "react-router-dom"
+import { toast } from "sonner"
+import { AppHeader } from "@/components/app-header"
+import { CoverDialog } from "@/components/cover-dialog"
+import { ProjectCover } from "@/components/project-cover"
+import { ShareDialog } from "@/components/share-dialog"
+import { TrackRow } from "@/components/track-row"
+import { Skeleton } from "@/components/ui/skeleton"
+import { useAuth } from "@/hooks/use-auth"
+import { useProject, useProjects } from "@/hooks/use-projects"
+import { formatProjectDuration } from "@/lib/format"
+import { updateProjectName } from "@/lib/project-edits"
+import { projectAccent, trackCountText, type Project } from "@/lib/types"
+import { usePlayer } from "@/player/player-provider"
+import { AudioDropzone } from "@/uploads/dropzone"
+import { useUploads } from "@/uploads/uploads-provider"
+
+export function ProjectPage() {
+  const { projectId } = useParams()
+  const { loading } = useProjects()
+  const project = useProject(projectId)
+  const player = usePlayer()
+  const { importFiles, isImporting } = useUploads()
+  const [shareOpen, setShareOpen] = useState(false)
+  const [coverOpen, setCoverOpen] = useState(false)
+
+  if (loading && !project) {
+    return (
+      <div className="min-h-dvh">
+        <AppHeader />
+        <main className="mx-auto w-full max-w-2xl px-4 pt-10 sm:px-6">
+          <div className="flex flex-col items-center gap-6">
+            <Skeleton className="size-64 rounded-3xl" />
+            <Skeleton className="h-6 w-48 rounded-md" />
+            <Skeleton className="h-4 w-32 rounded-md" />
+          </div>
+        </main>
+      </div>
+    )
+  }
+
+  if (!project) {
+    return (
+      <div className="min-h-dvh">
+        <AppHeader />
+        <main className="flex flex-col items-center pt-[20vh] text-muted-foreground">
+          <p className="text-[15px]">Project not found</p>
+          <Link to="/" className="pt-3 text-[15px] font-semibold text-foreground hover:opacity-70">
+            Back to library
+          </Link>
+        </main>
+      </div>
+    )
+  }
+
+  const accent = projectAccent(project)
+  const isActiveProject = player.project?.id === project.id
+  const isProjectPlaying = isActiveProject && player.isPlaying
+  const totalDuration = project.tracks.reduce((sum, t) => sum + t.duration, 0)
+  const hasPlayableTracks = project.tracks.some((t) => t.storagePath)
+
+  const playOrPause = () => {
+    if (isActiveProject) {
+      player.togglePlayPause()
+      return
+    }
+    const first = project.tracks.find((t) => t.storagePath)
+    if (first) player.play(first, project)
+  }
+
+  // Editing and uploads are only available for the user's own projects.
+  const isOwnProject = !project.ownerID
+  const canUpload = isOwnProject
+  const addFiles = (files: File[]) =>
+    void importFiles(files, { kind: "existing", projectID: project.id })
+
+  return (
+    <AudioDropzone
+      disabled={!canUpload}
+      overlayLabel={`Drop audio files to add to “${project.name}”`}
+      onFiles={addFiles}
+    >
+      {(openPicker) => (
+        <div className="min-h-dvh">
+          <AppHeader />
+
+          <main className="mx-auto w-full max-w-2xl px-4 pb-40 sm:px-6">
+            <div className="flex h-12 items-center">
+              <Link
+                to="/"
+                className="-ml-2 flex items-center gap-0.5 rounded-lg px-2 py-1.5 text-[15px] font-medium text-muted-foreground transition hover:text-foreground"
+              >
+                <ChevronLeft className="size-4.5" />
+                Library
+              </Link>
+            </div>
+
+            <section className="rise-in flex flex-col items-center pt-4">
+              {isOwnProject ? (
+                <button
+                  type="button"
+                  aria-label="Edit cover"
+                  onClick={() => setCoverOpen(true)}
+                  className="w-56 cursor-pointer transition duration-300 hover:opacity-95 active:scale-[0.99] sm:w-64"
+                >
+                  <ProjectCover
+                    project={project}
+                    isPlaying={isProjectPlaying}
+                    className="w-full"
+                  />
+                </button>
+              ) : (
+                <ProjectCover
+                  project={project}
+                  isPlaying={isProjectPlaying}
+                  className="w-56 sm:w-64"
+                />
+              )}
+
+              {isOwnProject ? (
+                <EditableTitle project={project} />
+              ) : (
+                <h1 className="max-w-full truncate pt-7 text-center text-[22px] font-bold">
+                  {project.name}
+                </h1>
+              )}
+              <p className="pt-1 text-[13px] text-muted-foreground">
+                {trackCountText(project)} •{" "}
+                {formatProjectDuration(totalDuration, project.tracks.length)}
+                {project.ownerUsername ? ` • by @${project.ownerUsername}` : ""}
+              </p>
+
+              <div className="mt-5 flex items-center gap-3">
+                {hasPlayableTracks && (
+                  <button
+                    type="button"
+                    onClick={playOrPause}
+                    className="flex h-11 items-center gap-2 rounded-full px-7 text-[15px] font-bold text-white shadow-md transition hover:brightness-105 active:scale-[0.98]"
+                    style={{ background: accent }}
+                  >
+                    {isProjectPlaying ? (
+                      <>
+                        <Pause className="size-4 fill-current" strokeWidth={0} />
+                        Pause
+                      </>
+                    ) : (
+                      <>
+                        <Play className="size-4 fill-current" strokeWidth={0} />
+                        Play
+                      </>
+                    )}
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  aria-label="Share project"
+                  onClick={() => setShareOpen(true)}
+                  className="flex size-11 items-center justify-center rounded-full border border-foreground/6 bg-secondary shadow-sm transition hover:bg-secondary/70 active:scale-95"
+                >
+                  <Share className="size-4.5" />
+                </button>
+
+                {canUpload && (
+                  <button
+                    type="button"
+                    aria-label="Add tracks"
+                    disabled={isImporting}
+                    onClick={openPicker}
+                    className="flex size-11 items-center justify-center rounded-full border border-foreground/6 bg-secondary shadow-sm transition hover:bg-secondary/70 active:scale-95 disabled:opacity-50"
+                  >
+                    <Plus className="size-4.5" />
+                  </button>
+                )}
+              </div>
+            </section>
+
+            <section className="rise-in pt-8" style={{ animationDelay: "0.08s" }}>
+              {project.tracks.length === 0 ? (
+                <p className="pt-8 text-center text-[15px] text-muted-foreground">
+                  No tracks yet — drop audio files here or tap + to add some.
+                </p>
+              ) : (
+                <div className="flex flex-col">
+                  {project.tracks.map((track, index) => (
+                    <TrackRow
+                      key={track.id}
+                      track={track}
+                      index={index + 1}
+                      project={project}
+                      accent={accent}
+                    />
+                  ))}
+                </div>
+              )}
+            </section>
+          </main>
+
+          <ShareDialog project={project} open={shareOpen} onOpenChange={setShareOpen} />
+          {isOwnProject && (
+            <CoverDialog project={project} open={coverOpen} onOpenChange={setCoverOpen} />
+          )}
+        </div>
+      )}
+    </AudioDropzone>
+  )
+}
+
+/**
+ * The project title as an invisible in-place editor: clicking puts the caret
+ * straight into the heading; blur (or Enter) commits the new name.
+ */
+function EditableTitle({ project }: { project: Project }) {
+  const { user } = useAuth()
+
+  const commit = (element: HTMLHeadingElement) => {
+    const name = (element.textContent ?? "").trim() || "untitled project"
+    element.textContent = name
+    if (!user || name === project.name) return
+    updateProjectName(user.uid, project, name).catch(() => {
+      element.textContent = project.name
+      toast("Couldn't rename the project. Please try again.")
+    })
+  }
+
+  return (
+    <h1
+      // Remount when the name changes externally so React and the
+      // contentEditable DOM never fight over the text node.
+      key={project.name}
+      contentEditable
+      suppressContentEditableWarning
+      spellCheck={false}
+      role="textbox"
+      aria-label="Project name"
+      className="max-w-full cursor-text truncate rounded-md px-1 pt-7 text-center text-[22px] font-bold outline-none focus:overflow-x-auto focus:text-clip"
+      onBlur={(event) => commit(event.currentTarget)}
+      onKeyDown={(event) => {
+        if (event.key === "Enter") {
+          event.preventDefault()
+          event.currentTarget.blur()
+        } else if (event.key === "Escape") {
+          event.currentTarget.textContent = project.name
+          event.currentTarget.blur()
+        }
+      }}
+      onPaste={(event) => {
+        event.preventDefault()
+        const text = event.clipboardData.getData("text/plain").replace(/\s+/g, " ")
+        document.execCommand("insertText", false, text)
+      }}
+    >
+      {project.name}
+    </h1>
+  )
+}

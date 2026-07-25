@@ -15,10 +15,30 @@ service firebase.storage {
           );
       }
 
+      // Link sharing: public versions are streamable by anonymous guest
+      // sessions (web share links) while the share link is enabled.
+      function linkSharedCanReadVersion() {
+        let access = firestore.get(
+          /databases/(default)/documents/users/$(userId)/versionAccess/$(versionId)
+        );
+        return access.data.isPublic == true
+          && firestore.get(
+            /databases/(default)/documents/users/$(userId)/projectPreviews/$(access.data.projectID)
+          ).data.linkEnabled == true;
+      }
+
+      // Storage rules allow at most 2 firestore.get()/exists() calls per
+      // request, so guests and signed-in users each take exactly one branch
+      // (each branch reads 2 documents). Signed-in listeners always play as
+      // invitees — the web client auto-joins before streaming via a link.
       allow read: if request.auth != null
         && (
           request.auth.uid == userId
-          || collaboratorCanReadVersion()
+          || (
+            request.auth.token.firebase.sign_in_provider == 'anonymous'
+              ? linkSharedCanReadVersion()
+              : collaboratorCanReadVersion()
+          )
         );
 
       allow write: if request.auth != null && request.auth.uid == userId;

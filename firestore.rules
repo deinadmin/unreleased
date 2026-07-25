@@ -83,6 +83,11 @@ service cloud.firestore {
         allow read: if request.auth != null
           && exists(/databases/$(database)/documents/users/$(userId)/projects/$(projectId)/invitees/$(request.auth.uid));
 
+        // Link sharing: anyone signed in (including anonymous guest sessions
+        // from the web player) can read while the owner's share link is on.
+        allow read: if request.auth != null
+          && get(/databases/$(database)/documents/users/$(userId)/projectPreviews/$(projectId)).data.linkEnabled == true;
+
         // ── Invitees subcollection ─────────────────────────────────────────
         match /invitees/{inviteeId} {
           // Owner can read and manage all invitees.
