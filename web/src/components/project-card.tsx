@@ -110,17 +110,14 @@ export function ProjectCard({ project }: { project: Project }) {
     event.preventDefault()
     event.stopPropagation()
     const rect = event.currentTarget.getBoundingClientRect()
-    contextMenu.openAt(
-      rect.left,
-      rect.bottom + 6,
-      menuItems(),
-      () => setContextMenuOpen(false),
-    )
+    contextMenu.openAt(rect.left, rect.bottom + 6, menuItems(), {
+      onClose: () => setContextMenuOpen(false),
+    })
     setContextMenuOpen(true)
   }
 
   const openActionsAtPointer = (event: React.MouseEvent) => {
-    contextMenu.open(event, menuItems(), () => setContextMenuOpen(false))
+    contextMenu.open(event, menuItems(), { onClose: () => setContextMenuOpen(false) })
     setContextMenuOpen(true)
   }
 

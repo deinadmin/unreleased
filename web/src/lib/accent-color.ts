@@ -38,6 +38,18 @@ export function gradientHexPairFromImage(
   return [start, end]
 }
 
+/**
+ * Whether black text reads better than white on this color. Mirrors the iOS
+ * `CoverControlContrastModifier`: WCAG contrast against black and white is
+ * equal at a relative luminance of roughly 0.179.
+ */
+export function prefersDarkForegroundOn(hex: string): boolean {
+  const { r, g, b } = rgbFromHex(hex)
+  const linear = (component: number) =>
+    component <= 0.04045 ? component / 12.92 : Math.pow((component + 0.055) / 1.055, 2.4)
+  return 0.2126 * linear(r) + 0.7152 * linear(g) + 0.0722 * linear(b) > 0.179
+}
+
 // MARK: - Dominant color extraction
 // Approximates the DominantColors package: pixelate, drop black/white/gray,
 // cluster similar colors, sort clusters by pixel frequency.

@@ -44,6 +44,33 @@ enum ProjectAccentColor {
         return Color(hex: hex)
     }
 
+    // MARK: - Contrast
+
+    /// Whether black content reads better than white on top of this color.
+    /// WCAG contrast against black and white is equal at a relative luminance
+    /// of approximately 0.179.
+    static func prefersDarkForeground(onHex hex: String) -> Bool {
+        (relativeLuminance(ofHex: hex) ?? 0) > 0.179
+    }
+
+    static func relativeLuminance(ofHex hex: String) -> Double? {
+        let value = hex.trimmingCharacters(in: CharacterSet(charactersIn: "#"))
+        guard value.count == 6, let rgb = UInt32(value, radix: 16) else { return nil }
+
+        let red = Double((rgb >> 16) & 0xFF) / 255
+        let green = Double((rgb >> 8) & 0xFF) / 255
+        let blue = Double(rgb & 0xFF) / 255
+        return 0.2126 * linearized(red)
+            + 0.7152 * linearized(green)
+            + 0.0722 * linearized(blue)
+    }
+
+    private static func linearized(_ component: Double) -> Double {
+        component <= 0.04045
+            ? component / 12.92
+            : pow((component + 0.055) / 1.055, 2.4)
+    }
+
     // MARK: - Extraction via DominantColors
 
     /// Extracts up to `count` dominant UIColors, excluding black / white / grey,

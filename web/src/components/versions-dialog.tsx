@@ -1,4 +1,15 @@
-import { Eye, EyeOff, GripVertical, MoreHorizontal, Pause, Pencil, Play, Plus, Trash2 } from "lucide-react"
+import {
+  Eye,
+  EyeOff,
+  GripVertical,
+  MoreHorizontal,
+  Pause,
+  Pencil,
+  Play,
+  Plus,
+  Trash2,
+  Upload,
+} from "lucide-react"
 import { useCallback, useEffect, useRef, useState } from "react"
 import { toast } from "@/lib/toast"
 import { useContextMenu, type ContextMenuItem } from "@/components/context-menu"
@@ -9,6 +20,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { useAuth } from "@/hooks/use-auth"
 import { useProject } from "@/hooks/use-projects"
 import { useSetActiveVersion } from "@/hooks/use-versions"
+import { lockAudioDrop } from "@/lib/audio-drop-lock"
 import { formatDuration, formatFileSize } from "@/lib/format"
 import { downloadURL } from "@/lib/storage-urls"
 import { projectAccent, type Project, type Track, type TrackVersion } from "@/lib/types"
@@ -73,6 +85,9 @@ export function VersionsDialog({
   // Non-null only while a card is being dragged; holds the live preview order.
   const [dragOrder, setDragOrder] = useState<string[] | null>(null)
   const [draggingID, setDraggingID] = useState<string | null>(null)
+  // True while an audio file from outside the page hovers the dialog.
+  const [fileDragging, setFileDragging] = useState(false)
+  const dragDepth = useRef(0)
 
   // Mirrored imperatively so the async preview pipeline can bail out on a
   // stale load without waiting for a re-render.
@@ -95,6 +110,13 @@ export function VersionsDialog({
   useEffect(() => {
     if (!open) return
     setPreviewAudio((existing) => existing ?? new Audio())
+  }, [open])
+
+  // The dialog handles its own audio drops, so the page-wide dropzone behind it
+  // has to stand down for as long as it is open.
+  useEffect(() => {
+    if (!open) return
+    return lockAudioDrop()
   }, [open])
 
   // Capture the playback state to restore once the dialog closes.
@@ -224,6 +246,31 @@ export function VersionsDialog({
     void importVersions(files, liveProject.id, liveTrack.id)
   }
 
+  const dropProps = isOwner
+    ? {
+        onDragEnter: (event: React.DragEvent) => {
+          if (!event.dataTransfer.types.includes("Files")) return
+          event.preventDefault()
+          dragDepth.current++
+          setFileDragging(true)
+        },
+        onDragOver: (event: React.DragEvent) => {
+          if (!event.dataTransfer.types.includes("Files")) return
+          event.preventDefault()
+        },
+        onDragLeave: () => {
+          dragDepth.current = Math.max(0, dragDepth.current - 1)
+          if (dragDepth.current === 0) setFileDragging(false)
+        },
+        onDrop: (event: React.DragEvent) => {
+          event.preventDefault()
+          dragDepth.current = 0
+          setFileDragging(false)
+          addVersions(Array.from(event.dataTransfer.files))
+        },
+      }
+    : {}
+
   const commitRename = async () => {
     if (!user || !renameTarget) return
     try {
@@ -320,6 +367,7 @@ export function VersionsDialog({
     <>
       <Dialog open={open} onOpenChange={handleOpenChange}>
         <DialogContent
+          {...dropProps}
           // The app's context menu renders outside the dialog, so reaching for
           // it must not be treated as dismissing the dialog.
           onInteractOutside={(event) => {
@@ -397,6 +445,20 @@ export function VersionsDialog({
                 version number.
               </p>
             )}
+          </div>
+
+          {/* Pointer-transparent so the drag keeps targeting the dialog. */}
+          <div
+            aria-hidden
+            className={cn(
+              "pointer-events-none absolute inset-0 flex items-center justify-center bg-background/80 p-6 backdrop-blur-sm transition-opacity duration-150 ease-snappy",
+              fileDragging ? "opacity-100" : "opacity-0",
+            )}
+          >
+            <div className="flex flex-col items-center gap-3 rounded-3xl border-2 border-dashed border-brand/60 bg-secondary/80 px-10 py-8 text-center">
+              <Upload className="size-8 text-brand" />
+              <p className="text-[15px] font-semibold">Drop audio to add a new version</p>
+            </div>
           </div>
         </DialogContent>
       </Dialog>

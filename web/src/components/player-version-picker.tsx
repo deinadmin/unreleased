@@ -1,19 +1,32 @@
+import { Plus } from "lucide-react"
 import { useCallback, useEffect, useRef, useState } from "react"
+import { prefersDarkForegroundOn } from "@/lib/accent-color"
 import type { TrackVersion } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
 const ROW_SPACING = 49
 const ROW_HEIGHT = 44
-const SELECTION_COLOR = "#FFCC2B"
 
 interface VersionPickerProps {
   versions: TrackVersion[]
   selectedVersionID: string
   versionNumber: (version: TrackVersion) => number
   versionName: (version: TrackVersion) => string
+  /** The project's accent, used to tint the selected version. */
+  accent: string
   /** `wasTapped` distinguishes a direct click from a settled drag, like iOS. */
   onSelect: (version: TrackVersion, wasTapped: boolean) => void
   className?: string
+}
+
+/** Foreground treatment for whatever sits on top of the accent fill. */
+function selectionTones(accent: string) {
+  const dark = prefersDarkForegroundOn(accent)
+  return {
+    label: dark ? "text-black/90" : "text-white",
+    badge: dark ? "bg-black/10 text-black/70" : "bg-white/20 text-white/85",
+    ring: dark ? "ring-black/10" : "ring-white/25",
+  }
 }
 
 /**
@@ -25,9 +38,15 @@ export function PlayerVersionList({
   selectedVersionID,
   versionNumber,
   versionName,
+  accent,
   onSelect,
+  onAddVersion,
   className,
-}: VersionPickerProps) {
+}: VersionPickerProps & {
+  /** Owners get an entry that opens the versions dialog. */
+  onAddVersion?: () => void
+}) {
+  const tones = selectionTones(accent)
   return (
     <div
       role="listbox"
@@ -37,6 +56,21 @@ export function PlayerVersionList({
         className,
       )}
     >
+      {onAddVersion && (
+        <button
+          type="button"
+          onClick={onAddVersion}
+          style={{ height: ROW_HEIGHT }}
+          className="flex shrink-0 items-center gap-2.5 rounded-xl px-3.5 text-left text-white/70 transition-colors hover:bg-white/10 hover:text-white"
+        >
+          {/* Sits in the version badge's slot so the labels line up. */}
+          <span className="shrink-0 rounded-full bg-white/10 px-1.5 py-1">
+            <Plus className="size-3" strokeWidth={3} />
+          </span>
+          <span className="min-w-0 truncate text-[14px] font-medium">Add a version</span>
+        </button>
+      )}
+
       {versions.map((version) => {
         const isSelected = version.id === selectedVersionID
         return (
@@ -52,13 +86,13 @@ export function PlayerVersionList({
             )}
             style={{
               height: ROW_HEIGHT,
-              background: isSelected ? SELECTION_COLOR : undefined,
+              background: isSelected ? accent : undefined,
             }}
           >
             <span
               className={cn(
                 "shrink-0 rounded-full px-1.5 py-1 text-[10px] font-bold tabular-nums",
-                isSelected ? "bg-black/10 text-black/70" : "bg-white/10 text-white/50",
+                isSelected ? tones.badge : "bg-white/10 text-white/50",
               )}
             >
               v{versionNumber(version)}
@@ -66,7 +100,7 @@ export function PlayerVersionList({
             <span
               className={cn(
                 "min-w-0 truncate text-[14px]",
-                isSelected ? "font-semibold text-black/90" : "font-medium",
+                isSelected ? cn("font-semibold", tones.label) : "font-medium",
               )}
             >
               {versionName(version)}
@@ -88,9 +122,11 @@ export function PlayerVersionWheel({
   selectedVersionID,
   versionNumber,
   versionName,
+  accent,
   onSelect,
   className,
 }: VersionPickerProps) {
+  const tones = selectionTones(accent)
   const [selectedIndex, setSelectedIndex] = useState(0)
   const [dragStartIndex, setDragStartIndex] = useState(0)
   const [dragOffset, setDragOffset] = useState(0)
@@ -212,11 +248,11 @@ export function PlayerVersionWheel({
     >
       <div
         aria-hidden
-        className="pointer-events-none absolute inset-x-7.5 rounded-[11px] ring-1 ring-white/25"
+        className={cn("pointer-events-none absolute inset-x-7.5 rounded-[11px] ring-1", tones.ring)}
         style={{
           height: ROW_HEIGHT,
-          background: SELECTION_COLOR,
-          boxShadow: `0 4px 16px ${SELECTION_COLOR}33`,
+          background: accent,
+          boxShadow: `0 4px 16px ${accent}33`,
         }}
       />
 
@@ -245,7 +281,7 @@ export function PlayerVersionWheel({
             <span
               className={cn(
                 "shrink-0 rounded-full px-1.5 py-1 text-[10px] font-bold tabular-nums",
-                isSelected ? "bg-black/8 text-black/70" : "bg-white/8 text-white/45",
+                isSelected ? tones.badge : "bg-white/8 text-white/45",
               )}
             >
               v{versionNumber(version)}
@@ -253,7 +289,9 @@ export function PlayerVersionWheel({
             <span
               className={cn(
                 "min-w-0 truncate",
-                isSelected ? "text-[15px] font-semibold text-black/90" : "text-[14px] font-medium text-white",
+                isSelected
+                  ? cn("text-[15px] font-semibold", tones.label)
+                  : "text-[14px] font-medium text-white",
               )}
             >
               {versionName(version)}

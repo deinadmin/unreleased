@@ -619,6 +619,10 @@ struct PlayerView: View {
                         selectedVersionID: track.resolvedActiveVersionID,
                         versionNumber: { track.versionNumber(for: $0.id) ?? 1 },
                         versionName: { track.versionDisplayName(for: $0) },
+                        selectionColor: store.accentColor(for: project),
+                        prefersDarkSelectionForeground: ProjectAccentColor.prefersDarkForeground(
+                            onHex: store.accentHex(for: project)
+                        ),
                         onSelect: { version, wasTapped in
                             if wasTapped {
                                 versionPickerTapHapticTrigger += 1
@@ -1089,6 +1093,10 @@ private struct PlayerVersionPicker: View {
     let selectedVersionID: UUID
     let versionNumber: (TrackVersion) -> Int
     let versionName: (TrackVersion) -> String
+    /// The project's accent, used to tint the selected version.
+    let selectionColor: Color
+    /// True when the accent is light enough that black content reads better.
+    let prefersDarkSelectionForeground: Bool
     let onSelect: (TrackVersion, Bool) -> Void
 
     @State private var selectedIndex = 0
@@ -1099,7 +1107,15 @@ private struct PlayerVersionPicker: View {
 
     private let rowSpacing: CGFloat = 49
     private let selectionHeight: CGFloat = 44
-    private let selectionColor = Color(red: 1.0, green: 0.80, blue: 0.17)
+
+    /// Content laid over the accent fill.
+    private var selectedForeground: Color {
+        prefersDarkSelectionForeground ? .black : .white
+    }
+
+    private var selectedBadgeBackground: Color {
+        prefersDarkSelectionForeground ? .black.opacity(0.08) : .white.opacity(0.20)
+    }
 
     var body: some View {
         ZStack {
@@ -1156,7 +1172,12 @@ private struct PlayerVersionPicker: View {
             .frame(height: selectionHeight)
             .overlay {
                 RoundedRectangle(cornerRadius: 11, style: .continuous)
-                    .strokeBorder(.white.opacity(0.24), lineWidth: 0.75)
+                    .strokeBorder(
+                        prefersDarkSelectionForeground
+                            ? .black.opacity(0.10)
+                            : .white.opacity(0.24),
+                        lineWidth: 0.75
+                    )
             }
             .shadow(color: selectionColor.opacity(0.20), radius: 16, y: 4)
             .padding(.horizontal, 8)
@@ -1175,17 +1196,25 @@ private struct PlayerVersionPicker: View {
                 Text("v\(versionNumber(version))")
                     .font(.system(size: isSelected ? 11 : 10, weight: .bold, design: .rounded))
                     .monospacedDigit()
-                    .foregroundStyle(isSelected ? .black.opacity(0.72) : .white.opacity(0.44))
+                    .foregroundStyle(
+                        isSelected
+                            ? selectedForeground.opacity(prefersDarkSelectionForeground ? 0.72 : 0.85)
+                            : .white.opacity(0.44)
+                    )
                     .padding(.horizontal, 7)
                     .padding(.vertical, 4)
                     .background(
-                        isSelected ? .black.opacity(0.08) : .white.opacity(0.07),
+                        isSelected ? selectedBadgeBackground : .white.opacity(0.07),
                         in: Capsule()
                     )
 
                 Text(versionName(version))
                     .font(.system(size: isSelected ? 15 : 14, weight: isSelected ? .semibold : .medium))
-                    .foregroundStyle(isSelected ? .black.opacity(0.88) : .white)
+                    .foregroundStyle(
+                        isSelected
+                            ? selectedForeground.opacity(prefersDarkSelectionForeground ? 0.88 : 1)
+                            : .white
+                    )
                     .lineLimit(1)
 
                 Spacer(minLength: 0)

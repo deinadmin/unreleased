@@ -810,11 +810,12 @@ private struct TrackRow: View {
     @State private var isQueueArmed = false
     @State private var isSuppressingTap = false
     @State private var tapSuppressionGeneration = 0
+    @State private var rowHeight: CGFloat = 0
 
-    private static let queueActivationDistance: CGFloat = 84
-    private static let minimumProjectedCommitDistance: CGFloat = 44
-    private static let maximumDirectReveal: CGFloat = 108
-    private static let actionBackgroundWidth: CGFloat = 200
+    private static let queueActivationDistance: CGFloat = 72
+    private static let minimumProjectedCommitDistance: CGFloat = 38
+    private static let maximumDirectReveal: CGFloat = 88
+    private static let actionBackgroundWidth: CGFloat = 220
 
     private var isActive: Bool { player.currentTrack?.id == track.id }
 
@@ -823,6 +824,18 @@ private struct TrackRow: View {
             queueActionBackground
             rowContent
                 .background(Color(uiColor: .systemBackground))
+                .onGeometryChange(for: CGFloat.self) { proxy in
+                    proxy.size.height
+                } action: { height in
+                    rowHeight = height
+                }
+                .clipShape(
+                    UnevenRoundedRectangle(
+                        topLeadingRadius: revealedCornerRadius,
+                        bottomLeadingRadius: revealedCornerRadius,
+                        style: .continuous
+                    )
+                )
                 .offset(x: horizontalOffset)
         }
         .frame(maxWidth: .infinity)
@@ -915,6 +928,12 @@ private struct TrackRow: View {
                     }
             }
             .accessibilityHidden(true)
+    }
+
+    /// The leading corners round on a single continuous ramp, hitting a full pill
+    /// exactly as the drag crosses the queue activation threshold.
+    private var revealedCornerRadius: CGFloat {
+        (rowHeight / 2) * queueRevealProgress
     }
 
     private var queueRevealProgress: CGFloat {
@@ -1012,7 +1031,7 @@ private struct TrackRow: View {
         return Self.maximumDirectReveal
             + rubberBandDistance(
                 translation - Self.maximumDirectReveal,
-                dimension: 64
+                dimension: 52
             )
     }
 

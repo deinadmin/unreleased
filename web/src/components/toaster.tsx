@@ -28,7 +28,9 @@ export function Toaster({ children }: { children?: ReactNode }) {
       aria-live="polite"
       onPointerEnter={pauseToasts}
       onPointerLeave={resumeToasts}
-      className="pointer-events-none fixed left-4 z-40 flex w-72 max-w-[calc(100vw-2rem)] flex-col-reverse transition-[bottom] duration-300 ease-snappy"
+      // Top of the stack: above dialogs and their blurred backdrop (z-50), the
+      // maximized player (z-50) and the context menu (z-70).
+      className="pointer-events-none fixed left-4 z-[80] flex w-72 max-w-[calc(100vw-2rem)] flex-col-reverse transition-[bottom] duration-300 ease-snappy"
       style={{ bottom: miniPlayerVisible ? "6rem" : "1rem" }}
     >
       {children}

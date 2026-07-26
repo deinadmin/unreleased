@@ -1,5 +1,6 @@
 import { Upload } from "lucide-react"
-import { useRef, useState, type ReactNode } from "react"
+import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react"
+import { isAudioDropLocked, subscribeAudioDropLock } from "@/lib/audio-drop-lock"
 
 export const AUDIO_ACCEPT = ".mp3,.m4a,.wav,.aiff,.aif,.flac,.aac,audio/*"
 
@@ -21,6 +22,14 @@ export function AudioDropzone({
   const inputRef = useRef<HTMLInputElement>(null)
   const dragDepth = useRef(0)
   const [dragging, setDragging] = useState(false)
+  // A surface with its own drop handling (the versions dialog) takes over.
+  const locked = useSyncExternalStore(subscribeAudioDropLock, isAudioDropLocked)
+
+  useEffect(() => {
+    if (!locked) return
+    dragDepth.current = 0
+    setDragging(false)
+  }, [locked])
 
   const openPicker = () => inputRef.current?.click()
 
@@ -30,20 +39,22 @@ export function AudioDropzone({
     <div
       className="relative min-h-dvh"
       onDragEnter={(event) => {
-        if (!event.dataTransfer.types.includes("Files")) return
+        if (locked || !event.dataTransfer.types.includes("Files")) return
         event.preventDefault()
         dragDepth.current++
         setDragging(true)
       }}
       onDragOver={(event) => {
-        if (!event.dataTransfer.types.includes("Files")) return
+        if (locked || !event.dataTransfer.types.includes("Files")) return
         event.preventDefault()
       }}
       onDragLeave={() => {
+        if (locked) return
         dragDepth.current = Math.max(0, dragDepth.current - 1)
         if (dragDepth.current === 0) setDragging(false)
       }}
       onDrop={(event) => {
+        if (locked) return
         event.preventDefault()
         dragDepth.current = 0
         setDragging(false)

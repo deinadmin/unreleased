@@ -19,11 +19,23 @@ export interface ContextMenuItem {
   onSelect: () => void
 }
 
+export interface OpenMenuOptions {
+  onClose?: () => void
+  /**
+   * Which corner of the menu the given coordinates describe. Defaults to the
+   * top-left, i.e. the menu grows down and to the right of the anchor. Use
+   * `"end"` to anchor the opposite edge, e.g. `alignX: "end"` to line the
+   * menu's right edge up with the anchor and `alignY: "end"` to open upward.
+   */
+  alignX?: "start" | "end"
+  alignY?: "start" | "end"
+}
+
 interface ContextMenuContextValue {
   /** Opens the custom menu at the pointer position of a `contextmenu` event. */
-  open: (event: React.MouseEvent, items: ContextMenuItem[], onClose?: () => void) => void
+  open: (event: React.MouseEvent, items: ContextMenuItem[], options?: OpenMenuOptions) => void
   /** Opens the custom menu at explicit viewport coordinates. */
-  openAt: (x: number, y: number, items: ContextMenuItem[], onClose?: () => void) => void
+  openAt: (x: number, y: number, items: ContextMenuItem[], options?: OpenMenuOptions) => void
 }
 
 const ContextMenuContext = createContext<ContextMenuContextValue | null>(null)
@@ -37,6 +49,8 @@ interface MenuState {
   id: number
   x: number
   y: number
+  alignX: "start" | "end"
+  alignY: "start" | "end"
   items: ContextMenuItem[]
 }
 
@@ -54,11 +68,18 @@ export function ContextMenuProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const show = useCallback(
-    (x: number, y: number, items: ContextMenuItem[], onClose?: () => void) => {
+    (x: number, y: number, items: ContextMenuItem[], options?: OpenMenuOptions) => {
       if (items.length === 0) return
       onCloseRef.current?.()
-      onCloseRef.current = onClose ?? null
-      setMenu({ id: ++menuID.current, x, y, items })
+      onCloseRef.current = options?.onClose ?? null
+      setMenu({
+        id: ++menuID.current,
+        x,
+        y,
+        alignX: options?.alignX ?? "start",
+        alignY: options?.alignY ?? "start",
+        items,
+      })
     },
     [],
   )
@@ -71,16 +92,16 @@ export function ContextMenuProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const open = useCallback(
-    (event: React.MouseEvent, items: ContextMenuItem[], onClose?: () => void) => {
+    (event: React.MouseEvent, items: ContextMenuItem[], options?: OpenMenuOptions) => {
       event.preventDefault()
-      show(event.clientX, event.clientY, items, onClose)
+      show(event.clientX, event.clientY, items, options)
     },
     [show],
   )
 
   const openAt = useCallback(
-    (x: number, y: number, items: ContextMenuItem[], onClose?: () => void) => {
-      show(x, y, items, onClose)
+    (x: number, y: number, items: ContextMenuItem[], options?: OpenMenuOptions) => {
+      show(x, y, items, options)
     },
     [show],
   )
@@ -94,8 +115,12 @@ export function ContextMenuProvider({ children }: { children: ReactNode }) {
   useLayoutEffect(() => {
     const el = menuRef.current
     if (!menu || !el) return
-    const x = Math.max(8, Math.min(menu.x, window.innerWidth - el.offsetWidth - 8))
-    const y = Math.max(8, Math.min(menu.y, window.innerHeight - el.offsetHeight - 8))
+    const { offsetWidth: width, offsetHeight: height } = el
+    // Resolve the requested corner into a top-left origin, then clamp.
+    const anchoredX = menu.alignX === "end" ? menu.x - width : menu.x
+    const anchoredY = menu.alignY === "end" ? menu.y - height : menu.y
+    const x = Math.max(8, Math.min(anchoredX, window.innerWidth - width - 8))
+    const y = Math.max(8, Math.min(anchoredY, window.innerHeight - height - 8))
     el.style.left = `${x}px`
     el.style.top = `${y}px`
     el.style.visibility = "visible"
@@ -142,7 +167,17 @@ export function ContextMenuProvider({ children }: { children: ReactNode }) {
           // open animation, but it also sets `transition-duration`, and with no
           // transition-property the CSS default of `all` would make the
           // clamped-in left/top slide into place instead of starting there.
-          className="pointer-events-auto fixed z-[70] min-w-44 origin-top-left animate-in rounded-xl border bg-popover p-1 text-popover-foreground shadow-xl transition-none duration-100 fade-in-0 zoom-in-95"
+          className={cn(
+            "pointer-events-auto fixed z-[70] min-w-44 animate-in rounded-xl border bg-popover p-1 text-popover-foreground shadow-xl transition-none duration-100 fade-in-0 zoom-in-95",
+            // Grow out of the anchored corner.
+            menu.alignY === "end"
+              ? menu.alignX === "end"
+                ? "origin-bottom-right"
+                : "origin-bottom-left"
+              : menu.alignX === "end"
+                ? "origin-top-right"
+                : "origin-top-left",
+          )}
           style={{ left: menu.x, top: menu.y, visibility: "hidden" }}
         >
           {menu.items.map((item) => (

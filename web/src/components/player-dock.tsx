@@ -1,15 +1,28 @@
-import { ChevronDown, ChevronsRight, NotebookPen, Pause, Play, Plus, SkipBack, SkipForward } from "lucide-react"
+import {
+  ChevronDown,
+  ChevronsRight,
+  MoreHorizontal,
+  NotebookPen,
+  Pause,
+  Play,
+  Plus,
+  SkipBack,
+  SkipForward,
+} from "lucide-react"
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react"
 import { useNavigate } from "react-router-dom"
+import { useContextMenu, type ContextMenuItem } from "@/components/context-menu"
 import { PlayerVersionList, PlayerVersionWheel } from "@/components/player-version-picker"
 import { CoverThumbnail, ProjectCover } from "@/components/project-cover"
 import { ScrollingWaveform } from "@/components/scrolling-waveform"
+import { useTrackActions } from "@/components/track-actions"
+import { TwoToneCircleSpinner } from "@/components/two-tone-spinner"
 import { VersionBadge } from "@/components/version-badge"
 import { useMediaQuery } from "@/hooks/use-media-query"
 import { useProjects } from "@/hooks/use-projects"
 import { useSetActiveVersion } from "@/hooks/use-versions"
 import { formatDuration, formatPlaybackTime } from "@/lib/format"
-import type { Project, Track, TrackVersion } from "@/lib/types"
+import { projectAccent, type Project, type Track, type TrackVersion } from "@/lib/types"
 import { cn, isTypingTarget } from "@/lib/utils"
 import {
   activeVersionNumber,
@@ -136,13 +149,17 @@ export function PlayerDock() {
         <div className="rise-in flex h-14 items-center gap-3 rounded-full bg-player-surface pl-1.5 pr-4 text-white shadow-[0_10px_30px_rgba(0,0,0,0.35)]">
           <button
             type="button"
-            aria-label={player.isPlaying ? "Pause" : "Play"}
+            aria-label={player.isLoading ? "Loading" : player.isPlaying ? "Pause" : "Play"}
+            aria-busy={player.isLoading}
+            disabled={player.isLoading}
             onClick={player.togglePlayPause}
-            className="relative shrink-0 overflow-hidden rounded-full transition active:scale-90"
+            className="relative shrink-0 overflow-hidden rounded-full transition not-disabled:active:scale-90"
           >
             <CoverThumbnail project={project} className="size-11 rounded-full blur-[3px]" />
             <span className="absolute inset-0 flex items-center justify-center bg-black/30 text-white">
-              {player.isPlaying ? (
+              {player.isLoading ? (
+                <TwoToneCircleSpinner className="size-4.5" strokeWidth={2.7} />
+              ) : player.isPlaying ? (
                 <Pause className="size-4.5 fill-current" strokeWidth={0} />
               ) : (
                 <Play className="ml-0.5 size-4.5 fill-current" strokeWidth={0} />
@@ -181,12 +198,14 @@ export function PlayerDock() {
 
 /**
  * White seek bar for the maximized players: rAF-driven fill, drag to scrub,
- * and a floating timestamp tooltip that follows the pointer on hover.
+ * and a floating timestamp tooltip that follows the pointer on hover. It goes
+ * inert while the track is still loading — there is nothing to seek into yet.
  */
 function ProgressSection({ player, track }: { player: PlayerValue; track: Track }) {
   const trackDuration = player.duration || track.duration
   const currentSeconds = player.progress * trackDuration
   const getProgress = player.getProgress
+  const disabled = player.isLoading
   const fillRef = useRef<HTMLDivElement>(null)
   const [hoverFraction, setHoverFraction] = useState<number | null>(null)
   const drag = useRef<{ active: boolean; fraction: number; holdUntil: number }>({
@@ -194,6 +213,14 @@ function ProgressSection({ player, track }: { player: PlayerValue; track: Track 
     fraction: 0,
     holdUntil: 0,
   })
+
+  // A load can begin mid-drag (the previous track ending, say), so drop any
+  // hover or scrub state the moment the bar goes inert.
+  useEffect(() => {
+    if (!disabled) return
+    drag.current = { active: false, fraction: 0, holdUntil: 0 }
+    setHoverFraction(null)
+  }, [disabled])
 
   useEffect(() => {
     let frame = 0
@@ -217,7 +244,7 @@ function ProgressSection({ player, track }: { player: PlayerValue; track: Track 
   return (
     <div>
       <div className="relative">
-        {hoverFraction !== null && (
+        {hoverFraction !== null && !disabled && (
           <div
             className="pointer-events-none absolute -top-8 z-10 -translate-x-1/2 rounded-md bg-white px-2 py-1 text-[11px] font-semibold tabular-nums text-black shadow-lg"
             style={{ left: `${Math.min(94, Math.max(6, hoverFraction * 100))}%` }}
@@ -226,7 +253,10 @@ function ProgressSection({ player, track }: { player: PlayerValue; track: Track 
           </div>
         )}
         <div
-          className="group flex h-6 cursor-default touch-none items-center"
+          className={cn(
+            "group flex h-6 cursor-default items-center",
+            disabled ? "pointer-events-none" : "touch-none",
+          )}
           onPointerDown={(event) => {
             event.currentTarget.setPointerCapture(event.pointerId)
             const fraction = fractionFromEvent(event)
@@ -252,7 +282,12 @@ function ProgressSection({ player, track }: { player: PlayerValue; track: Track 
             setHoverFraction(null)
           }}
         >
-          <div className="h-1.5 w-full overflow-hidden rounded-full bg-white/15 transition-[height] duration-150 ease-snappy group-hover:h-2.5">
+          <div
+            className={cn(
+              "h-1.5 w-full overflow-hidden rounded-full bg-white/15 transition-[height] duration-150 ease-snappy",
+              !disabled && "group-hover:h-2.5",
+            )}
+          >
             <div ref={fillRef} className="h-full rounded-full bg-white" />
           </div>
         </div>
@@ -393,6 +428,7 @@ function PlayerCoverSlot({
   player,
   picker,
   variant,
+  onAddVersion,
   coverStyle,
 }: {
   project: Project
@@ -400,6 +436,8 @@ function PlayerCoverSlot({
   player: PlayerValue
   picker: VersionPicker
   variant: "wheel" | "list"
+  /** Opens the versions dialog from the list picker. Owners only. */
+  onAddVersion?: () => void
   coverStyle: React.CSSProperties
 }) {
   const showsPicker = picker.available && picker.open
@@ -408,6 +446,7 @@ function PlayerCoverSlot({
     selectedVersionID: picker.activeID,
     versionNumber: (version: TrackVersion) => versionNumber(track, version.id) ?? 1,
     versionName: (version: TrackVersion) => versionDisplayName(track, version),
+    accent: projectAccent(project),
     // A click on the list is a deliberate pick, so it also dismisses the
     // picker. The wheel stays open, since scrolling through it selects too.
     onSelect:
@@ -460,7 +499,16 @@ function PlayerCoverSlot({
           )}
         >
           {variant === "list" ? (
-            <PlayerVersionList {...pickerProps} />
+            <PlayerVersionList
+              {...pickerProps}
+              onAddVersion={
+                onAddVersion &&
+                (() => {
+                  picker.setOpen(false)
+                  onAddVersion()
+                })
+              }
+            />
           ) : (
             <PlayerVersionWheel {...pickerProps} />
           )}
@@ -470,19 +518,40 @@ function PlayerCoverSlot({
   )
 }
 
-/** Previous / play-pause / next transport row, with an optional notes toggle. */
+/**
+ * Previous / play-pause / next transport row, flanked by an optional notes
+ * toggle and the track's options menu.
+ */
 function TransportControls({
   player,
+  track,
+  menuItems,
   notesVisible,
   onToggleNotes,
 }: {
   player: PlayerValue
+  track: Track
+  menuItems: () => ContextMenuItem[]
   notesVisible?: boolean
   onToggleNotes?: () => void
 }) {
+  const contextMenu = useContextMenu()
+  const [menuOpen, setMenuOpen] = useState(false)
+
+  const openMenu = (event: React.MouseEvent<HTMLButtonElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect()
+    // Opens upward out of the button's top-right corner.
+    contextMenu.openAt(rect.right, rect.top - 8, menuItems(), {
+      alignX: "end",
+      alignY: "end",
+      onClose: () => setMenuOpen(false),
+    })
+    setMenuOpen(true)
+  }
+
   return (
     <div className="flex items-center justify-center gap-8">
-      {onToggleNotes && (
+      {onToggleNotes ? (
         <button
           type="button"
           aria-label={notesVisible ? "Hide notes" : "Show notes"}
@@ -495,6 +564,9 @@ function TransportControls({
         >
           <NotebookPen className="size-5" />
         </button>
+      ) : (
+        // Balances the options button so play/pause stays centered.
+        <span aria-hidden className="size-5" />
       )}
       <button
         type="button"
@@ -506,11 +578,15 @@ function TransportControls({
       </button>
       <button
         type="button"
-        aria-label={player.isPlaying ? "Pause" : "Play"}
+        aria-label={player.isLoading ? "Loading" : player.isPlaying ? "Pause" : "Play"}
+        aria-busy={player.isLoading}
+        disabled={player.isLoading}
         onClick={player.togglePlayPause}
-        className="flex size-16 items-center justify-center rounded-full bg-white text-black shadow-lg transition active:scale-95"
+        className="flex size-16 items-center justify-center rounded-full bg-white text-black shadow-lg transition not-disabled:active:scale-95"
       >
-        {player.isPlaying ? (
+        {player.isLoading ? (
+          <TwoToneCircleSpinner className="size-7" strokeWidth={2.15} />
+        ) : player.isPlaying ? (
           <Pause className="size-6 fill-current" strokeWidth={0} />
         ) : (
           <Play className="ml-1 size-6 fill-current" strokeWidth={0} />
@@ -524,7 +600,18 @@ function TransportControls({
       >
         <SkipForward className="size-7 fill-current" strokeWidth={0} />
       </button>
-      {onToggleNotes && <span aria-hidden className="size-5 opacity-0" />}
+      <button
+        type="button"
+        aria-label={`More options for ${track.title}`}
+        aria-expanded={menuOpen}
+        onClick={openMenu}
+        className={cn(
+          "transition active:scale-90",
+          menuOpen ? "text-white" : "text-white/40 hover:text-white/70",
+        )}
+      >
+        <MoreHorizontal className="size-5" />
+      </button>
     </div>
   )
 }
@@ -600,6 +687,8 @@ function SidebarPlayer({
   const [showNotes, setShowNotes] = useState(true)
   const canToggleNotes = Boolean(canEditNotes) || track.notes.trim().length > 0
   const picker = useVersionPicker(player, project, track, canSwitchVersions)
+  // One instance drives both the options menu and the picker's "Add a version".
+  const trackActions = useTrackActions({ track, project, includePlay: false })
   return (
     <aside
       aria-label="Now playing"
@@ -635,6 +724,7 @@ function SidebarPlayer({
           player={player}
           picker={picker}
           variant="list"
+          onAddVersion={project.ownerID ? undefined : trackActions.openVersions}
           coverStyle={{ height: "min(100%, calc(0.72 * (var(--player-sidebar-width) - 4rem)))" }}
         />
         <div className="mt-7 flex shrink-0 flex-col items-center gap-1">
@@ -654,11 +744,15 @@ function SidebarPlayer({
         <div className="mt-4">
           <TransportControls
             player={player}
+            track={track}
+            menuItems={trackActions.menuItems}
             notesVisible={showNotes}
             onToggleNotes={canToggleNotes ? () => setShowNotes((v) => !v) : undefined}
           />
         </div>
       </div>
+
+      {trackActions.dialogs}
     </aside>
   )
 }
@@ -684,6 +778,7 @@ function FullscreenPlayer({
   const [showNotes, setShowNotes] = useState(true)
   const canToggleNotes = Boolean(canEditNotes) || track.notes.trim().length > 0
   const picker = useVersionPicker(player, project, track, canSwitchVersions)
+  const trackActions = useTrackActions({ track, project, includePlay: false })
   return (
     <div
       aria-label="Now playing"
@@ -733,10 +828,14 @@ function FullscreenPlayer({
       <div className="mt-5">
         <TransportControls
           player={player}
+          track={track}
+          menuItems={trackActions.menuItems}
           notesVisible={showNotes}
           onToggleNotes={canToggleNotes ? () => setShowNotes((v) => !v) : undefined}
         />
       </div>
+
+      {trackActions.dialogs}
     </div>
   )
 }

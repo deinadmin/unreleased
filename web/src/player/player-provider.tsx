@@ -18,6 +18,12 @@ interface PlayerContextValue {
   project: Project | null
   track: Track | null
   isPlaying: boolean
+  /**
+   * True from the moment a track is asked to play until its audio actually
+   * starts. Version swaps are excluded — they deliberately hold the previous
+   * transport state so the change reads as seamless.
+   */
+  isLoading: boolean
   /** Duration in seconds (falls back to track metadata until audio loads). */
   duration: number
   /** Low-frequency progress fraction (0…1) for coarse UI. */
@@ -65,6 +71,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const [project, setProject] = useState<Project | null>(null)
   const [track, setTrack] = useState<Track | null>(null)
   const [isPlaying, setIsPlaying] = useState(false)
+  const [isLoading, setIsLoading] = useState(false)
   const [duration, setDuration] = useState(0)
   const [progress, setProgress] = useState(0)
   const [expanded, setExpanded] = useState(false)
@@ -104,6 +111,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       projectRef.current = nextProject
       setDuration(nextTrack.duration)
       setProgress(0)
+      setIsLoading(true)
       downloadURL(storagePath)
         .then((url) => {
           if (loadToken.current !== token) return
@@ -132,6 +140,10 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
           }
           toast("Couldn't play this track. Check your connection and try again.")
         })
+        .finally(() => {
+          // A newer load owns the transport now and manages its own spinner.
+          if (loadToken.current === token) setIsLoading(false)
+        })
     },
     [audio],
   )
@@ -149,6 +161,9 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       trackRef.current = nextTrack
       projectRef.current = nextProject
       setDuration(nextTrack.duration)
+      // The swap is masked rather than announced, so no spinner here — and any
+      // spinner left over from a load this one supersedes has to go.
+      setIsLoading(false)
 
       // Pin the playhead to where the new version will resume, so swapping the
       // source never flashes the progress back to the start.
@@ -267,6 +282,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     trackRef.current = null
     projectRef.current = null
     setIsPlaying(false)
+    setIsLoading(false)
     setProgress(0)
     setDuration(0)
     setExpanded(false)
@@ -282,7 +298,11 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   }, [audio, step])
 
   useEffect(() => {
+    // `play` fires the moment playback is *requested*, so the transport flips to
+    // its playing state right away while the spinner keeps running. `playing`
+    // is the one that means audio is actually coming out.
     const onPlay = () => setIsPlaying(true)
+    const onPlaying = () => setIsLoading(false)
     const onPause = () => {
       // Swapping a version's source pauses the element on the way through.
       if (heldPlaying.current) return
@@ -297,12 +317,14 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     }
     const onEnded = () => step(1)
     audio.addEventListener("play", onPlay)
+    audio.addEventListener("playing", onPlaying)
     audio.addEventListener("pause", onPause)
     audio.addEventListener("loadedmetadata", onLoaded)
     audio.addEventListener("timeupdate", onTime)
     audio.addEventListener("ended", onEnded)
     return () => {
       audio.removeEventListener("play", onPlay)
+      audio.removeEventListener("playing", onPlaying)
       audio.removeEventListener("pause", onPause)
       audio.removeEventListener("loadedmetadata", onLoaded)
       audio.removeEventListener("timeupdate", onTime)
@@ -330,6 +352,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       project,
       track,
       isPlaying,
+      isLoading,
       duration,
       progress,
       audio,
@@ -344,7 +367,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       expanded,
       setExpanded,
     }),
-    [project, track, isPlaying, duration, progress, audio, getProgress, play, switchToVersion, togglePlayPause, seek, next, previous, stop, expanded],
+    [project, track, isPlaying, isLoading, duration, progress, audio, getProgress, play, switchToVersion, togglePlayPause, seek, next, previous, stop, expanded],
   )
 
   return <PlayerContext.Provider value={value}>{children}</PlayerContext.Provider>
