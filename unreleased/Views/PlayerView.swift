@@ -19,11 +19,13 @@ struct PlayerView: View {
     @State private var isShowingVersionPicker = false
     @State private var versionPickerTapHapticTrigger = 0
     @State private var bottomAccessoryHapticTrigger = 0
-    /// Flips to true once the insertion-spring has settled so the matched-
-    /// geometry hero cover can take over from the static placeholder cover.
-    @State private var heroSettled = false
-    /// Cancellation handle for the delayed settle task.
-    @State private var heroSettleTask: Task<Void, Never>? = nil
+    /// True while the matched-geometry hero cover is needed for the expanded
+    /// player. The compact player keeps its cover inside the mini bar so the
+    /// artwork cannot drift independently during the player's insertion.
+    @State private var showsHeroCover = false
+    /// Cancellation handle for handing the cover back to the compact player
+    /// after the collapse animation has finished.
+    @State private var heroHandoffTask: Task<Void, Never>? = nil
     /// Tracks whether the mini-player cover button is being held down so the
     /// hero cover (and its placeholder) can show a press-scale effect.
     @State private var isCoverPressed = false
@@ -110,10 +112,9 @@ struct PlayerView: View {
                 // Hero cover lives in this stable coordinate space (a sibling of the card,
                 // not inside its overlay) so matched geometry resolves cleanly while the
                 // card itself is animating between sizes/positions.
-                // Hidden until heroSettled: the miniBar placeholder cover handles the
-                // visual during the insertion spring. Once settled the hero snaps into
-                // place with no secondary animation (matchedGeometryEffect is already
-                // at the correct position when it becomes visible).
+                // The compact player always renders its cover inside miniBar so the
+                // artwork moves as one object with the inserting card. The hero becomes
+                // visible only when an expanded-player morph needs matched geometry.
                 heroCover(project: project)
                     // Isolates the hero's geometry group from the ZStack's
                     // coordinate-space changes as the card expands/collapses,
@@ -129,8 +130,8 @@ struct PlayerView: View {
                         .spring(response: 0.22, dampingFraction: 0.65),
                         value: isCoverPressed
                     )
-                    .opacity(heroSettled && !isShowingVersionPicker ? 1 : 0)
-                    .animation(.none, value: heroSettled)
+                    .opacity(showsHeroCover && !isShowingVersionPicker ? 1 : 0)
+                    .animation(.none, value: showsHeroCover)
                     .animation(.easeInOut(duration: 0.22), value: isShowingVersionPicker)
             }
             .frame(maxWidth: cardMaxWidth)
@@ -149,36 +150,39 @@ struct PlayerView: View {
             .onAppear {
                 offset = 0
                 lastDragTranslation = 0
-                // Wait for the insertion spring to fully settle before revealing the
-                // matched-geometry hero cover. During this window the mini bar shows
-                // a static placeholder cover so there is no visible gap. 0.55 s is
-                // comfortably past the longest insertion spring (response 0.44 s).
-                heroSettleTask?.cancel()
-                heroSettleTask = Task { @MainActor in
-                    try? await Task.sleep(for: .seconds(0.55))
-                    guard !Task.isCancelled else { return }
-                    heroSettled = true
-                }
+                heroHandoffTask?.cancel()
+                heroHandoffTask = nil
+                showsHeroCover = isExpanded
             }
             .onDisappear {
-                heroSettled = false
-                heroSettleTask?.cancel()
-                heroSettleTask = nil
+                showsHeroCover = false
+                heroHandoffTask?.cancel()
+                heroHandoffTask = nil
             }
             .onChange(of: player.isShowingNowPlaying) { _, showing in
                 offset = 0
                 lastDragTranslation = 0
                 if showing {
                     dismissKeyboard()
-                    // Player is expanding — settle the hero immediately so the
+                    // Player is expanding — show the hero immediately so the
                     // mini→full morph animation is visible from the first frame.
-                    heroSettleTask?.cancel()
-                    heroSettleTask = nil
-                    heroSettled = true
+                    heroHandoffTask?.cancel()
+                    heroHandoffTask = nil
+                    showsHeroCover = true
                 } else {
                     isShowingQueue = false
                     isShowingNotes = false
                     isShowingVersionPicker = false
+                    // Keep the hero alive through the collapse, then hand rendering
+                    // back to the cover embedded in miniBar. This leaves the compact
+                    // cover fixed to the card until the next expansion.
+                    heroHandoffTask?.cancel()
+                    heroHandoffTask = Task { @MainActor in
+                        try? await Task.sleep(for: .seconds(0.55))
+                        guard !Task.isCancelled, !player.isShowingNowPlaying else { return }
+                        showsHeroCover = false
+                        heroHandoffTask = nil
+                    }
                 }
             }
             .onChange(of: track.id) { _, _ in
@@ -313,14 +317,13 @@ struct PlayerView: View {
             player.isShowingNowPlaying = true
         } label: {
             HStack(spacing: 0) {
-                // ZStack lets the matched-geometry anchor (coverSlot) and the static
-                // placeholder cover occupy the same cell. The placeholder is shown while
-                // the insertion spring is running so the hero cover can reveal itself
-                // only after the spring has settled (avoiding the "giant circle shrinks
-                // into place" glitch that matchedGeometryEffect produces on first appear).
+                // ZStack lets the matched-geometry anchor (coverSlot) and the compact
+                // cover occupy the same cell. The compact cover remains in this layout
+                // whenever the player is collapsed, so it shares the card's insertion
+                // transform and cannot move independently.
                 ZStack {
                     coverSlot(size: compactCoverSize, isTapToPlay: true)
-                    if !heroSettled {
+                    if !showsHeroCover {
                         HeroCoverView(
                             gradient: project.gradient,
                             coverImage: store.coverImage(for: project),
@@ -420,11 +423,10 @@ struct PlayerView: View {
         .id(coverArtIdentity(for: project))
         .matchedGeometryEffect(id: "cover", in: morph, isSource: false)
         .allowsHitTesting(false)
-        // Belt-and-suspenders: completely disable animations on the hero while
-        // the insertion spring is still running. The placeholder cover in miniBar
-        // handles the visual during this window.
+        // Keep the hidden hero from inheriting compact-player animations while
+        // the cover embedded in miniBar is responsible for the visible artwork.
         .transaction { tx in
-            if !heroSettled { tx.disablesAnimations = true }
+            if !showsHeroCover { tx.disablesAnimations = true }
         }
         // Mini player: block implicit play/pause transitions on the matched-geometry
         // group (expanded scale animation is handled inside HeroCoverView).
