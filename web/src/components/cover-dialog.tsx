@@ -1,6 +1,6 @@
 import { Check, ImagePlus, Loader2 } from "lucide-react"
 import { useRef, useState } from "react"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { useAuth } from "@/hooks/use-auth"
 import { useStorageUrl } from "@/hooks/use-storage-url"

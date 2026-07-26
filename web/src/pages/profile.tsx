@@ -15,7 +15,7 @@ import {
 } from "lucide-react"
 import { useRef, useState, type DragEvent } from "react"
 import { useLocation, useNavigate } from "react-router-dom"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 import { AppHeader } from "@/components/app-header"
 import { SettingsDivider, SettingsRow, SettingsSection } from "@/components/settings"
 import {

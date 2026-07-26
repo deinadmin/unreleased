@@ -8,6 +8,7 @@ import {
   useState,
   type ReactNode,
 } from "react"
+import { createPortal } from "react-dom"
 import { cn } from "@/lib/utils"
 
 export interface ContextMenuItem {
@@ -31,8 +32,17 @@ const ContextMenuContext = createContext<ContextMenuContextValue | null>(null)
  * App-wide right-click handling: the native browser menu is suppressed
  * everywhere; components opt in to a styled custom menu via `useContextMenu`.
  */
+interface MenuState {
+  /** Bumped on every open so the menu node is rebuilt from scratch. */
+  id: number
+  x: number
+  y: number
+  items: ContextMenuItem[]
+}
+
 export function ContextMenuProvider({ children }: { children: ReactNode }) {
-  const [menu, setMenu] = useState<{ x: number; y: number; items: ContextMenuItem[] } | null>(null)
+  const [menu, setMenu] = useState<MenuState | null>(null)
+  const menuID = useRef(0)
   const menuRef = useRef<HTMLDivElement>(null)
   const onCloseRef = useRef<(() => void) | null>(null)
 
@@ -48,7 +58,7 @@ export function ContextMenuProvider({ children }: { children: ReactNode }) {
       if (items.length === 0) return
       onCloseRef.current?.()
       onCloseRef.current = onClose ?? null
-      setMenu({ x, y, items })
+      setMenu({ id: ++menuID.current, x, y, items })
     },
     [],
   )
@@ -75,14 +85,20 @@ export function ContextMenuProvider({ children }: { children: ReactNode }) {
     [show],
   )
 
-  // Keep the menu inside the viewport.
+  // The menu mounts hidden at the requested point; this clamps it into the
+  // viewport and reveals it, all before the browser paints, so it is never seen
+  // at the un-clamped spot. The position is written straight to the node rather
+  // than through state, so it can't depend on React managing to render again
+  // within the same frame. `offsetWidth`/`offsetHeight` are used because a
+  // bounding rect would report the open animation's scaled-down box.
   useLayoutEffect(() => {
     const el = menuRef.current
     if (!menu || !el) return
-    const rect = el.getBoundingClientRect()
-    const x = Math.min(menu.x, window.innerWidth - rect.width - 8)
-    const y = Math.min(menu.y, window.innerHeight - rect.height - 8)
-    if (x !== menu.x || y !== menu.y) setMenu({ ...menu, x: Math.max(8, x), y: Math.max(8, y) })
+    const x = Math.max(8, Math.min(menu.x, window.innerWidth - el.offsetWidth - 8))
+    const y = Math.max(8, Math.min(menu.y, window.innerHeight - el.offsetHeight - 8))
+    el.style.left = `${x}px`
+    el.style.top = `${y}px`
+    el.style.visibility = "visible"
   }, [menu])
 
   // Dismiss on outside press, Escape, scroll, or resize.
@@ -108,15 +124,26 @@ export function ContextMenuProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => () => onCloseRef.current?.(), [])
 
+  // Portalled to the body, and mounted only once opened, so a modal dialog's
+  // `aria-hidden` sweep (which runs when the dialog opens) never covers it.
+  // `pointer-events-auto` restores clicks, since such a dialog switches
+  // pointer events off on the body while it is open.
   return (
     <ContextMenuContext.Provider value={{ open, openAt }}>
       {children}
-      {menu && (
+      {menu && createPortal(
         <div
+          // Keyed per open so React always rebuilds the node with the hidden
+          // starting style, leaving the layout effect free to reveal it.
+          key={menu.id}
           ref={menuRef}
           role="menu"
-          className="fixed z-[70] min-w-44 origin-top-left animate-in rounded-xl border bg-popover p-1 text-popover-foreground shadow-xl duration-100 fade-in-0 zoom-in-95"
-          style={{ left: menu.x, top: menu.y }}
+          // `transition-none` matters: `duration-100` is only meant to time the
+          // open animation, but it also sets `transition-duration`, and with no
+          // transition-property the CSS default of `all` would make the
+          // clamped-in left/top slide into place instead of starting there.
+          className="pointer-events-auto fixed z-[70] min-w-44 origin-top-left animate-in rounded-xl border bg-popover p-1 text-popover-foreground shadow-xl transition-none duration-100 fade-in-0 zoom-in-95"
+          style={{ left: menu.x, top: menu.y, visibility: "hidden" }}
         >
           {menu.items.map((item) => (
             <button
@@ -140,7 +167,8 @@ export function ContextMenuProvider({ children }: { children: ReactNode }) {
               {item.label}
             </button>
           ))}
-        </div>
+        </div>,
+        document.body,
       )}
     </ContextMenuContext.Provider>
   )

@@ -1,13 +1,25 @@
 import { ChevronDown, ChevronsRight, NotebookPen, Pause, Play, Plus, SkipBack, SkipForward } from "lucide-react"
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react"
 import { useNavigate } from "react-router-dom"
+import { PlayerVersionList, PlayerVersionWheel } from "@/components/player-version-picker"
 import { CoverThumbnail, ProjectCover } from "@/components/project-cover"
 import { ScrollingWaveform } from "@/components/scrolling-waveform"
+import { VersionBadge } from "@/components/version-badge"
 import { useMediaQuery } from "@/hooks/use-media-query"
 import { useProjects } from "@/hooks/use-projects"
+import { useSetActiveVersion } from "@/hooks/use-versions"
 import { formatDuration, formatPlaybackTime } from "@/lib/format"
-import type { Project, Track } from "@/lib/types"
+import type { Project, Track, TrackVersion } from "@/lib/types"
 import { cn, isTypingTarget } from "@/lib/utils"
+import {
+  activeVersionNumber,
+  hasMultipleVersions,
+  resolvedActiveVersionID,
+  versionDisplayName,
+  versionNumber,
+  visibleVersions,
+  withSelectedVersion,
+} from "@/lib/versions"
 import { usePlayer } from "@/player/player-provider"
 
 type PlayerValue = ReturnType<typeof usePlayer>
@@ -26,11 +38,6 @@ export function PlayerDock() {
 
   const hasTrack = Boolean(player.track && player.project)
   const expanded = hasTrack && player.expanded
-
-  const getProgress = useCallback(() => {
-    const total = player.audio.duration
-    return Number.isFinite(total) && total > 0 ? player.audio.currentTime / total : 0
-  }, [player.audio])
 
   // Shift the page content while the sidebar player is open on big screens.
   useEffect(() => {
@@ -79,6 +86,8 @@ export function PlayerDock() {
   const project = projects.find((p) => p.id === player.project!.id) ?? player.project
   const track = project.tracks.find((t) => t.id === player.track!.id) ?? player.track
 
+  const miniVersionNumber = hasMultipleVersions(track) ? activeVersionNumber(track) : null
+
   // Notes are only editable on the user's own projects; shared projects in
   // the library open the same page read-only.
   const canEditNotes = !project.ownerID
@@ -102,6 +111,7 @@ export function PlayerDock() {
           expanded={expanded}
           onOpenNotes={openNotes}
           canEditNotes={canEditNotes}
+          canSwitchVersions={inLibrary}
         />
       ) : (
         <FullscreenPlayer
@@ -111,6 +121,7 @@ export function PlayerDock() {
           expanded={expanded}
           onOpenNotes={openNotes}
           canEditNotes={canEditNotes}
+          canSwitchVersions={inLibrary}
         />
       )}
 
@@ -145,14 +156,19 @@ export function PlayerDock() {
             onClick={() => player.setExpanded(true)}
             className="flex min-w-0 flex-1 flex-col items-start gap-px text-left"
           >
-            <span className="w-full truncate text-[13px] font-semibold">{track.title}</span>
+            <span className="flex w-full min-w-0 items-center gap-1.5">
+              <span className="min-w-0 truncate text-[13px] font-semibold">{track.title}</span>
+              {miniVersionNumber !== null && (
+                <VersionBadge number={miniVersionNumber} variant="player" />
+              )}
+            </span>
             <span className="w-full truncate text-[11px] text-white/55">{project.name}</span>
           </button>
 
           <ScrollingWaveform
             trackID={track.id}
             waveform={track.waveform}
-            getProgress={getProgress}
+            getProgress={player.getProgress}
             onSeek={player.seek}
             duration={player.duration || track.duration}
             className="w-[130px] shrink-0"
@@ -170,6 +186,7 @@ export function PlayerDock() {
 function ProgressSection({ player, track }: { player: PlayerValue; track: Track }) {
   const trackDuration = player.duration || track.duration
   const currentSeconds = player.progress * trackDuration
+  const getProgress = player.getProgress
   const fillRef = useRef<HTMLDivElement>(null)
   const [hoverFraction, setHoverFraction] = useState<number | null>(null)
   const drag = useRef<{ active: boolean; fraction: number; holdUntil: number }>({
@@ -182,12 +199,7 @@ function ProgressSection({ player, track }: { player: PlayerValue; track: Track 
     let frame = 0
     const tick = () => {
       const scrubbing = drag.current.active || performance.now() < drag.current.holdUntil
-      const total = player.audio.duration
-      const progress = scrubbing
-        ? drag.current.fraction
-        : Number.isFinite(total) && total > 0
-          ? player.audio.currentTime / total
-          : 0
+      const progress = scrubbing ? drag.current.fraction : getProgress()
       if (fillRef.current) {
         fillRef.current.style.width = `${Math.min(1, Math.max(0, progress)) * 100}%`
       }
@@ -195,7 +207,7 @@ function ProgressSection({ player, track }: { player: PlayerValue; track: Track 
     }
     frame = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(frame)
-  }, [player.audio])
+  }, [getProgress])
 
   const fractionFromEvent = (event: React.PointerEvent<HTMLDivElement>) => {
     const rect = event.currentTarget.getBoundingClientRect()
@@ -319,6 +331,145 @@ function NotesPreview({
   )
 }
 
+/**
+ * Version state for the maximized players: the wheel that replaces the cover
+ * and the badge beside the title that toggles it, mirroring the iOS player.
+ */
+function useVersionPicker(
+  player: PlayerValue,
+  project: Project,
+  track: Track,
+  /** False before a shared project is joined, where audio streams by link. */
+  enabled: boolean,
+) {
+  const setActiveVersion = useSetActiveVersion()
+  const [open, setOpen] = useState(false)
+
+  // A different track means a different history, so the picker closes.
+  useEffect(() => setOpen(false), [track.id])
+
+  // Escape dismisses the picker before it reaches the player's own handler.
+  useEffect(() => {
+    if (!open) return
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return
+      event.preventDefault()
+      setOpen(false)
+    }
+    window.addEventListener("keydown", onKey, true)
+    return () => window.removeEventListener("keydown", onKey, true)
+  }, [open])
+
+  const versions = visibleVersions(track, Boolean(project.ownerID))
+  const activeID = resolvedActiveVersionID(track)
+  const number = activeVersionNumber(track)
+  const available = enabled && versions.length > 1 && number !== null
+
+  const select = (version: TrackVersion, wasTapped: boolean) => {
+    if (version.id === activeID) {
+      if (wasTapped) setOpen(false)
+      return
+    }
+    const resumeTime = player.audio.currentTime
+    const shouldPlay = player.isPlaying
+    setActiveVersion(project, track.id, version.id)
+    const updated = withSelectedVersion(track, version.id)
+    player.switchToVersion(updated, project, Math.min(resumeTime, updated.duration), shouldPlay)
+  }
+
+  return { open, setOpen, versions, activeID, number, available, select }
+}
+
+type VersionPicker = ReturnType<typeof useVersionPicker>
+
+/**
+ * Cover slot that cross-fades into the version picker while it is open. Touch
+ * layouts get the iOS wheel; the pointer-driven sidebar gets a plain list that
+ * fills the whole slot.
+ */
+function PlayerCoverSlot({
+  project,
+  track,
+  player,
+  picker,
+  variant,
+  coverStyle,
+}: {
+  project: Project
+  track: Track
+  player: PlayerValue
+  picker: VersionPicker
+  variant: "wheel" | "list"
+  coverStyle: React.CSSProperties
+}) {
+  const showsPicker = picker.available && picker.open
+  const pickerProps = {
+    versions: picker.versions,
+    selectedVersionID: picker.activeID,
+    versionNumber: (version: TrackVersion) => versionNumber(track, version.id) ?? 1,
+    versionName: (version: TrackVersion) => versionDisplayName(track, version),
+    // A click on the list is a deliberate pick, so it also dismisses the
+    // picker. The wheel stays open, since scrolling through it selects too.
+    onSelect:
+      variant === "list"
+        ? (version: TrackVersion, wasTapped: boolean) => {
+            picker.select(version, wasTapped)
+            picker.setOpen(false)
+          }
+        : picker.select,
+  }
+  return (
+    <div className="relative flex min-h-0 flex-1 items-center justify-center">
+      <div
+        className={cn(
+          "relative aspect-square transition-all duration-200 ease-snappy",
+          showsPicker && "pointer-events-none scale-[0.94] opacity-0",
+        )}
+        style={coverStyle}
+      >
+        <ProjectCover
+          project={project}
+          isPlaying={player.isPlaying}
+          showVinyl={false}
+          className="h-full w-full"
+        />
+
+        {picker.available && (
+          <button
+            type="button"
+            aria-expanded={picker.open}
+            aria-label="Choose version"
+            onClick={() => picker.setOpen(true)}
+            className="absolute bottom-2.5 left-2.5 flex h-7 items-center rounded-full bg-black/25 px-2.5 text-[11px] font-bold tabular-nums text-white shadow-sm backdrop-blur-md transition hover:bg-black/40 active:scale-90"
+          >
+            v{picker.number ?? 1}
+          </button>
+        )}
+      </div>
+      {picker.available && (
+        <div
+          inert={!showsPicker || undefined}
+          // Clicking the empty space around the picker dismisses it.
+          onClick={(event) => {
+            if (event.target === event.currentTarget) picker.setOpen(false)
+          }}
+          className={cn(
+            "absolute flex items-center justify-center transition-all duration-300 ease-snappy",
+            variant === "list" ? "inset-0" : "inset-x-0",
+            showsPicker ? "scale-100 opacity-100" : "pointer-events-none scale-[0.94] opacity-0",
+          )}
+        >
+          {variant === "list" ? (
+            <PlayerVersionList {...pickerProps} />
+          ) : (
+            <PlayerVersionWheel {...pickerProps} />
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 /** Previous / play-pause / next transport row, with an optional notes toggle. */
 function TransportControls({
   player,
@@ -436,6 +587,7 @@ function SidebarPlayer({
   expanded,
   onOpenNotes,
   canEditNotes,
+  canSwitchVersions,
 }: {
   player: PlayerValue
   project: Project
@@ -443,9 +595,11 @@ function SidebarPlayer({
   expanded: boolean
   onOpenNotes?: () => void
   canEditNotes?: boolean
+  canSwitchVersions: boolean
 }) {
   const [showNotes, setShowNotes] = useState(true)
   const canToggleNotes = Boolean(canEditNotes) || track.notes.trim().length > 0
+  const picker = useVersionPicker(player, project, track, canSwitchVersions)
   return (
     <aside
       aria-label="Now playing"
@@ -475,14 +629,14 @@ function SidebarPlayer({
         {/* Like the fullscreen player, the cover fills the room left over
             after the notes take their natural height, shrinking only when
             the sidebar is too short to fit everything at full size. */}
-        <div className="flex min-h-0 flex-1 items-center justify-center">
-          <div
-            className="aspect-square"
-            style={{ height: "min(100%, calc(0.72 * (var(--player-sidebar-width) - 4rem)))" }}
-          >
-            <ProjectCover project={project} isPlaying={player.isPlaying} showVinyl={false} className="h-full w-full" />
-          </div>
-        </div>
+        <PlayerCoverSlot
+          project={project}
+          track={track}
+          player={player}
+          picker={picker}
+          variant="list"
+          coverStyle={{ height: "min(100%, calc(0.72 * (var(--player-sidebar-width) - 4rem)))" }}
+        />
         <div className="mt-7 flex shrink-0 flex-col items-center gap-1">
           <span className="max-w-full truncate text-lg font-bold">{track.title}</span>
           <span className="max-w-full truncate text-[13px] text-white/55">{project.name}</span>
@@ -517,6 +671,7 @@ function FullscreenPlayer({
   expanded,
   onOpenNotes,
   canEditNotes,
+  canSwitchVersions,
 }: {
   player: PlayerValue
   project: Project
@@ -524,9 +679,11 @@ function FullscreenPlayer({
   expanded: boolean
   onOpenNotes?: () => void
   canEditNotes?: boolean
+  canSwitchVersions: boolean
 }) {
   const [showNotes, setShowNotes] = useState(true)
   const canToggleNotes = Boolean(canEditNotes) || track.notes.trim().length > 0
+  const picker = useVersionPicker(player, project, track, canSwitchVersions)
   return (
     <div
       aria-label="Now playing"
@@ -549,14 +706,14 @@ function FullscreenPlayer({
         {/* The cover fills the room left over after the notes (capped at six
             lines here) take their natural height, so it only shrinks on
             screens that are too small to fit everything at full size. */}
-        <div className="flex min-h-0 flex-1 items-center justify-center">
-          <div
-            className="aspect-square"
-            style={{ height: "min(100%, calc(0.74 * (100vw - 4rem)), 20rem)" }}
-          >
-            <ProjectCover project={project} isPlaying={player.isPlaying} showVinyl={false} className="h-full w-full" />
-          </div>
-        </div>
+        <PlayerCoverSlot
+          project={project}
+          track={track}
+          player={player}
+          picker={picker}
+          variant="wheel"
+          coverStyle={{ height: "min(100%, calc(0.74 * (100vw - 4rem)), 20rem)" }}
+        />
         <div className="mt-8 flex shrink-0 flex-col items-center gap-1">
           <span className="max-w-full truncate text-xl font-bold">{track.title}</span>
           <span className="max-w-full truncate text-[13px] text-white/55">{project.name}</span>

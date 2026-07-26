@@ -11,7 +11,7 @@ import {
 } from "lucide-react"
 import { useState } from "react"
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 import { AppHeader } from "@/components/app-header"
 import { useContextMenu, type ContextMenuItem } from "@/components/context-menu"
 import { CoverDialog } from "@/components/cover-dialog"

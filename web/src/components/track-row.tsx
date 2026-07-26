@@ -1,17 +1,20 @@
-import { MoreHorizontal, NotebookPen, NotebookText, Pencil, Play, Trash2 } from "lucide-react"
+import { Layers, MoreHorizontal, NotebookPen, NotebookText, Pencil, Play, Trash2 } from "lucide-react"
 import { useState } from "react"
 import { useNavigate } from "react-router-dom"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 import { useContextMenu, type ContextMenuItem } from "@/components/context-menu"
 import { PlayingBars } from "@/components/playing-bars"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { VersionBadge } from "@/components/version-badge"
+import { VersionsDialog } from "@/components/versions-dialog"
 import { useAuth } from "@/hooks/use-auth"
 import { useProject } from "@/hooks/use-projects"
 import { cn } from "@/lib/utils"
 import { formatDuration, formatFileSize, formatRelativeDate } from "@/lib/format"
 import { deleteTrack, updateTrackTitle } from "@/lib/project-edits"
 import type { Project, Track } from "@/lib/types"
+import { activeVersionNumber, hasMultipleVersions } from "@/lib/versions"
 import { usePlayer } from "@/player/player-provider"
 
 export function TrackRow({
@@ -37,12 +40,9 @@ export function TrackRow({
   const [renameTitle, setRenameTitle] = useState(track.title)
   const [renaming, setRenaming] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [versionsOpen, setVersionsOpen] = useState(false)
   const isActive = player.track?.id === track.id && player.project?.id === project.id
-  const versionNumber =
-    track.versions.length > 1
-      ? track.versions.length -
-        Math.max(0, track.versions.findIndex((v) => v.id === track.activeVersionID))
-      : null
+  const versionNumber = hasMultipleVersions(track) ? activeVersionNumber(track) : null
 
   const play = () => (onPlay ? onPlay(track) : player.play(track, project))
   const isOwnProject = !project.ownerID
@@ -55,9 +55,10 @@ export function TrackRow({
     try {
       if (isActive) player.stop()
       await deleteTrack(user.uid, project, track.id)
+      toast.success(`Deleted “${track.title}”`)
     } catch (error) {
       console.error("deleting track failed", error)
-      toast("Couldn't delete this track. Please try again.")
+      toast.error("Couldn't delete this track. Please try again.")
     }
   }
 
@@ -90,6 +91,7 @@ export function TrackRow({
     if (isOwnProject && user) {
       items.push(
         { label: "Rename", icon: <Pencil />, onSelect: beginRename },
+        { label: "Versions", icon: <Layers />, onSelect: () => setVersionsOpen(true) },
         {
           label: "Edit notes",
           icon: <NotebookPen />,
@@ -98,6 +100,11 @@ export function TrackRow({
         { label: "Delete", icon: <Trash2 />, destructive: true, onSelect: () => setConfirmDelete(true) },
       )
     } else if (inLibrary) {
+      // Before a shared project is joined its audio streams through the public
+      // link endpoint, which always serves the owner's active version.
+      if (hasMultipleVersions(track)) {
+        items.push({ label: "Versions", icon: <Layers />, onSelect: () => setVersionsOpen(true) })
+      }
       items.push({
         label: "View notes",
         icon: <NotebookText />,
@@ -155,11 +162,7 @@ export function TrackRow({
             >
               {track.title}
             </span>
-            {versionNumber !== null && (
-              <span className="shrink-0 rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-bold text-muted-foreground">
-                v{versionNumber}
-              </span>
-            )}
+            {versionNumber !== null && <VersionBadge number={versionNumber} />}
           </span>
           <span className="flex items-center gap-1 text-xs text-muted-foreground">
             <span>{formatRelativeDate(track.addedDate)}</span>
@@ -257,6 +260,15 @@ export function TrackRow({
         </div>
       </DialogContent>
     </Dialog>
+
+    {versionsOpen && (
+      <VersionsDialog
+        project={project}
+        track={track}
+        open={versionsOpen}
+        onOpenChange={setVersionsOpen}
+      />
+    )}
     </>
   )
 }

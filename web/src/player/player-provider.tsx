@@ -8,7 +8,7 @@ import {
   useState,
   type ReactNode,
 } from "react"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 import { downloadURL } from "@/lib/storage-urls"
 import { preparePlayedTrackCache } from "@/lib/track-cache"
 import { equalizerRouting } from "@/player/equalizer"
@@ -24,7 +24,18 @@ interface PlayerContextValue {
   progress: number
   /** The underlying element — waveforms rAF-read currentTime for smooth motion. */
   audio: HTMLAudioElement
+  /**
+   * Playback fraction (0…1) for every rAF-driven surface. Prefer this over
+   * reading the element: it holds the resume position steady while a version
+   * swap loads, instead of dipping to zero with the empty media element.
+   */
+  getProgress: () => number
   play: (track: Track, project: Project) => void
+  /**
+   * Swaps the audio of the track already loaded for a different version,
+   * resuming at `startAt` instead of restarting (iOS `AudioPlayer.switchToVersion`).
+   */
+  switchToVersion: (track: Track, project: Project, startAt: number, shouldPlay: boolean) => void
   togglePlayPause: () => void
   seek: (fraction: number) => void
   next: () => void
@@ -61,6 +72,16 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const loadToken = useRef(0)
   const projectRef = useRef<Project | null>(null)
   const trackRef = useRef<Track | null>(null)
+  // Set while a version swap is loading: the media element reports no time and
+  // counts as paused until the new source is ready, so the UI reads these.
+  const heldProgress = useRef<number | null>(null)
+  const heldPlaying = useRef<boolean | null>(null)
+
+  const getProgress = useCallback(() => {
+    if (heldProgress.current !== null) return heldProgress.current
+    const total = audio.duration
+    return Number.isFinite(total) && total > 0 ? audio.currentTime / total : 0
+  }, [audio])
 
   const play = useCallback(
     (nextTrack: Track, nextProject: Project) => {
@@ -70,6 +91,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         return
       }
       const token = ++loadToken.current
+      heldProgress.current = null
+      heldPlaying.current = null
       // First appearance of the player: big screens default to the maximized
       // sidebar, small screens to the mini player.
       if (!trackRef.current) {
@@ -108,6 +131,89 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
             return
           }
           toast("Couldn't play this track. Check your connection and try again.")
+        })
+    },
+    [audio],
+  )
+
+  const switchToVersion = useCallback(
+    (nextTrack: Track, nextProject: Project, startAt: number, shouldPlay: boolean) => {
+      const storagePath = nextTrack.storagePath
+      if (!storagePath) {
+        showUploadPendingToast(nextTrack.title)
+        return
+      }
+      const token = ++loadToken.current
+      setTrack(nextTrack)
+      setProject(nextProject)
+      trackRef.current = nextTrack
+      projectRef.current = nextProject
+      setDuration(nextTrack.duration)
+
+      // Pin the playhead to where the new version will resume, so swapping the
+      // source never flashes the progress back to the start.
+      const resumeAt = Math.min(Math.max(startAt, 0), nextTrack.duration || startAt)
+      const held = nextTrack.duration > 0 ? resumeAt / nextTrack.duration : 0
+      heldProgress.current = held
+      setProgress(held)
+      // Loading a new source pauses the element; keep the transport showing
+      // "playing" so the button doesn't blink mid-swap.
+      heldPlaying.current = shouldPlay ? true : null
+      const release = () => {
+        if (loadToken.current !== token) return
+        heldProgress.current = null
+        if (heldPlaying.current === null) return
+        heldPlaying.current = null
+        setIsPlaying(!audio.paused)
+      }
+
+      downloadURL(storagePath)
+        .then((url) => {
+          if (loadToken.current !== token) return
+          preparePlayedTrackCache(storagePath, nextTrack.fileSize)
+
+          const load = (canRetryWithoutCORS: boolean) => {
+            // The equalizer decides whether this load has to be a CORS request.
+            equalizerRouting.prepare(audio)
+            const onReady = () => {
+              audio.removeEventListener("error", onError)
+              if (loadToken.current !== token) return
+              audio.currentTime = Math.min(resumeAt, audio.duration || resumeAt)
+              heldProgress.current = null
+              if (!shouldPlay) {
+                release()
+                return
+              }
+              // Hold the transport until playback has actually resumed.
+              void audio.play().catch(() => {}).finally(release)
+            }
+            const onError = () => {
+              audio.removeEventListener("loadedmetadata", onReady)
+              if (loadToken.current !== token) return
+              // A CORS load the storage bucket refuses is recoverable: retry the
+              // same source plainly, leaving the equalizer switched out.
+              if (canRetryWithoutCORS && equalizerRouting.recoverFromLoadFailure(audio)) {
+                load(false)
+                return
+              }
+              release()
+              toast("Couldn't play this version. Check your connection and try again.")
+            }
+            audio.addEventListener("loadedmetadata", onReady, { once: true })
+            audio.addEventListener("error", onError, { once: true })
+            audio.src = url
+          }
+          load(true)
+        })
+        .catch((error) => {
+          if (loadToken.current !== token) return
+          release()
+          console.error("version playback failed", error)
+          if ((error as { code?: string })?.code === "storage/object-not-found") {
+            showUploadPendingToast(nextTrack.title)
+            return
+          }
+          toast("Couldn't play this version. Check your connection and try again.")
         })
     },
     [audio],
@@ -152,6 +258,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
   const stop = useCallback(() => {
     loadToken.current++
+    heldProgress.current = null
+    heldPlaying.current = null
     audio.pause()
     audio.removeAttribute("src")
     setTrack(null)
@@ -175,9 +283,15 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const onPlay = () => setIsPlaying(true)
-    const onPause = () => setIsPlaying(false)
+    const onPause = () => {
+      // Swapping a version's source pauses the element on the way through.
+      if (heldPlaying.current) return
+      setIsPlaying(false)
+    }
     const onLoaded = () => setDuration(audio.duration || trackRef.current?.duration || 0)
     const onTime = () => {
+      // The pinned resume position wins until the swapped-in source is ready.
+      if (heldProgress.current !== null) return
       const total = audio.duration
       setProgress(Number.isFinite(total) && total > 0 ? audio.currentTime / total : 0)
     }
@@ -219,7 +333,9 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       duration,
       progress,
       audio,
+      getProgress,
       play,
+      switchToVersion,
       togglePlayPause,
       seek,
       next,
@@ -228,7 +344,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       expanded,
       setExpanded,
     }),
-    [project, track, isPlaying, duration, progress, audio, play, togglePlayPause, seek, next, previous, stop, expanded],
+    [project, track, isPlaying, duration, progress, audio, getProgress, play, switchToVersion, togglePlayPause, seek, next, previous, stop, expanded],
   )
 
   return <PlayerContext.Provider value={value}>{children}</PlayerContext.Provider>

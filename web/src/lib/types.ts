@@ -1,3 +1,5 @@
+import { applyActiveVersionMetadata } from "./versions"
+
 export interface GradientTheme {
   colors: string[]
   startX: number
@@ -161,27 +163,25 @@ export function trackCountText(project: Project): string {
 
 /**
  * Mirrors the iOS `selectPublicVersionsForSharedPlayback`: for shared listeners,
- * versioned tracks surface a public version's audio. Tracks whose versions are
- * all private are excluded entirely (their audio is not readable).
+ * versioned tracks surface a public version's audio. The full version list is
+ * kept so version numbers match the owner's, and hidden versions are filtered
+ * out at display time by `visibleVersions`. Tracks whose versions are all
+ * private are excluded entirely (their audio is not readable).
+ *
+ * `preferredVersionID` supplies this device's local-only pick, which stands in
+ * for the `activeVersionID` the listener cannot write to the owner's document.
  */
-export function sharedPlayableProject(project: Project): Project {
+export function sharedPlayableProject(
+  project: Project,
+  preferredVersionID?: (trackID: string) => string | undefined,
+): Project {
   const tracks = project.tracks.flatMap((track) => {
     if (track.versions.length === 0) return [track]
-    const active = track.versions.find((v) => v.id === track.activeVersionID)
-    const version = active?.isPublic ? active : track.versions.find((v) => v.isPublic)
+    const preferredID = preferredVersionID?.(track.id) ?? track.activeVersionID
+    const preferred = track.versions.find((v) => v.id === preferredID)
+    const version = preferred?.isPublic ? preferred : track.versions.find((v) => v.isPublic)
     if (!version) return []
-    return [
-      {
-        ...track,
-        activeVersionID: version.id,
-        fileName: version.fileName,
-        fileSize: version.fileSize,
-        duration: version.duration,
-        waveform: version.waveform,
-        storagePath: version.storagePath,
-        versions: track.versions.filter((v) => v.isPublic),
-      },
-    ]
+    return [applyActiveVersionMetadata({ ...track, activeVersionID: version.id })]
   })
   return { ...project, tracks }
 }

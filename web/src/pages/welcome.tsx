@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from "react"
 import { Navigate, useNavigate, useSearchParams } from "react-router-dom"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 import { AppMark } from "@/components/app-mark"
 import { authErrorMessage, useAuth } from "@/hooks/use-auth"
 

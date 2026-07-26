@@ -1,9 +1,9 @@
 import { lazy, Suspense, useLayoutEffect } from "react"
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-router-dom"
-import { Toaster } from "sonner"
 import { AppMark } from "@/components/app-mark"
 import { ContextMenuProvider } from "@/components/context-menu"
 import { PlayerDock } from "@/components/player-dock"
+import { Toaster } from "@/components/toaster"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { AuthProvider, useAuth } from "@/hooks/use-auth"
 import { NotificationsProvider } from "@/hooks/use-notifications"
@@ -184,10 +184,12 @@ export default function App() {
                   </Routes>
                 </Suspense>
                 <PlayerDock />
-                <UploadsCard />
                 </ContextMenuProvider>
               </BrowserRouter>
-              <Toaster position="top-center" />
+              {/* The upload card is pinned to the bottom of the toast stack. */}
+              <Toaster>
+                <UploadsCard />
+              </Toaster>
               </TooltipProvider>
             </UploadsProvider>
             </EqualizerProvider>

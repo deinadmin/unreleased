@@ -10,7 +10,7 @@ import {
   Trash2,
 } from "lucide-react"
 import { Fragment, useEffect, useMemo, useState, type ReactNode } from "react"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 import { AppHeader } from "@/components/app-header"
 import { SettingsPageHeader } from "@/components/settings"
 import { Button } from "@/components/ui/button"
@@ -118,10 +118,12 @@ export function DeleteTracksPage() {
       if (playing) player.stop()
       await deleteTracks(user.uid, projects, locations)
       setSelection(new Set())
-      toast(`Deleted ${locations.length} ${locations.length === 1 ? "track" : "tracks"}.`)
+      toast.success(
+        `Deleted ${locations.length} ${locations.length === 1 ? "track" : "tracks"}`,
+      )
     } catch (error) {
       console.error("deleting tracks failed", error)
-      toast("Couldn't delete these tracks. Please try again.")
+      toast.error("Couldn't delete these tracks. Please try again.")
     } finally {
       setDeleting(false)
     }

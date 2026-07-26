@@ -1,7 +1,7 @@
 import { ChevronLeft } from "lucide-react"
 import { useState, type FormEvent } from "react"
 import { Navigate, useNavigate, useSearchParams } from "react-router-dom"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 import { AppMark } from "@/components/app-mark"
 import { Input } from "@/components/ui/input"
 import { authErrorMessage, useAuth } from "@/hooks/use-auth"

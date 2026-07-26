@@ -1,6 +1,6 @@
 import { Loader2 } from "lucide-react"
 import { useEffect, useState } from "react"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 import { CoverPickerGrid } from "@/components/cover-dialog"
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
 import { useAuth } from "@/hooks/use-auth"

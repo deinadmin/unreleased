@@ -1,13 +1,17 @@
 import { AlertCircle, CheckCircle2, Music } from "lucide-react"
 import { useUploads, type UploadItem } from "@/uploads/uploads-provider"
 
-/** Floating import progress card, the web counterpart of the iOS `ImportingOverlay`. */
+/**
+ * Import progress, the web counterpart of the iOS `ImportingOverlay`. It is
+ * pinned to the bottom of the toast stack: unlike a normal toast it stays put
+ * until the import finishes and is never evicted to make room.
+ */
 export function UploadsCard() {
   const { uploads } = useUploads()
   if (uploads.length === 0) return null
 
   return (
-    <div className="fixed bottom-24 left-4 z-40 w-72 rounded-2xl border border-border/60 bg-background/95 p-3 shadow-xl backdrop-blur-xl">
+    <div className="pointer-events-auto w-full rounded-2xl border border-border/60 bg-background/95 p-3 shadow-xl backdrop-blur-xl transition-none duration-200 ease-snappy animate-in fade-in-0 zoom-in-95 slide-in-from-bottom-2">
       <p className="px-1 pb-2 text-[13px] font-semibold text-muted-foreground">
         Importing {uploads.length === 1 ? "1 track" : `${uploads.length} tracks`}
       </p>
