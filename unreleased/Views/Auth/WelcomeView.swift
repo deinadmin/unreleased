@@ -17,6 +17,7 @@ struct WelcomeView: View {
             Spacer(minLength: 24)
 
             AuthAppMark(size: 120, cornerRadius: 30)
+                .resistedDragTilt(inverted: true)
                 .padding(.bottom, 36)
 
             Text("Give your work-in-progress music a proper home")

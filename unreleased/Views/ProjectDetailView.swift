@@ -328,20 +328,15 @@ struct ProjectDetailView: View {
                             showDeleteConfirm = true
                         } label: {
                             if project.isShared {
-                                Label {
-                                    Text("Leave Project")
-                                } icon: {
-                                    RedProjectDetailLeaveMenuIcon()
-                                }
+                                DestructiveMenuLabel(
+                                    title: "Leave Project",
+                                    systemImage: "person.fill.xmark"
+                                )
                             } else {
-                                Label {
-                                    Text("Delete")
-                                } icon: {
-                                    RedProjectDetailTrashMenuIcon()
-                                }
+                                DestructiveMenuLabel(title: "Delete", systemImage: "trash")
                             }
                         }
-                        .tint(project.isShared ? .primary : .red)
+                        .tint(.red)
                     }
                     .tint(.primary)
                 } label: {
@@ -405,24 +400,6 @@ private struct ProjectHeaderDownloadState: Equatable {
     var isDownloading: Bool
     var isFullyDownloaded: Bool
     var hasPendingDownloads: Bool
-}
-
-private struct RedProjectDetailTrashMenuIcon: View {
-    var body: some View {
-        if let image = UIImage(systemName: "trash")?
-            .withTintColor(.systemRed, renderingMode: .alwaysOriginal) {
-            Image(uiImage: image)
-        }
-    }
-}
-
-private struct RedProjectDetailLeaveMenuIcon: View {
-    var body: some View {
-        if let image = UIImage(systemName: "person.fill.xmark")?
-            .withTintColor(.systemRed, renderingMode: .alwaysOriginal) {
-            Image(uiImage: image)
-        }
-    }
 }
 
 private struct ProjectDetailHeaderSection: View, Equatable {
@@ -748,7 +725,6 @@ private struct PlayButton: View {
     }
 
     private var buttonFill: Color { store.accentColor(for: project) }
-    private var buttonFillHex: String { store.accentHex(for: project) }
 
     var body: some View {
         Button {
@@ -757,19 +733,14 @@ private struct PlayButton: View {
             HStack(spacing: labelSpacing) {
                 Image(systemName: isActiveProject && player.isPlaying ? "pause.fill" : "play.fill")
                     .font(.subheadline.weight(.bold))
-                    .coverControlContrast(
-                        for: nil,
-                        backgroundHex: buttonFillHex
-                    )
                     .animation(nil, value: player.isPlaying)
 
                 Text(isActiveProject && player.isPlaying ? "Pause" : "Play")
                     .font(.subheadline.weight(.bold))
-                    .coverControlContrast(
-                        for: nil,
-                        backgroundHex: buttonFillHex
-                    )
             }
+            // Match the web project and shared-page Play buttons, whose
+            // foreground is always white over the project accent color.
+            .foregroundStyle(.white)
             .padding(.horizontal, horizontalPadding)
             .frame(height: max(44, controlHeight))
             .background(buttonFill, in: Capsule())

@@ -29,12 +29,18 @@ struct PlayerView: View {
     /// Tracks whether the mini-player cover button is being held down so the
     /// hero cover (and its placeholder) can show a press-scale effect.
     @State private var isCoverPressed = false
+    /// Tracks a hold on the main mini-player button so the complete compact
+    /// card—including its background—can compress as one object.
+    @State private var isMiniPlayerPressed = false
     /// Live scrubbing progress during waveform drag (used for cover rotation).
     @State private var liveScrubProgress: Double = 0
     /// Whether we're currently scrubbing (used for timestamp updates).
     @State private var isScrubbing: Bool = false
     /// Target progress position after a seek completes — displayed until player catches up.
     @State private var targetScrubProgress: Double? = nil
+    /// Shared by the expanded hero and the compact cover so handing rendering
+    /// between those two view instances never restarts the artwork rotation.
+    @State private var coverRotationClock = CoverRotationClock()
 
     @Namespace private var morph
 
@@ -83,6 +89,16 @@ struct PlayerView: View {
 
     private var compactCoverSize: CGFloat { compactHeight - compactCoverInset * 2 }
 
+    private var playerCardShape: UnevenRoundedRectangle {
+        UnevenRoundedRectangle(
+            topLeadingRadius: cardTopLeading,
+            bottomLeadingRadius: cardBottomLeading,
+            bottomTrailingRadius: cardBottomTrailing,
+            topTrailingRadius: cardTopTrailing,
+            style: .continuous
+        )
+    }
+
     /// Latest project metadata from the store (name, cover, gradient).
     private var liveProject: Project? {
         guard let id = player.currentProject?.id else { return nil }
@@ -103,6 +119,7 @@ struct PlayerView: View {
         if let track = liveTrack, let project = liveProject {
             ZStack(alignment: .bottom) {
                 playerCard(track: track, project: project)
+                    .scaleEffect(!isExpanded && isMiniPlayerPressed ? 0.97 : 1)
                     .padding(.horizontal, sideMargin)
                     // Expanded: same inset as sides so bottom corners stay concentric with the device.
                     // Mini: keep the existing float above the home indicator.
@@ -153,6 +170,12 @@ struct PlayerView: View {
                 heroHandoffTask?.cancel()
                 heroHandoffTask = nil
                 showsHeroCover = isExpanded
+                coverRotationClock.synchronize(
+                    isPlaying: player.isPlaying,
+                    isScrubbing: isScrubbing,
+                    playbackProgress: player.playbackProgress,
+                    at: Date()
+                )
             }
             .onDisappear {
                 showsHeroCover = false
@@ -184,6 +207,36 @@ struct PlayerView: View {
                         heroHandoffTask = nil
                     }
                 }
+            }
+            .onChange(of: player.isPlaying) { _, isPlaying in
+                coverRotationClock.setPlaying(
+                    isPlaying,
+                    isScrubbing: isScrubbing,
+                    at: Date()
+                )
+            }
+            .onChange(of: isScrubbing) { _, isScrubbing in
+                coverRotationClock.setScrubbing(
+                    isScrubbing,
+                    isPlaying: player.isPlaying,
+                    playbackProgress: player.playbackProgress,
+                    at: Date()
+                )
+            }
+            .onChange(of: targetScrubProgress ?? (isScrubbing ? liveScrubProgress : player.playbackProgress)) { _, progress in
+                coverRotationClock.setPlaybackProgress(
+                    progress,
+                    isScrubbing: isScrubbing,
+                    duration: player.duration
+                )
+            }
+            .onChange(of: coverArtIdentity(for: project)) { _, _ in
+                coverRotationClock.reset(
+                    isPlaying: player.isPlaying,
+                    isScrubbing: isScrubbing,
+                    playbackProgress: player.playbackProgress,
+                    at: Date()
+                )
             }
             .onChange(of: track.id) { _, _ in
                 isShowingVersionPicker = false
@@ -233,40 +286,18 @@ struct PlayerView: View {
         }
         .frame(maxWidth: .infinity)
         .frame(minHeight: compactHeight)
-        .background {
-            UnevenRoundedRectangle(
-                topLeadingRadius: cardTopLeading,
-                bottomLeadingRadius: cardBottomLeading,
-                bottomTrailingRadius: cardBottomTrailing,
-                topTrailingRadius: cardTopTrailing,
-                style: .continuous
-            )
-            .fill(isExpanded ? Color(white: 0.10) : PlayerChrome.surfaceBackground)
-            .shadow(
-                color: .black.opacity(isExpanded ? 0.45 : 0.35),
-                radius: isExpanded ? 40 : 18,
-                x: 0,
-                y: isExpanded ? -6 : 6
-            )
-        }
-        .clipShape(
-            UnevenRoundedRectangle(
-                topLeadingRadius: cardTopLeading,
-                bottomLeadingRadius: cardBottomLeading,
-                bottomTrailingRadius: cardBottomTrailing,
-                topTrailingRadius: cardTopTrailing,
-                style: .continuous
-            )
+        .clipShape(playerCardShape)
+        .glassEffect(
+            .regular.interactive().tint(.black.opacity(0.9)),
+            in: playerCardShape
         )
-        .contentShape(
-            UnevenRoundedRectangle(
-                topLeadingRadius: cardTopLeading,
-                bottomLeadingRadius: cardBottomLeading,
-                bottomTrailingRadius: cardBottomTrailing,
-                topTrailingRadius: cardTopTrailing,
-                style: .continuous
-            )
+        .shadow(
+            color: .black.opacity(isExpanded ? 0.45 : 0.35),
+            radius: isExpanded ? 40 : 18,
+            x: 0,
+            y: isExpanded ? -6 : 6
         )
+        .contentShape(playerCardShape)
         .overlay(alignment: .bottom) {
             if !isExpanded {
                 miniScrubTimePill
@@ -332,9 +363,8 @@ struct PlayerView: View {
                             loadingProgress: player.loadingProgress,
                             showsMiniOverlay: true,
                             showsShadow: false,
-                            playbackProgress: player.playbackProgress,
                             isScrubbing: false,
-                            duration: player.duration
+                            rotationClock: coverRotationClock
                         )
                         .allowsHitTesting(false)
                         .scaleEffect(isCoverPressed ? 0.88 : 1.0)
@@ -375,7 +405,9 @@ struct PlayerView: View {
             .frame(height: compactHeight)
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        // Report the hold without applying the system's opacity treatment.
+        // PlayerView uses that state to scale the complete compact card.
+        .buttonStyle(MiniPlayerPressButtonStyle(isPressed: $isMiniPlayerPressed))
     }
 
     // MARK: - Shared morphing cover (same circle in every player state)
@@ -416,9 +448,8 @@ struct PlayerView: View {
             loadingProgress: player.loadingProgress,
             showsMiniOverlay: !isExpanded || isShowingQueue || isShowingNotes,
             showsShadow: isExpanded && !isShowingQueue && !isShowingNotes,
-            playbackProgress: targetScrubProgress ?? (isScrubbing ? liveScrubProgress : player.playbackProgress),
             isScrubbing: isScrubbing,
-            duration: player.duration
+            rotationClock: coverRotationClock
         )
         .id(coverArtIdentity(for: project))
         .matchedGeometryEffect(id: "cover", in: morph, isSource: false)
@@ -1097,7 +1128,7 @@ private struct PlayerVersionPicker: View {
     let versionName: (TrackVersion) -> String
     /// The project's accent, used to tint the selected version.
     let selectionColor: Color
-    /// True when the accent is light enough that black content reads better.
+    /// True when the accent is light enough to use darker badge and border treatments.
     let prefersDarkSelectionForeground: Bool
     let onSelect: (TrackVersion, Bool) -> Void
 
@@ -1109,15 +1140,6 @@ private struct PlayerVersionPicker: View {
 
     private let rowSpacing: CGFloat = 49
     private let selectionHeight: CGFloat = 44
-
-    /// Content laid over the accent fill.
-    private var selectedForeground: Color {
-        prefersDarkSelectionForeground ? .black : .white
-    }
-
-    private var selectedBadgeBackground: Color {
-        prefersDarkSelectionForeground ? .black.opacity(0.08) : .white.opacity(0.20)
-    }
 
     var body: some View {
         ZStack {
@@ -1189,34 +1211,22 @@ private struct PlayerVersionPicker: View {
         let referenceIndex = isDragging ? dragStartIndex : selectedIndex
         let position = CGFloat(index - referenceIndex) * rowSpacing + dragOffset
         let distance = abs(position / rowSpacing)
-        let isSelected = index == selectedIndex
 
         return Button {
             choose(index: index)
         } label: {
             HStack(spacing: 10) {
                 Text("v\(versionNumber(version))")
-                    .font(.system(size: isSelected ? 11 : 10, weight: .bold, design: .rounded))
+                    .font(.system(size: 10, weight: .bold, design: .rounded))
                     .monospacedDigit()
-                    .foregroundStyle(
-                        isSelected
-                            ? selectedForeground.opacity(prefersDarkSelectionForeground ? 0.72 : 0.85)
-                            : .white.opacity(0.44)
-                    )
+                    .foregroundStyle(.white.opacity(0.85))
                     .padding(.horizontal, 7)
                     .padding(.vertical, 4)
-                    .background(
-                        isSelected ? selectedBadgeBackground : .white.opacity(0.07),
-                        in: Capsule()
-                    )
+                    .background(.white.opacity(0.07), in: Capsule())
 
                 Text(versionName(version))
-                    .font(.system(size: isSelected ? 15 : 14, weight: isSelected ? .semibold : .medium))
-                    .foregroundStyle(
-                        isSelected
-                            ? selectedForeground.opacity(prefersDarkSelectionForeground ? 0.88 : 1)
-                            : .white
-                    )
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(.white)
                     .lineLimit(1)
 
                 Spacer(minLength: 0)
@@ -1227,10 +1237,9 @@ private struct PlayerVersionPicker: View {
         }
         .buttonStyle(.plain)
         .scaleEffect(max(0.76, 1 - distance * 0.085))
-        .opacity(isSelected ? 1 : max(0.12, 0.72 - distance * 0.20))
+        .opacity(max(0.12, 1 - distance * 0.28))
         .blur(radius: max(0, distance - 1.65) * 0.55)
         .offset(y: position)
-        .zIndex(isSelected ? 2 : 1)
         .accessibilityHidden(true)
     }
 
@@ -1349,6 +1358,81 @@ private struct NowPlayingPulseIcon: View {
 
 // MARK: - Hero cover (the single visible circle that morphs across player states)
 
+private struct CoverRotationClock {
+    private(set) var accumulatedDegrees: Double = 0
+    private(set) var playStartDate: Date?
+    private var lastScrubProgress: Double = 0
+
+    private let degreesPerSecond: Double = 18
+
+    func rotation(at date: Date) -> Double {
+        guard let playStartDate else { return accumulatedDegrees }
+        return accumulatedDegrees + date.timeIntervalSince(playStartDate) * degreesPerSecond
+    }
+
+    mutating func synchronize(
+        isPlaying: Bool,
+        isScrubbing: Bool,
+        playbackProgress: Double,
+        at date: Date
+    ) {
+        lastScrubProgress = playbackProgress
+        if isPlaying && !isScrubbing && playStartDate == nil {
+            playStartDate = date
+        }
+    }
+
+    mutating func setPlaying(_ isPlaying: Bool, isScrubbing: Bool, at date: Date) {
+        if isPlaying && !isScrubbing {
+            playStartDate = date
+        } else {
+            accumulatedDegrees = rotation(at: date)
+            playStartDate = nil
+        }
+    }
+
+    mutating func setScrubbing(
+        _ isScrubbing: Bool,
+        isPlaying: Bool,
+        playbackProgress: Double,
+        at date: Date
+    ) {
+        if isScrubbing {
+            accumulatedDegrees = rotation(at: date)
+            playStartDate = nil
+            lastScrubProgress = playbackProgress
+        } else if isPlaying {
+            playStartDate = date
+        }
+    }
+
+    mutating func setPlaybackProgress(
+        _ playbackProgress: Double,
+        isScrubbing: Bool,
+        duration: TimeInterval
+    ) {
+        guard isScrubbing else { return }
+        let effectiveDuration = duration > 0 ? duration : 180
+        let delta = playbackProgress - lastScrubProgress
+        accumulatedDegrees += delta * effectiveDuration * degreesPerSecond
+        lastScrubProgress = playbackProgress
+    }
+
+    mutating func reset(
+        isPlaying: Bool,
+        isScrubbing: Bool,
+        playbackProgress: Double,
+        at date: Date
+    ) {
+        accumulatedDegrees = 0
+        playStartDate = nil
+        lastScrubProgress = playbackProgress
+        if isPlaying && !isScrubbing {
+            playStartDate = date
+        }
+    }
+}
+
 private struct HeroCoverView: View {
     let gradient: GradientTheme
     let coverImage: UIImage?
@@ -1357,34 +1441,15 @@ private struct HeroCoverView: View {
     let loadingProgress: Double
     let showsMiniOverlay: Bool
     let showsShadow: Bool
-    /// Current playback progress (0…1), already scrub-adjusted by the parent.
-    let playbackProgress: Double
     /// True while the user's finger is on the waveform scrubber.
     let isScrubbing: Bool
-    /// Track duration in seconds — calibrates scrub rotation to match play-speed.
-    let duration: TimeInterval
-
-    // Accumulated rotation in degrees at the last pause/scrub-start.
-    @State private var accumulatedDegrees: Double = 0
-    // Non-nil only while playing (and not scrubbing) so the TimelineView can
-    // advance the angle in real time without needing a SwiftUI animation.
-    @State private var playStartDate: Date? = nil
-    // Progress value at the moment the most recent scrub gesture started,
-    // used to compute rotation delta as the finger moves.
-    @State private var lastScrubProgress: Double = 0
-
-    /// 18 °/s → one full revolution every 20 seconds, matching a slow vinyl spin.
-    private let degreesPerSecond: Double = 18.0
+    /// Stable rotation state owned by PlayerView and shared across the
+    /// expanded/compact rendering handoff.
+    let rotationClock: CoverRotationClock
 
     /// Subtle "paused = slightly shrunken" feel in the expanded player view.
     private var coverScale: CGFloat {
         showsShadow ? (isPlaying ? 1.0 : 0.93) : 1.0
-    }
-
-    /// Rotation angle at a given instant, accounting for elapsed play time.
-    private func rotationAt(_ date: Date) -> Double {
-        guard let start = playStartDate else { return accumulatedDegrees }
-        return accumulatedDegrees + date.timeIntervalSince(start) * degreesPerSecond
     }
 
     @ViewBuilder
@@ -1417,7 +1482,7 @@ private struct HeroCoverView: View {
             // blur is applied before rotation, allowing SwiftUI to transform
             // the blurred result instead of changing the blur itself.
             TimelineView(.animation(minimumInterval: nil, paused: !isPlaying || isScrubbing)) { tl in
-                let degrees = rotationAt(tl.date)
+                let degrees = rotationClock.rotation(at: tl.date)
 
                 ZStack {
                     coverArtwork(rotation: degrees)
@@ -1457,42 +1522,6 @@ private struct HeroCoverView: View {
             .opacity(showsMiniOverlay ? 1 : 0)
         }
         .aspectRatio(1, contentMode: .fit)
-        .onAppear {
-            lastScrubProgress = playbackProgress
-            if isPlaying && !isScrubbing {
-                playStartDate = Date()
-            }
-        }
-        // Play/pause: start or freeze the real-time angle accumulator.
-        .onChange(of: isPlaying) { _, playing in
-            if playing && !isScrubbing {
-                playStartDate = Date()
-            } else {
-                accumulatedDegrees = rotationAt(Date())
-                playStartDate = nil
-            }
-        }
-        // Scrub start/end: freeze time-based rotation and hand control to
-        // the playbackProgress onChange below; resume on scrub end.
-        .onChange(of: isScrubbing) { _, scrubbing in
-            if scrubbing {
-                accumulatedDegrees = rotationAt(Date())
-                playStartDate = nil
-                lastScrubProgress = playbackProgress
-            } else if isPlaying {
-                playStartDate = Date()
-            }
-        }
-        // Drive rotation from scrub position. Delta is scaled so that
-        // scrubbing across the entire track rotates the same total angle
-        // as playing the track would — keeping the two motions in sync.
-        .onChange(of: playbackProgress) { _, newProgress in
-            guard isScrubbing else { return }
-            let effectiveDuration = duration > 0 ? duration : 180.0
-            let delta = newProgress - lastScrubProgress
-            accumulatedDegrees += delta * effectiveDuration * degreesPerSecond
-            lastScrubProgress = newProgress
-        }
     }
 }
 
@@ -1516,7 +1545,9 @@ private struct CoverArtworkBlurOverlay: View {
                     .fill(gradient.gradient)
             }
         }
-        .scaleEffect(1.18)
+        // Overscan farther than the blur radius so the sharp source cannot
+        // peek through along the circular mask's antialiased edge.
+        .scaleEffect(1.30)
         .blur(radius: 6, opaque: true)
         .overlay(Color.black.opacity(0.34))
         .clipShape(Circle())
@@ -1526,8 +1557,32 @@ private struct CoverArtworkBlurOverlay: View {
 
 // MARK: - Cover press button style
 
+/// Animates only the compact press-down. Releasing clears the scale in a
+/// non-animated transaction so that animation cannot leak into the player's
+/// simultaneous compact-to-expanded layout morph.
+private struct MiniPlayerPressButtonStyle: ButtonStyle {
+    @Binding var isPressed: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .onChange(of: configuration.isPressed) { _, pressed in
+                if pressed {
+                    withAnimation(.easeOut(duration: 0.12)) {
+                        isPressed = true
+                    }
+                } else {
+                    var transaction = Transaction(animation: nil)
+                    transaction.disablesAnimations = true
+                    withTransaction(transaction) {
+                        isPressed = false
+                    }
+                }
+            }
+    }
+}
+
 /// Transparent button style that forwards `isPressed` state to a binding so
-/// the hero cover (which lives outside the button label) can animate in sync.
+/// visuals outside the button label can animate in sync without opacity loss.
 private struct CoverPressButtonStyle: ButtonStyle {
     @Binding var isPressed: Bool
 

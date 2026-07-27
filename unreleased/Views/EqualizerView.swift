@@ -112,14 +112,11 @@ struct EqualizerView: View {
                         Button(role: .destructive) {
                             presetPrompt = .delete(preset)
                         } label: {
-                            Label {
-                                Text("Delete")
-                            } icon: {
-                                RedTrashMenuIcon()
-                            }
+                            DestructiveMenuLabel(title: "Delete", systemImage: "trash")
                         }
                         .tint(.red)
                     }
+                    .tint(.primary)
 
                     if index < player.customEqualizerPresets.count - 1 {
                         Divider()
@@ -238,15 +235,6 @@ private enum PresetNamePrompt: Equatable {
     case save
     case rename(CustomEqualizerPreset.ID)
     case delete(CustomEqualizerPreset)
-}
-
-private struct RedTrashMenuIcon: View {
-    var body: some View {
-        if let image = UIImage(systemName: "trash")?
-            .withTintColor(.systemRed, renderingMode: .alwaysOriginal) {
-            Image(uiImage: image)
-        }
-    }
 }
 
 private struct EqualizerEditor: View {

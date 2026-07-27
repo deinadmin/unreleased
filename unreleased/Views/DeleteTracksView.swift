@@ -103,22 +103,26 @@ struct DeleteTracksView: View {
 
     private var sortMenu: some View {
         Menu {
-            Picker("Sort by", selection: $sortField) {
-                ForEach(TrackSortField.allCases) { field in
-                    Label(field.title, systemImage: field.systemImage)
-                        .tag(field)
+            Group {
+                Picker("Sort by", selection: $sortField) {
+                    ForEach(TrackSortField.allCases) { field in
+                        Label(field.title, systemImage: field.systemImage)
+                            .tag(field)
+                    }
+                }
+
+                Picker("Order", selection: $sortDirection) {
+                    Label("Ascending", systemImage: "arrow.up")
+                        .tag(SortDirection.ascending)
+                    Label("Descending", systemImage: "arrow.down")
+                        .tag(SortDirection.descending)
                 }
             }
-
-            Picker("Order", selection: $sortDirection) {
-                Label("Ascending", systemImage: "arrow.up")
-                    .tag(SortDirection.ascending)
-                Label("Descending", systemImage: "arrow.down")
-                    .tag(SortDirection.descending)
-            }
+            .tint(.primary)
         } label: {
             Label("Sort", systemImage: "arrow.up.arrow.down")
         }
+        .tint(.primary)
         .accessibilityLabel("Sort tracks")
         .accessibilityValue("\(sortField.title), \(sortDirection.title)")
     }

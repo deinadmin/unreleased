@@ -272,28 +272,15 @@ export function PlayerVersionWheel({
             style={{
               height: ROW_HEIGHT,
               transform: `translateY(${position}px) scale(${Math.max(0.76, 1 - distance * 0.085)})`,
-              opacity: isSelected ? 1 : Math.max(0.12, 0.72 - distance * 0.2),
+              opacity: Math.max(0.12, 1 - distance * 0.28),
               filter: distance > 1.65 ? `blur(${(distance - 1.65) * 0.55}px)` : undefined,
-              zIndex: isSelected ? 2 : 1,
               transition: isDragging ? undefined : "transform 320ms var(--ease-snappy), opacity 320ms var(--ease-snappy)",
             }}
           >
-            <span
-              className={cn(
-                "shrink-0 rounded-full px-1.5 py-1 text-[10px] font-bold tabular-nums",
-                isSelected ? tones.badge : "bg-white/8 text-white/45",
-              )}
-            >
+            <span className="shrink-0 rounded-full bg-white/8 px-1.5 py-1 text-[10px] font-bold text-white/85 tabular-nums">
               v{versionNumber(version)}
             </span>
-            <span
-              className={cn(
-                "min-w-0 truncate",
-                isSelected
-                  ? cn("text-[15px] font-semibold", tones.label)
-                  : "text-[14px] font-medium text-white",
-              )}
-            >
+            <span className="min-w-0 truncate text-[15px] font-semibold text-white">
               {versionName(version)}
             </span>
           </button>

@@ -38,6 +38,32 @@ enum ProjectInviteService {
         try? await ref.setData(data, merge: true)
     }
 
+    /// Refreshes an existing invite preview after project metadata changes.
+    ///
+    /// Unlike `writePreview`, this never creates a preview for a project that has
+    /// not been shared. Notification rows observe this document so their cover
+    /// follows later project edits instead of remaining an invite-time snapshot.
+    static func refreshPreviewIfExists(
+        project: Project,
+        ownerUID: String,
+        ownerUsername: String?
+    ) async {
+        let ref = CloudPaths.projectPreviewDocument(ownerID: ownerUID, projectID: project.id)
+        guard let snapshot = try? await ref.getDocument(), snapshot.exists else { return }
+
+        var data: [String: Any] = [
+            "name": project.name,
+            "gradient": encodeGradient(project.gradient),
+            "coverStoragePath": project.coverStoragePath ?? FieldValue.delete(),
+            "accentColorHex": project.accentColorHex ?? FieldValue.delete(),
+            "updatedAt": Timestamp(date: Date()),
+        ]
+        if let ownerUsername {
+            data["ownerUsername"] = ownerUsername
+        }
+        try? await ref.setData(data, merge: true)
+    }
+
     /// Enables or disables the general share link. Existing listeners keep their access.
     static func setLinkEnabled(_ enabled: Bool, ownerUID: String, projectID: UUID) async throws {
         let ref = CloudPaths.projectPreviewDocument(ownerID: ownerUID, projectID: projectID)
@@ -328,7 +354,7 @@ enum ProjectInviteService {
 
     // MARK: - Private helpers
 
-    private static func decodePreview(
+    static func decodePreview(
         _ data: [String: Any],
         ownerUID: String,
         projectID: UUID

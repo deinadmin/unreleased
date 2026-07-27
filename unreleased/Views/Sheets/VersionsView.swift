@@ -523,15 +523,12 @@ private struct VersionRow: View {
 
             if canDelete {
                 Button(role: .destructive, action: onDelete) {
-                    Label {
-                        Text("Delete Version")
-                    } icon: {
-                        RedVersionTrashMenuIcon()
-                    }
+                    DestructiveMenuLabel(title: "Delete Version", systemImage: "trash")
                 }
                 .tint(.red)
             }
         }
+        .tint(.primary)
     }
 
     private var previewScrubber: some View {
@@ -547,15 +544,6 @@ private struct VersionRow: View {
         )
         .frame(height: 28)
         .accessibilityLabel("Scrub version \(number)")
-    }
-}
-
-private struct RedVersionTrashMenuIcon: View {
-    var body: some View {
-        if let image = UIImage(systemName: "trash")?
-            .withTintColor(.systemRed, renderingMode: .alwaysOriginal) {
-            Image(uiImage: image)
-        }
     }
 }
 

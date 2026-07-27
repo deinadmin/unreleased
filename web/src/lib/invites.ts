@@ -92,6 +92,33 @@ export async function ensurePreview(
   await setDoc(ref, data, { merge: true })
 }
 
+/**
+ * Keeps an already-shared project's live invite preview in sync. It deliberately
+ * does not create a preview for projects that have never been shared.
+ */
+export async function refreshPreviewIfExists(
+  project: Project,
+  ownerUID: string,
+  ownerUsername?: string,
+): Promise<void> {
+  const ref = previewDoc(ownerUID, project.id)
+  const existing = await getDoc(ref).catch(() => null)
+  if (!existing?.exists()) return
+
+  await setDoc(
+    ref,
+    {
+      name: project.name,
+      gradient: encodeGradient(project.gradient),
+      coverStoragePath: project.coverStoragePath ?? deleteField(),
+      accentColorHex: project.accentColorHex ?? deleteField(),
+      ...(ownerUsername ? { ownerUsername } : {}),
+      updatedAt: Timestamp.now(),
+    },
+    { merge: true },
+  ).catch(() => {})
+}
+
 export async function fetchPreview(
   ownerUID: string,
   projectID: string,

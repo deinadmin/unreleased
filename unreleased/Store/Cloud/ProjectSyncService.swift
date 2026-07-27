@@ -389,6 +389,11 @@ final class ProjectSyncService {
                 let doc = CloudPaths.projectDocument(userID: userID, projectID: project.id)
                 let username = usernameProvider?()
                 try await doc.setData(FirestoreProjectCodec.encode(project, ownerUsername: username), merge: true)
+                await ProjectInviteService.refreshPreviewIfExists(
+                    project: project,
+                    ownerUID: userID,
+                    ownerUsername: username
+                )
                 for track in project.tracks {
                     for version in track.versions {
                         try await writeVersionAccess(projectID: project.id, version: version)

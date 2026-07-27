@@ -198,13 +198,7 @@ struct HomeView: View {
         VStack(spacing: 0) {
             Spacer()
 
-            Image("AppIconDisplay")
-                .resizable()
-                .interpolation(.high)
-                .scaledToFit()
-                .frame(width: 240, height: 240)
-                .clipShape(.rect(cornerRadius: 28))
-                .accessibilityLabel("unreleased app icon")
+            OnboardingAppIcon()
                 .padding(.bottom, 36)
 
             Text("Start your first project")
@@ -265,8 +259,12 @@ struct HomeView: View {
                                 Button(role: .destructive) {
                                     projectPendingLeave = project
                                 } label: {
-                                    Label("Leave Project", systemImage: "person.fill.xmark")
+                                    DestructiveMenuLabel(
+                                        title: "Leave Project",
+                                        systemImage: "person.fill.xmark"
+                                    )
                                 }
+                                .tint(.red)
                             } else {
                                 Button {
                                     if store.hasStorageCapacity {
@@ -292,19 +290,15 @@ struct HomeView: View {
 
                                 Button(role: .destructive) {
                                     projectPendingDelete = project
-                                    } label: {
-                                        Label {
-                                            Text("Delete")
-                                        } icon: {
-                                            RedProjectTrashMenuIcon()
-                                        }
-                                    }
-                                    .tint(.red)
+                                } label: {
+                                    DestructiveMenuLabel(title: "Delete", systemImage: "trash")
                                 }
+                                .tint(.red)
                             }
                         }
                         .tint(.primary)
                     }
+                }
             }
             .padding(.horizontal, 20)
             .padding(.top, 8)
@@ -484,12 +478,16 @@ struct HomeView: View {
     }
 }
 
-private struct RedProjectTrashMenuIcon: View {
+private struct OnboardingAppIcon: View {
     var body: some View {
-        if let image = UIImage(systemName: "trash")?
-            .withTintColor(.systemRed, renderingMode: .alwaysOriginal) {
-            Image(uiImage: image)
-        }
+        Image("AppIconDisplay")
+            .resizable()
+            .interpolation(.high)
+            .scaledToFit()
+            .frame(width: 240, height: 240)
+            .clipShape(.rect(cornerRadius: 28))
+            .resistedDragTilt(inverted: true)
+            .accessibilityLabel("unreleased app icon")
     }
 }
 

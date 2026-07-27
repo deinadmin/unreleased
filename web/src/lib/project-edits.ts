@@ -12,6 +12,7 @@ import { deleteObject, ref as storageRef, uploadBytes } from "firebase/storage"
 import { accentHexFromGradient, accentHexFromImage, gradientHexPairFromImage } from "./accent-color"
 import { encodeGradient, encodeProject, encodeTrack } from "./codec"
 import { db, storage } from "./firebase"
+import { refreshPreviewIfExists } from "./invites"
 import { compressedSquareJpeg, COVER_PHOTO_LIMITS } from "./photo-compression"
 import {
   cacheUploadedProjectCover,
@@ -52,6 +53,7 @@ export async function updateProjectName(uid: string, project: Project, rawName: 
     name,
     updatedDate: Timestamp.now(),
   })
+  await refreshPreviewIfExists({ ...project, name }, uid)
 }
 
 /** Saves the notes for a single track by rewriting the embedded tracks array. */
@@ -181,6 +183,16 @@ export async function setProjectGradient(
     coverStoragePath: deleteField(),
     updatedDate: Timestamp.now(),
   })
+  await refreshPreviewIfExists(
+    {
+      ...project,
+      gradient,
+      accentColorHex: accentHexFromGradient(gradient),
+      coverGradientColors: undefined,
+      coverStoragePath: undefined,
+    },
+    uid,
+  )
   // Best-effort cleanup of the replaced cloud cover.
   if (project.coverStoragePath) {
     await invalidateProjectCover(project.coverStoragePath)
@@ -222,6 +234,10 @@ export async function setProjectCoverImage(
         coverGradientColors,
         updatedDate: Timestamp.now(),
       })
+      await refreshPreviewIfExists(
+        { ...project, coverStoragePath: storagePath, accentColorHex, coverGradientColors },
+        uid,
+      )
     } catch (error) {
       await invalidateProjectCover(storagePath)
       deleteObject(storageRef(storage, storagePath)).catch(() => {})

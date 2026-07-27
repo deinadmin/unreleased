@@ -9,7 +9,14 @@ import {
   query,
   setDoc,
 } from "firebase/firestore"
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react"
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react"
 import { useAuth } from "@/hooks/use-auth"
 import { decodeGradient } from "@/lib/codec"
 import { db } from "@/lib/firebase"
@@ -33,11 +40,14 @@ const NotificationsContext = createContext<NotificationsContextValue>({
 
 export function NotificationsProvider({ children }: { children: ReactNode }) {
   const { user, isSignedIn } = useAuth()
-  const [notifications, setNotifications] = useState<AppNotification[]>([])
+  const [notificationSnapshots, setNotificationSnapshots] = useState<AppNotification[]>([])
+  const [projectPreviews, setProjectPreviews] = useState<
+    Map<string, Pick<AppNotification, "projectName" | "projectGradient" | "coverStoragePath">>
+  >(new Map())
 
   useEffect(() => {
     if (!user || !isSignedIn) {
-      setNotifications([])
+      setNotificationSnapshots([])
       return
     }
     const notificationsQuery = query(
@@ -48,7 +58,7 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
     return onSnapshot(
       notificationsQuery,
       (snapshot) => {
-        setNotifications(
+        setNotificationSnapshots(
           snapshot.docs.flatMap((docSnap) => {
             const data = docSnap.data()
             if (
@@ -83,6 +93,66 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
       (error) => console.error("notifications listener failed", error),
     )
   }, [user, isSignedIn])
+
+  const previewKeys = useMemo(
+    () =>
+      [
+        ...new Set(
+          notificationSnapshots
+            .filter((notification) => notification.kind === "projectInvite")
+            .map((notification) => `${notification.fromUID}|${notification.projectID}`),
+        ),
+      ].sort(),
+    [notificationSnapshots],
+  )
+  const previewKeySignature = previewKeys.join("\n")
+
+  useEffect(() => {
+    setProjectPreviews(new Map())
+    if (!user || !isSignedIn) return
+
+    const unsubscribes = previewKeys.map((key) => {
+      const separator = key.indexOf("|")
+      const ownerUID = key.slice(0, separator)
+      const projectID = key.slice(separator + 1)
+      return onSnapshot(
+        doc(db, "users", ownerUID, "projectPreviews", projectID),
+        (snapshot) => {
+          const data = snapshot.data()
+          const gradient = data ? decodeGradient(data.gradient) : undefined
+          setProjectPreviews((current) => {
+            const next = new Map(current)
+            if (data && typeof data.name === "string" && gradient) {
+              next.set(key, {
+                projectName: data.name,
+                projectGradient: gradient,
+                coverStoragePath:
+                  typeof data.coverStoragePath === "string"
+                    ? data.coverStoragePath
+                    : undefined,
+              })
+            } else {
+              next.delete(key)
+            }
+            return next
+          })
+        },
+        (error) => console.error("notification project preview listener failed", error),
+      )
+    })
+    return () => unsubscribes.forEach((unsubscribe) => unsubscribe())
+  }, [user, isSignedIn, previewKeySignature])
+
+  const notifications = useMemo(
+    () =>
+      notificationSnapshots.map((notification) => {
+        const preview = projectPreviews.get(
+          `${notification.fromUID}|${notification.projectID}`,
+        )
+        return preview ? { ...notification, ...preview } : notification
+      }),
+    [notificationSnapshots, projectPreviews],
+  )
 
   const notificationDoc = (id: string) => doc(db, "users", user!.uid, "notifications", id)
 

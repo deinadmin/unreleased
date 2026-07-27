@@ -36,9 +36,11 @@ struct NotificationsView: View {
                         Button(role: .destructive) {
                             store.deleteNotification(notification)
                         } label: {
-                            Label("Delete", systemImage: "trash")
+                            DestructiveMenuLabel(title: "Delete", systemImage: "trash")
                         }
+                        .tint(.red)
                     }
+                    .tint(.primary)
                 }
             }
             .padding(.horizontal, 20)
