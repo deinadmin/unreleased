@@ -399,14 +399,18 @@ struct ProjectShareSheet: View {
 
             VStack(spacing: 20) {
                 if let qrImage {
-                    Image(uiImage: qrImage)
-                        .interpolation(.none)
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: 240, height: 240)
-                        .padding(24)
-                        .background(.white, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
-                        .shadow(color: .black.opacity(0.18), radius: 24, y: 10)
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 28, style: .continuous)
+                            .fill(.white)
+
+                        Image(uiImage: qrImage)
+                            .interpolation(.none)
+                            .resizable()
+                            .scaledToFit()
+                            .padding(24)
+                    }
+                    .frame(width: 288, height: 288)
+                    .shadow(color: .black.opacity(0.18), radius: 24, y: 10)
                 } else {
                     ProgressView()
                 }
@@ -719,7 +723,16 @@ struct ProjectShareSheet: View {
         filter.message = Data(string.utf8)
         filter.correctionLevel = "M"
         guard let output = filter.outputImage else { return nil }
-        let scaled = output.transformed(by: CGAffineTransform(scaleX: 10, y: 10))
+
+        // Keep the QR background transparent so its quiet zone is supplied by the
+        // rounded white card instead of showing a second, square white rectangle.
+        let colors = CIFilter.falseColor()
+        colors.inputImage = output
+        colors.color0 = CIColor.black
+        colors.color1 = CIColor.clear
+        guard let recolored = colors.outputImage else { return nil }
+
+        let scaled = recolored.transformed(by: CGAffineTransform(scaleX: 10, y: 10))
         guard let cgImage = context.createCGImage(scaled, from: scaled.extent) else { return nil }
         return UIImage(cgImage: cgImage)
     }

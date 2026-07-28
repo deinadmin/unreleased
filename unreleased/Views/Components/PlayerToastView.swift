@@ -134,6 +134,9 @@ struct PlayerToastBanner: View {
         .foregroundStyle(.white)
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
-        .background(PlayerChrome.surfaceBackground, in: Capsule())
+        .glassEffect(
+            .regular.interactive().tint(PlayerChrome.surfaceBackground),
+            in: .capsule
+        )
     }
 }

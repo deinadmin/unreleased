@@ -89,6 +89,10 @@ struct PlayerView: View {
 
     private var compactCoverSize: CGFloat { compactHeight - compactCoverInset * 2 }
 
+    private var playerCardTint: Color {
+        (isExpanded ? Color(white: 0.10) : PlayerChrome.surfaceBackground)
+    }
+
     private var playerCardShape: UnevenRoundedRectangle {
         UnevenRoundedRectangle(
             topLeadingRadius: cardTopLeading,
@@ -288,7 +292,7 @@ struct PlayerView: View {
         .frame(minHeight: compactHeight)
         .clipShape(playerCardShape)
         .glassEffect(
-            .regular.interactive().tint(.black.opacity(0.9)),
+            .regular.interactive().tint(playerCardTint),
             in: playerCardShape
         )
         .shadow(
