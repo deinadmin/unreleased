@@ -251,7 +251,13 @@ struct HomeView: View {
             LazyVGrid(columns: columns, spacing: 16) {
                 ForEach(filteredProjects) { project in
                     NavigationLink(value: project.id) {
-                        ProjectCard(project: project, zoomNamespace: projectZoomNamespace)
+                        ProjectCard(
+                            project: project,
+                            zoomNamespace: projectZoomNamespace,
+                            onAddTracks: project.isShared ? nil : {
+                                requestAddTracks(to: project)
+                            }
+                        )
                     }
                     .contextMenu {
                         Group {
@@ -267,11 +273,7 @@ struct HomeView: View {
                                 .tint(.red)
                             } else {
                                 Button {
-                                    if store.hasStorageCapacity {
-                                        projectAddingTracks = project
-                                    } else {
-                                        store.presentStorageUpsell(.uploadFull)
-                                    }
+                                    requestAddTracks(to: project)
                                 } label: {
                                     Label("Add tracks", systemImage: "plus")
                                 }
@@ -413,6 +415,14 @@ struct HomeView: View {
 
     // MARK: - Import helpers
 
+    private func requestAddTracks(to project: Project) {
+        if store.hasStorageCapacity {
+            projectAddingTracks = project
+        } else {
+            store.presentStorageUpsell(.uploadFull)
+        }
+    }
+
     private func importTracksToExisting(urls: [URL], into project: Project) {
         guard !urls.isEmpty else { return }
         isImportingToExisting = true
@@ -498,6 +508,7 @@ private struct ProjectCard: View {
     @Environment(ProjectStore.self) private var store
     let project: Project
     let zoomNamespace: Namespace.ID
+    let onAddTracks: (() -> Void)?
 
     @State private var playHapticTick = 0
 
@@ -526,30 +537,33 @@ private struct ProjectCard: View {
                 .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                 .matchedTransitionSource(id: project.id, in: zoomNamespace)
 
-                if !project.tracks.isEmpty {
-                    Button(action: playOrPause) {
-                        ZStack {
-                            Image(systemName: showsPause ? "pause.fill" : "play.fill")
-                                .font(.system(size: 12, weight: .bold))
-                                .coverControlContrast(
-                                    for: coverImage,
-                                    fallbackGradient: project.gradient,
-                                    // The 32-point control is inset 10 points
-                                    // from the artwork's bottom-right corner.
-                                    sampleRect: CGRect(
-                                        x: 0.75,
-                                        y: 0.75,
-                                        width: 0.2,
-                                        height: 0.2
-                                    )
-                                )
+                if !project.tracks.isEmpty || onAddTracks != nil {
+                    Button(action: performOverlayAction) {
+                        HStack(spacing: 6) {
+                            Image(systemName: overlaySystemImage)
                                 .animation(nil, value: showsPause)
+
+                            if project.tracks.isEmpty {
+                                Text("Add first track")
+                            }
                         }
-                        .frame(width: 32, height: 32)
-                        .contentShape(.circle)
+                        .font(.system(size: 12, weight: .bold))
+                        .frame(minWidth: 32, minHeight: 32)
+                        .padding(.horizontal, project.tracks.isEmpty ? 12 : 0)
+                        .coverControlContrast(
+                            for: coverImage,
+                            fallbackGradient: project.gradient,
+                            sampleRect: project.tracks.isEmpty
+                                ? CGRect(x: 0.2, y: 0.75, width: 0.75, height: 0.2)
+                                : CGRect(x: 0.75, y: 0.75, width: 0.2, height: 0.2)
+                        )
+                        .contentShape(Capsule())
                     }
-                    .glassEffect(.clear.interactive(), in: Circle())
+                    .glassEffect(.clear.interactive(), in: Capsule())
                     .padding(10)
+                    .accessibilityLabel(
+                        project.tracks.isEmpty ? "Add first track" : (showsPause ? "Pause" : "Play")
+                    )
                 }
             }
 
@@ -565,6 +579,19 @@ private struct ProjectCard: View {
             }
         }
         .sensoryFeedback(.impact(weight: .medium), trigger: playHapticTick)
+    }
+
+    private var overlaySystemImage: String {
+        if project.tracks.isEmpty { return "plus" }
+        return showsPause ? "pause.fill" : "play.fill"
+    }
+
+    private func performOverlayAction() {
+        if project.tracks.isEmpty {
+            onAddTracks?()
+        } else {
+            playOrPause()
+        }
     }
 
     private func playOrPause() {

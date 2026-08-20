@@ -7,6 +7,7 @@ struct PlayerView: View {
     @Environment(ProjectStore.self) private var store
     @Environment(\.navigateToTrackNotes) private var navigateToTrackNotes
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.scenePhase) private var scenePhase
 
     @State private var offset: CGFloat = 0
     @State private var lastDragTranslation: CGFloat = 0
@@ -171,6 +172,7 @@ struct PlayerView: View {
             .onAppear {
                 offset = 0
                 lastDragTranslation = 0
+                isDragging = false
                 heroHandoffTask?.cancel()
                 heroHandoffTask = nil
                 showsHeroCover = isExpanded
@@ -189,6 +191,7 @@ struct PlayerView: View {
             .onChange(of: player.isShowingNowPlaying) { _, showing in
                 offset = 0
                 lastDragTranslation = 0
+                isDragging = false
                 if showing {
                     dismissKeyboard()
                     // Player is expanding — show the hero immediately so the
@@ -211,6 +214,16 @@ struct PlayerView: View {
                         heroHandoffTask = nil
                     }
                 }
+            }
+            .onChange(of: scenePhase) { _, phase in
+                guard phase != .active else {
+                    if !isDragging && offset != 0 {
+                        resetDismissGesture()
+                    }
+                    return
+                }
+
+                resetDismissGesture()
             }
             .onChange(of: player.isPlaying) { _, isPlaying in
                 coverRotationClock.setPlaying(
@@ -321,8 +334,11 @@ struct PlayerView: View {
                         .foregroundStyle(.white)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 4)
-                        .background(PlayerChrome.surfaceBackground, in: Capsule())
                         .fixedSize()
+                        .glassEffect(
+                            .regular.tint(PlayerChrome.surfaceBackground),
+                            in: .capsule
+                        )
                         .transition(
                             .scale(scale: 0.88, anchor: .bottom)
                             .combined(with: .opacity)
@@ -1050,6 +1066,8 @@ struct PlayerView: View {
     private var dismissGesture: some Gesture {
         DragGesture(minimumDistance: 10)
             .onChanged { value in
+                guard scenePhase == .active else { return }
+
                 isDragging = true
                 let delta = value.translation.height - lastDragTranslation
                 lastDragTranslation = value.translation.height
@@ -1061,6 +1079,11 @@ struct PlayerView: View {
                 }
             }
             .onEnded { value in
+                guard scenePhase == .active else {
+                    resetDismissGesture()
+                    return
+                }
+
                 let predictedOffset = offset + value.predictedEndTranslation.height - value.translation.height
                 lastDragTranslation = 0
                 isDragging = false
@@ -1077,6 +1100,16 @@ struct PlayerView: View {
                     }
                 }
             }
+    }
+
+    private func resetDismissGesture() {
+        lastDragTranslation = 0
+        isDragging = false
+
+        guard offset != 0 else { return }
+        withAnimation(Self.snapBackSpring) {
+            offset = 0
+        }
     }
 
     private func dismissKeyboard() {

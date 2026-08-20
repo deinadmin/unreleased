@@ -1,5 +1,7 @@
 import SwiftUI
 
+private let selectedSwatchOutline = Color.primary.opacity(0.6)
+
 struct GradientPickerView: View {
     @Binding var selected: GradientTheme
     @Binding var coverImage: UIImage?
@@ -67,7 +69,7 @@ private struct CoverPhotoSwatch: View {
             .overlay {
                 if isSelected {
                     RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .strokeBorder(.white, lineWidth: 3)
+                        .strokeBorder(selectedSwatchOutline, lineWidth: 3)
                     Image(systemName: "checkmark")
                         .font(.system(size: 14, weight: .bold))
                         .foregroundStyle(.white)
@@ -89,7 +91,7 @@ private struct GradientSwatch: View {
             .overlay {
                 if isSelected {
                     RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .strokeBorder(.white, lineWidth: 3)
+                        .strokeBorder(selectedSwatchOutline, lineWidth: 3)
                     Image(systemName: "checkmark")
                         .font(.system(size: 14, weight: .bold))
                         .foregroundStyle(.white)
