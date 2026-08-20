@@ -512,9 +512,13 @@ private struct ProjectCard: View {
 
     @State private var playHapticTick = 0
 
+    private let overlayControlRadius: CGFloat = 16
+    private let overlayControlInset: CGFloat = 10
+
     private var isActiveProject: Bool { player.currentProject?.id == project.id }
     private var showsPause: Bool { isActiveProject && player.isPlaying }
     private var coverImage: UIImage? { store.coverImage(for: project) }
+    private var coverCornerRadius: CGFloat { overlayControlRadius + overlayControlInset }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -528,13 +532,13 @@ private struct ProjectCard: View {
                             .scaledToFill()
                             .clipped()
                     } else {
-                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        RoundedRectangle(cornerRadius: coverCornerRadius, style: .continuous)
                             .fill(project.gradient.gradient)
                             .aspectRatio(1, contentMode: .fit)
                             .frame(maxWidth: .infinity)
                     }
                 }
-                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: coverCornerRadius, style: .continuous))
                 .matchedTransitionSource(id: project.id, in: zoomNamespace)
 
                 if !project.tracks.isEmpty || onAddTracks != nil {
@@ -548,7 +552,10 @@ private struct ProjectCard: View {
                             }
                         }
                         .font(.system(size: 12, weight: .bold))
-                        .frame(minWidth: 32, minHeight: 32)
+                        .frame(
+                            minWidth: overlayControlRadius * 2,
+                            minHeight: overlayControlRadius * 2
+                        )
                         .padding(.horizontal, project.tracks.isEmpty ? 12 : 0)
                         .coverControlContrast(
                             for: coverImage,
@@ -560,7 +567,7 @@ private struct ProjectCard: View {
                         .contentShape(Capsule())
                     }
                     .glassEffect(.clear.interactive(), in: Capsule())
-                    .padding(10)
+                    .padding(overlayControlInset)
                     .accessibilityLabel(
                         project.tracks.isEmpty ? "Add first track" : (showsPause ? "Pause" : "Play")
                     )

@@ -34,8 +34,7 @@ struct ContentView: View {
 
     private var showsMiniPlayer: Bool {
         player.currentTrack != nil
-            && !player.isShowingNowPlaying
-            && !miniPlayerVisibility.isHidden
+            && (player.isShowingNowPlaying || !miniPlayerVisibility.isHidden)
     }
 
     /// On iPad the search bar floats Spotlight-style near the top, so only the
