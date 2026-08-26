@@ -57,7 +57,7 @@ struct NotificationSettingsView: View {
                 icon: "person.badge.plus",
                 iconColor: .secondary,
                 title: "New project invites",
-                subtitle: "When someone invites you to collaborate on a project."
+                subtitle: "When someone invites you to join their project."
             ) {
                 Toggle("", isOn: preferenceBinding(\.projectInvites))
                     .labelsHidden()

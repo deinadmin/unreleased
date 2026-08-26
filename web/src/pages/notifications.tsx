@@ -82,7 +82,7 @@ export function NotificationsPage() {
                         }
                       }
                       coverStoragePath={notification.coverStoragePath}
-                      className="size-10 shrink-0 rounded-2xl"
+                      className="size-10 shrink-0"
                     />
                   ) : (
                     <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-background">

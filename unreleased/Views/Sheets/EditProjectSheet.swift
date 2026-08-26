@@ -84,7 +84,7 @@ struct EditProjectSheet: View {
     @ViewBuilder
     private var coverPreview: some View {
         VStack(spacing: 12) {
-            ProjectCoverView(gradient: gradient, coverImage: coverImage, vinylGradient: previewVinylGradient, size: 160, cornerRadius: 20, showVinyl: true)
+            ProjectCoverView(gradient: gradient, coverImage: coverImage, vinylGradient: previewVinylGradient, size: 160, showVinyl: true)
 
             Button {
                 withAnimation(.smooth) {

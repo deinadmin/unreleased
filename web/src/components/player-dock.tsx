@@ -347,7 +347,7 @@ function NotesPreview({
       onScroll={updateFade}
       className={cn(
         "max-h-40 overflow-y-auto overscroll-contain whitespace-pre-wrap text-[13px] leading-5 text-white/60 [scrollbar-width:thin]",
-        onOpen && "cursor-default outline-none transition-colors hover:text-white/85 focus:outline-none focus:ring-0",
+        onOpen && "cursor-default outline-none hover:text-white/85 focus:outline-none focus:ring-0",
         className,
       )}
       style={{
@@ -358,7 +358,9 @@ function NotesPreview({
           "linear-gradient(to bottom, black 45%, rgb(0 0 0 / var(--notes-fade-alpha)) 100%)",
         maskImage:
           "linear-gradient(to bottom, black 45%, rgb(0 0 0 / var(--notes-fade-alpha)) 100%)",
-        transition: "--notes-fade-alpha 300ms var(--ease-snappy)",
+        // Declared inline because this shorthand also owns the hover colour —
+        // an inline `transition` would otherwise beat Tailwind's utility class.
+        transition: "--notes-fade-alpha 300ms var(--ease-snappy), color 180ms ease-out",
       } as React.CSSProperties}
     >
       {notes}

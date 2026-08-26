@@ -143,8 +143,7 @@ struct ProjectInviteSheet: View {
             CloudProjectCoverThumbnail(
                 gradient: preview.gradient,
                 coverStoragePath: preview.coverStoragePath,
-                size: 80,
-                cornerRadius: 18
+                size: 80
             )
                 .shadow(color: .black.opacity(0.12), radius: 10, y: 4)
 

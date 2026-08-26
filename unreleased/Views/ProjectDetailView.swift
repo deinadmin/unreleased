@@ -256,8 +256,7 @@ struct ProjectDetailView: View {
                 ProjectCoverThumbnail(
                     gradient: project.gradient,
                     coverImage: store.coverImage(for: project),
-                    size: 28,
-                    cornerRadius: 7
+                    size: 28
                 )
 
                 VStack(alignment: .leading, spacing: 0) {
@@ -486,7 +485,6 @@ private struct ProjectDetailHeaderSection: View, Equatable {
             coverImage: coverImage,
             vinylGradient: vinylGradient,
             size: size,
-            cornerRadius: 20,
             showVinyl: true,
             isPlaying: isPlaying
         )

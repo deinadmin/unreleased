@@ -1,6 +1,19 @@
 import FirebaseStorage
 import SwiftUI
 
+// MARK: - Cover corner radius
+
+/// Single source of truth for project-cover rounding.
+/// Derived from the home grid card (26pt radius on a ~172pt cover) so covers keep
+/// the same visual roundness at every size across the app.
+enum ProjectCoverRadius {
+    static let ratio: CGFloat = 0.151
+
+    static func forSize(_ size: CGFloat) -> CGFloat {
+        (size * ratio).rounded()
+    }
+}
+
 // MARK: - Project Cover
 
 /// Animated cover square.
@@ -16,9 +29,12 @@ struct ProjectCoverView: View {
     /// When provided, overrides the vinyl center gradient (used when cover-image colors are extracted).
     var vinylGradient: GradientTheme? = nil
     var size: CGFloat = 260
-    var cornerRadius: CGFloat = 20
+    /// Overrides the shared `ProjectCoverRadius` rounding when set.
+    var cornerRadiusOverride: CGFloat? = nil
     var showVinyl: Bool = true
     var isPlaying: Bool = false
+
+    private var cornerRadius: CGFloat { cornerRadiusOverride ?? ProjectCoverRadius.forSize(size) }
 
     // How far the cover slides left (= how far the vinyl bleeds right, symmetric).
     private var shift: CGFloat { size * 0.1875 }
@@ -65,7 +81,7 @@ struct ProjectCoverView: View {
         coverImage: UIImage? = nil,
         vinylGradient: GradientTheme? = nil,
         size: CGFloat = 260,
-        cornerRadius: CGFloat = 20,
+        cornerRadiusOverride: CGFloat? = nil,
         showVinyl: Bool = true,
         isPlaying: Bool = false
     ) {
@@ -73,7 +89,7 @@ struct ProjectCoverView: View {
         self.coverImage = coverImage
         self.vinylGradient = vinylGradient
         self.size = size
-        self.cornerRadius = cornerRadius
+        self.cornerRadiusOverride = cornerRadiusOverride
         self.showVinyl = showVinyl
         self.isPlaying = isPlaying
         _layoutIsPlaying = State(initialValue: isPlaying)
@@ -170,7 +186,10 @@ struct ProjectCoverThumbnail: View {
     let gradient: GradientTheme
     var coverImage: UIImage? = nil
     var size: CGFloat = 56
-    var cornerRadius: CGFloat = 12
+    /// Overrides the shared `ProjectCoverRadius` rounding when set.
+    var cornerRadiusOverride: CGFloat? = nil
+
+    private var cornerRadius: CGFloat { cornerRadiusOverride ?? ProjectCoverRadius.forSize(size) }
 
     var body: some View {
         Group {
@@ -196,9 +215,12 @@ struct CloudProjectCoverThumbnail: View {
     let gradient: GradientTheme
     let coverStoragePath: String?
     var size: CGFloat = 56
-    var cornerRadius: CGFloat = 12
+    /// Overrides the shared `ProjectCoverRadius` rounding when set.
+    var cornerRadiusOverride: CGFloat? = nil
 
     @State private var coverURL: URL?
+
+    private var cornerRadius: CGFloat { cornerRadiusOverride ?? ProjectCoverRadius.forSize(size) }
 
     private var coverShape: RoundedRectangle {
         RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)

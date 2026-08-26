@@ -66,7 +66,7 @@ struct PlayerSearchBar: View {
         .padding(.trailing, endCapRadius + closeSize / 2 + 6)
         .frame(height: barHeight)
         .frame(maxWidth: .infinity)
-        .background(surfaceFill, in: Capsule())
+        // Inside the glass so the close button stretches/wiggles with the bar.
         .overlay(alignment: .trailing) {
             Button(action: closeSearch) {
                 ZStack {
@@ -82,6 +82,7 @@ struct PlayerSearchBar: View {
             .accessibilityLabel("Close search")
             .padding(.trailing, closeTrailingInset)
         }
+        .glassEffect(.regular.interactive().tint(surfaceFill), in: Capsule())
         .geometryGroup()
         .shadow(
             color: .black.opacity(isDark ? 0.35 : 0.12),

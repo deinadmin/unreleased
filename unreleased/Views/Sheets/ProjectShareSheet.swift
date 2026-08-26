@@ -288,7 +288,7 @@ struct ProjectShareSheet: View {
 
                 Image(systemName: didCopy ? "checkmark" : "doc.on.doc")
                     .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(didCopy ? .green : .secondary)
+                    .foregroundStyle(didCopy ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.secondary))
                     .frame(width: 52, height: 52)
             }
         }

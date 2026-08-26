@@ -235,7 +235,7 @@ function InviteCard({
         name={preview.name}
         gradient={preview.gradient}
         coverStoragePath={preview.coverStoragePath}
-        className="size-40 rounded-[26px] shadow-lg"
+        className="size-40 shadow-lg"
       />
       <h1 className="max-w-full truncate pt-7 text-[22px] font-bold">{preview.name}</h1>
       {preview.ownerUsername && (

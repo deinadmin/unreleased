@@ -161,8 +161,7 @@ private struct NotificationRow: View {
                 CloudProjectCoverThumbnail(
                     gradient: notification.projectGradient ?? GradientTheme.presets[4],
                     coverStoragePath: notification.coverStoragePath,
-                    size: 48,
-                    cornerRadius: cardCornerRadius
+                    size: 48
                 )
             } else {
                 ZStack {

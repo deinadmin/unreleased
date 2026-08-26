@@ -2,6 +2,7 @@ import { MoreHorizontal } from "lucide-react"
 import { useState } from "react"
 import { useContextMenu } from "@/components/context-menu"
 import { PlayingBars } from "@/components/playing-bars"
+import { TwoToneCircleSpinner } from "@/components/two-tone-spinner"
 import { useTrackActions } from "@/components/track-actions"
 import { VersionBadge } from "@/components/version-badge"
 import { cn } from "@/lib/utils"
@@ -63,7 +64,9 @@ export function TrackRow({
           className="flex min-w-0 flex-1 items-center gap-3 rounded-xl px-3 py-3 text-left disabled:cursor-default disabled:opacity-50"
         >
           <span className="flex w-7 shrink-0 items-center justify-center">
-            {isActive && player.isPlaying ? (
+            {isActive && player.isLoading ? (
+              <TwoToneCircleSpinner className="size-4" style={{ color: accent }} />
+            ) : isActive && player.isPlaying ? (
               <PlayingBars color={accent} />
             ) : (
               <span className="text-sm font-medium tabular-nums text-muted-foreground">

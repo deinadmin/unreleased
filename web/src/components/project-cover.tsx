@@ -9,6 +9,16 @@ import { cn } from "@/lib/utils"
 import { Vinyl } from "./vinyl"
 
 /**
+ * Single source of truth for cover rounding, mirroring iOS `ProjectCoverRadius`.
+ * 26px = the grid card's overlay button radius (16px) plus its inset (10px), so
+ * the cover corner stays concentric with the play / actions buttons.
+ */
+export const COVER_RADIUS = "rounded-[26px]"
+
+/** Same roundness ratio, but scaled — for thumbnails far smaller than a card. */
+export const COVER_THUMB_RADIUS = "rounded-[15.1%]"
+
+/**
  * Animated cover square matching the iOS `ProjectCoverView`:
  * paused → cover centered, vinyl hidden behind it;
  * playing → cover slides left, vinyl slides out right and spins.
@@ -39,7 +49,10 @@ export function ProjectCover({
       )}
 
       <div
-        className="absolute inset-0 overflow-hidden rounded-[7.7%] shadow-[0_8px_20px_rgba(0,0,0,0.2)] transition-transform duration-500 ease-in-out"
+        className={cn(
+          "absolute inset-0 overflow-hidden shadow-[0_8px_20px_rgba(0,0,0,0.2)] transition-transform duration-500 ease-in-out",
+          COVER_RADIUS,
+        )}
         style={{
           transform: showVinyl && isPlaying ? "translateX(-18.75%)" : "translateX(0)",
           background: coverUrl ? "#1f1f1f" : gradientCSS(project.gradient),
@@ -65,7 +78,7 @@ export function CoverThumbnail({ project, className }: { project: Project; class
       name={project.name}
       gradient={project.gradient}
       coverStoragePath={project.coverStoragePath}
-      className={cn("rounded-xl", className)}
+      className={className}
     />
   )
 }
@@ -85,7 +98,7 @@ export function CloudProjectCover({
   const coverUrl = useStorageUrl(coverStoragePath)
   return (
     <div
-      className={cn("overflow-hidden", className)}
+      className={cn("overflow-hidden", COVER_THUMB_RADIUS, className)}
       style={{ background: coverUrl ? "#1f1f1f" : gradientCSS(gradient) }}
     >
       {coverUrl && (

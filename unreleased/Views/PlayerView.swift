@@ -854,8 +854,7 @@ struct PlayerView: View {
                     ProjectCoverThumbnail(
                         gradient: project.gradient,
                         coverImage: store.coverImage(for: project),
-                        size: 44,
-                        cornerRadius: 9
+                        size: 44
                     )
 
                     VStack(alignment: .leading, spacing: 3) {

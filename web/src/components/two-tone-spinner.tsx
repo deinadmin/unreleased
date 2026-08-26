@@ -8,9 +8,11 @@ import { cn } from "@/lib/utils"
 export function TwoToneCircleSpinner({
   className,
   strokeWidth = 2.5,
+  style,
 }: {
   className?: string
   strokeWidth?: number
+  style?: React.CSSProperties
 }) {
   // Half of the circumference of the r=10 path, so the emphasized arc covers
   // exactly one half of the ring.
@@ -22,6 +24,7 @@ export function TwoToneCircleSpinner({
       viewBox="0 0 24 24"
       fill="none"
       className={cn("animate-spin", className)}
+      style={style}
     >
       <circle
         cx="12"

@@ -147,8 +147,7 @@ struct SaveInSheet: View {
                 ProjectCoverThumbnail(
                     gradient: project.gradient,
                     coverImage: store.coverImage(for: project),
-                    size: 48,
-                    cornerRadius: 10
+                    size: 48
                 )
 
                 VStack(alignment: .leading, spacing: 3) {

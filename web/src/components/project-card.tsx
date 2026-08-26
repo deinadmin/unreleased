@@ -12,7 +12,7 @@ import { Link } from "react-router-dom"
 import { toast } from "@/lib/toast"
 import { useContextMenu, type ContextMenuItem } from "@/components/context-menu"
 import { EditProjectDialog } from "@/components/edit-project-dialog"
-import { CoverThumbnail } from "@/components/project-cover"
+import { COVER_RADIUS, CoverThumbnail } from "@/components/project-cover"
 import { ShareDialog } from "@/components/share-dialog"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -152,7 +152,7 @@ export function ProjectCard({ project }: { project: Project }) {
         onPointerDown={beginPress}
       >
         <div
-          className={`relative aspect-square overflow-hidden rounded-[7.7%] transition-transform duration-300 ease-out ${
+          className={`relative aspect-square overflow-hidden ${COVER_RADIUS} transition-transform duration-300 ease-out ${
             pressed
               ? "scale-[0.98]"
               : contextMenuOpen
@@ -160,7 +160,7 @@ export function ProjectCard({ project }: { project: Project }) {
                 : "group-hover:scale-[1.015]"
           }`}
         >
-          <CoverThumbnail project={project} className="h-full w-full rounded-[7.7%]" />
+          <CoverThumbnail project={project} className={`h-full w-full ${COVER_RADIUS}`} />
 
           <button
             type="button"
