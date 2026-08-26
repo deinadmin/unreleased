@@ -18,6 +18,7 @@ import {
   fetchPreview,
   hasPendingInvite,
   normalizeProjectID,
+  publicCoverURL,
   publicTrackURL,
 } from "@/lib/invites"
 import {
@@ -76,10 +77,14 @@ export function SharedProjectPage() {
           const decoded = await decodeProject(snapshot.data())
           if (cancelled || !decoded) return
           const playable = sharedPlayableProject({ ...decoded, ownerID: ownerId })
+          const publicCover = playable.coverStoragePath
+            ? publicCoverURL(ownerId, projectID)
+            : undefined
           setState({
             phase: "ready",
             project: {
               ...playable,
+              coverStoragePath: publicCover,
               tracks: playable.tracks.map((track) => ({
                 ...track,
                 storagePath: track.storagePath
@@ -102,7 +107,17 @@ export function SharedProjectPage() {
           }
           const pending = await hasPendingInvite(ownerId, projectID, user.uid)
           if (!cancelled) {
-            setState({ phase: "invite", preview, canJoin: preview.linkEnabled || pending })
+            setState({
+              phase: "invite",
+              preview: {
+                ...preview,
+                coverStoragePath:
+                  preview.linkEnabled && preview.coverStoragePath
+                    ? publicCoverURL(ownerId, projectID)
+                    : preview.coverStoragePath,
+              },
+              canJoin: preview.linkEnabled || pending,
+            })
           }
         },
       )

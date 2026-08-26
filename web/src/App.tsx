@@ -40,6 +40,11 @@ const ProfileNotificationsPage = lazy(() =>
     default: module.ProfileNotificationsPage,
   })),
 )
+const ProfilePlaybackPage = lazy(() =>
+  import("@/pages/profile-playback").then((module) => ({
+    default: module.ProfilePlaybackPage,
+  })),
+)
 const ProfileStoragePage = lazy(() =>
   import("@/pages/profile-storage").then((module) => ({ default: module.ProfileStoragePage })),
 )
@@ -145,6 +150,14 @@ export default function App() {
                     element={
                       <RequireAuth>
                         <ProfileNotificationsPage />
+                      </RequireAuth>
+                    }
+                  />
+                  <Route
+                    path="/profile/playback"
+                    element={
+                      <RequireAuth>
+                        <ProfilePlaybackPage />
                       </RequireAuth>
                     }
                   />

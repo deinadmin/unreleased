@@ -453,8 +453,8 @@ struct ProfileView: View {
             }
             .buttonStyle(.plain)
 
-        case "eq":
-            NavigationLink(value: EqualizerRoute()) {
+        case "playback":
+            NavigationLink(value: PlaybackRoute()) {
                 ProfileSettingsRowLabel(row: row)
             }
             .buttonStyle(.plain)
@@ -515,7 +515,7 @@ struct ProfileView: View {
     private var placeholderSettings: [ProfileSettingsRowLabel.Model] {
         [
             .init(id: "notifications", title: "Notifications", icon: "bell"),
-            .init(id: "eq", title: "EQ", icon: "slider.horizontal.3"),
+            .init(id: "playback", title: "Playback", icon: "speaker.wave.2"),
             .init(id: "storage", title: "Storage & Sync", icon: "icloud"),
             .init(id: "help", title: "Help & Support", icon: "questionmark.circle"),
             .init(id: "about", title: "About", icon: "info.circle"),

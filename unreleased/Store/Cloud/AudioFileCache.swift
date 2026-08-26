@@ -7,8 +7,8 @@ actor AudioFileCache {
 
     private var activeDownloads: [String: Task<URL, Error>] = [:]
 
-    private func downloadKey(trackID: UUID, directory: URL) -> String {
-        "\(trackID.uuidString)-\(directory.path)"
+    private func downloadKey(storagePath: String, directory: URL) -> String {
+        "\(storagePath)-\(directory.path)"
     }
 
     func localURL(for track: Track, in directory: URL) -> URL {
@@ -41,7 +41,7 @@ actor AudioFileCache {
             return localURL(for: track, in: directory)
         }
 
-        let key = downloadKey(trackID: track.id, directory: directory)
+        let key = downloadKey(storagePath: storagePath, directory: directory)
         if let existing = activeDownloads[key] {
             return try await existing.value
         }
@@ -55,9 +55,16 @@ actor AudioFileCache {
             if FileManager.default.fileExists(atPath: destination.path) {
                 try FileManager.default.removeItem(at: destination)
             }
-            try await CloudPaths.audioReference(storagePath: storagePath)
-                .writeToFileAsync(destination, onProgress: onProgress)
-            return destination
+            do {
+                try await CloudPaths.audioReference(storagePath: storagePath)
+                    .writeToFileAsync(destination, onProgress: onProgress)
+                return destination
+            } catch {
+                // A failed rendition probe must never leave a partial file that
+                // a later playback could mistake for a valid cached asset.
+                try? FileManager.default.removeItem(at: destination)
+                throw error
+            }
         }
 
         activeDownloads[key] = task

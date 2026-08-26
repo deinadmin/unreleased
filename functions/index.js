@@ -10,6 +10,17 @@ import { getFirestore, FieldValue, Timestamp } from "firebase-admin/firestore";
 import { getStorage } from "firebase-admin/storage";
 import { getMessaging } from "firebase-admin/messaging";
 import { logger } from "firebase-functions";
+import { renditionStoragePath } from "./audio-renditions.js";
+
+export {
+  backfillAudioRenditions,
+  cleanupAudioRenditions,
+  generateAudioRenditions,
+} from "./audio-renditions.js";
+export {
+  backfillAudioAccessIndexes,
+  syncProjectAudioAccess,
+} from "./audio-access.js";
 
 initializeApp();
 
@@ -536,6 +547,21 @@ function selectedPublicAudio(track) {
   return audio;
 }
 
+async function selectedPublicAudioPath(bucket, originalPath, requestedQuality) {
+  if (requestedQuality !== "standard" && requestedQuality !== "high") {
+    return originalPath;
+  }
+  const renditionPath = renditionStoragePath(originalPath, requestedQuality);
+  if (!renditionPath) return originalPath;
+  try {
+    const [exists] = await bucket.file(renditionPath).exists();
+    return exists ? renditionPath : originalPath;
+  } catch (error) {
+    logger.warn(`Could not resolve ${requestedQuality} rendition for ${originalPath}:`, error);
+    return originalPath;
+  }
+}
+
 function sanitizePublicTrack(track, ownerId, audioUrl) {
   if (!track || typeof track.id !== "string" || typeof track.title !== "string") {
     return null;
@@ -689,7 +715,15 @@ export const getPublicProject = onRequest(
         response.status(404).json({ error: "media-unavailable" });
         return;
       }
-      await streamPublicFile(request, response, audio.storagePath);
+      const storagePath = await selectedPublicAudioPath(
+        getStorage().bucket(),
+        audio.storagePath,
+        // Public share links always stream the data-efficient default. Higher
+        // quality is available after signing in and accepting the project,
+        // where normal per-user playback settings and Storage rules apply.
+        "standard"
+      );
+      await streamPublicFile(request, response, storagePath);
       return;
     }
 

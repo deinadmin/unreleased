@@ -416,6 +416,7 @@ final class ProjectStore {
             for version in track.displayedVersions {
                 deleteAudioFile(fileName: version.fileName)
                 deleteDownloadedFile(fileName: version.fileName)
+                deleteRenditionCacheFiles(originalStoragePath: version.storagePath)
             }
         }
         deleteCoverImage(fileName: project.coverImageFileName)
@@ -621,6 +622,7 @@ final class ProjectStore {
         for version in track.displayedVersions {
             deleteAudioFile(fileName: version.fileName)
             deleteDownloadedFile(fileName: version.fileName)
+            deleteRenditionCacheFiles(originalStoragePath: version.storagePath)
         }
         save()
 
@@ -661,6 +663,7 @@ final class ProjectStore {
             for version in track.displayedVersions {
                 deleteAudioFile(fileName: version.fileName)
                 deleteDownloadedFile(fileName: version.fileName)
+                deleteRenditionCacheFiles(originalStoragePath: version.storagePath)
             }
         }
 
@@ -837,6 +840,7 @@ final class ProjectStore {
 
         deleteAudioFile(fileName: deleted.fileName)
         deleteDownloadedFile(fileName: deleted.fileName)
+        deleteRenditionCacheFiles(originalStoragePath: deleted.storagePath)
         save()
 
         let service = syncService
@@ -1177,7 +1181,21 @@ final class ProjectStore {
         return version.fileSize <= 0 || size == version.fileSize
     }
 
-    func playbackURL(for version: TrackVersion) async -> URL? {
+    func playbackURL(
+        for version: TrackVersion,
+        quality: PlaybackQuality = .original
+    ) async -> URL? {
+        if let storagePath = version.storagePath,
+           let renditionURL = await playbackRenditionURL(
+               id: version.id,
+               duration: version.duration,
+               addedDate: version.addedDate,
+               originalStoragePath: storagePath,
+               quality: quality
+           ) {
+            return renditionURL
+        }
+
         let localURL = audioFilesURL.appendingPathComponent(version.fileName)
         if hasCachedAudio(for: version) {
             return localURL
@@ -1214,8 +1232,21 @@ final class ProjectStore {
     /// Prefers user download, then cache; otherwise streams once into the cache directory.
     func playbackURL(
         for track: Track,
+        quality: PlaybackQuality = .original,
         onProgress: (@Sendable (Double) -> Void)? = nil
     ) async -> URL? {
+        if let storagePath = track.storagePath,
+           let renditionURL = await playbackRenditionURL(
+               id: track.id,
+               duration: track.duration,
+               addedDate: track.addedDate,
+               originalStoragePath: storagePath,
+               quality: quality,
+               onProgress: onProgress
+           ) {
+            return renditionURL
+        }
+
         if hasDownloadedFile(for: track) {
             onProgress?(1)
             return downloadedFileURL(for: track)
@@ -1239,6 +1270,45 @@ final class ProjectStore {
             )
         } catch {
             print("ProjectStore: audio cache failed — \(error)")
+            return nil
+        }
+    }
+
+    private func playbackRenditionURL(
+        id: UUID,
+        duration: TimeInterval,
+        addedDate: Date,
+        originalStoragePath: String,
+        quality: PlaybackQuality,
+        onProgress: (@Sendable (Double) -> Void)? = nil
+    ) async -> URL? {
+        guard let renditionStoragePath = CloudPaths.audioRenditionStoragePath(
+            originalStoragePath: originalStoragePath,
+            quality: quality
+        ), let cacheFileName = CloudPaths.audioRenditionCacheFileName(
+            originalStoragePath: originalStoragePath,
+            quality: quality
+        ) else { return nil }
+
+        let cacheTrack = Track(
+            id: id,
+            title: "",
+            fileName: cacheFileName,
+            fileSize: 0,
+            duration: duration,
+            addedDate: addedDate,
+            storagePath: renditionStoragePath
+        )
+        do {
+            return try await AudioFileCache.shared.ensureLocalFile(
+                for: cacheTrack,
+                storagePath: renditionStoragePath,
+                in: audioFilesURL,
+                onProgress: onProgress
+            )
+        } catch {
+            // New uploads can be played before the transcoder finishes, and
+            // legacy non-WAV formats intentionally have no AAC rendition.
             return nil
         }
     }
@@ -1355,6 +1425,17 @@ final class ProjectStore {
     private func deleteDownloadedFile(fileName: String) {
         let url = downloadsURL.appendingPathComponent(fileName)
         try? FileManager.default.removeItem(at: url)
+    }
+
+    private func deleteRenditionCacheFiles(originalStoragePath: String?) {
+        guard let originalStoragePath else { return }
+        for quality in PlaybackQuality.allCases where quality != .original {
+            guard let fileName = CloudPaths.audioRenditionCacheFileName(
+                originalStoragePath: originalStoragePath,
+                quality: quality
+            ) else { continue }
+            deleteAudioFile(fileName: fileName)
+        }
     }
 
     private func cancelDownload(trackID: UUID) {

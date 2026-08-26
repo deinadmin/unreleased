@@ -109,7 +109,10 @@ function storagePathForURL(url) {
 function isTrackRequest(request) {
   if (request.method !== "GET") return false
   const storagePath = storagePathForURL(request.url)
-  if (!storagePath || !storagePath.includes("/audio/")) return false
+  if (
+    !storagePath ||
+    (!storagePath.includes("/audio/") && !storagePath.includes("/audio-renditions/"))
+  ) return false
   // Media-element requests use `audio`; Safari can expose an empty destination
   // for a byte-range request, so the Range header is the conservative fallback.
   return request.destination === "audio" || (request.destination === "" && request.headers.has("range"))

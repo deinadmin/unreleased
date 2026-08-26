@@ -127,6 +127,40 @@ enum CloudPaths {
         "users/\(userID)/audio/versions/\(versionID.uuidString)/audio.\(fileExtension)"
     }
 
+    static func audioRenditionStoragePath(
+        originalStoragePath: String,
+        quality: PlaybackQuality
+    ) -> String? {
+        guard quality != .original else { return nil }
+        let components = originalStoragePath.split(separator: "/").map(String.init)
+        guard components.count >= 4,
+              components[0] == "users",
+              components[2] == "audio"
+        else { return nil }
+
+        let userID = components[1]
+        if components.count == 6, components[3] == "versions" {
+            return "users/\(userID)/audio-renditions/versions/\(components[4])/\(quality.rawValue).m4a"
+        }
+        guard components.count == 4 else { return nil }
+        let trackID = URL(fileURLWithPath: components[3]).deletingPathExtension().lastPathComponent
+        return "users/\(userID)/audio-renditions/tracks/\(trackID)/\(quality.rawValue).m4a"
+    }
+
+    static func audioRenditionCacheFileName(
+        originalStoragePath: String,
+        quality: PlaybackQuality
+    ) -> String? {
+        guard let storagePath = audioRenditionStoragePath(
+            originalStoragePath: originalStoragePath,
+            quality: quality
+        ) else { return nil }
+        let safeStem = storagePath
+            .dropLast(".m4a".count)
+            .map { $0.isLetter || $0.isNumber || $0 == "-" ? $0 : "-" }
+        return "\(String(safeStem)).m4a"
+    }
+
     static func coverStoragePath(userID: String, fileName: String) -> String {
         "users/\(userID)/covers/\(fileName)"
     }

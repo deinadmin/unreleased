@@ -2,8 +2,18 @@ rules_version = '2';
 
 service firebase.storage {
   match /b/{bucket}/o {
+    function isOwner(userId) {
+      return request.auth != null && request.auth.uid == userId;
+    }
+
+    function isAnonymousGuest() {
+      return request.auth != null
+        && request.auth.token.firebase.sign_in_provider == 'anonymous';
+    }
+
     // Version audio has a dedicated path so visibility is enforced server-side.
-    // A public version is readable only by the owner or an accepted project invitee.
+    // A public version is readable only by the owner, an accepted project
+    // invitee, or an anonymous share-link guest while link sharing is enabled.
     match /users/{userId}/audio/versions/{versionId}/{fileName} {
       function collaboratorCanReadVersion() {
         let access = firestore.get(
@@ -33,9 +43,9 @@ service firebase.storage {
       // invitee grant; link previews use the public streaming endpoint.
       allow read: if request.auth != null
         && (
-          request.auth.uid == userId
+          isOwner(userId)
           || (
-            request.auth.token.firebase.sign_in_provider == 'anonymous'
+            isAnonymousGuest()
               ? linkSharedCanReadVersion()
               : collaboratorCanReadVersion()
           )
@@ -45,17 +55,133 @@ service firebase.storage {
     }
 
     match /users/{userId}/audio/{fileName} {
-      // Any authenticated user can read (stream/download) audio so shared
-      // project recipients can play and cache tracks from the owner's path.
-      allow read: if request.auth != null;
+      function collaboratorCanReadTrack() {
+        let access = firestore.get(
+          /databases/(default)/documents/users/$(userId)/trackFileAccess/$(fileName)
+        );
+        return firestore.exists(
+          /databases/(default)/documents/users/$(userId)/projects/$(access.data.projectID)/invitees/$(request.auth.uid)
+        );
+      }
+
+      function linkSharedCanReadTrack() {
+        let access = firestore.get(
+          /databases/(default)/documents/users/$(userId)/trackFileAccess/$(fileName)
+        );
+        return firestore.get(
+          /databases/(default)/documents/users/$(userId)/projectPreviews/$(access.data.projectID)
+        ).data.linkEnabled == true;
+      }
+
+      allow read: if request.auth != null
+        && (
+          isOwner(userId)
+          || (
+            isAnonymousGuest()
+              ? linkSharedCanReadTrack()
+              : collaboratorCanReadTrack()
+          )
+        );
 
       // Only the owner can upload or delete their own audio files.
       allow write: if request.auth != null && request.auth.uid == userId;
     }
 
+    // Server-generated AAC copies inherit the original track's project access.
+    match /users/{userId}/audio-renditions/tracks/{trackId}/{fileName} {
+      function collaboratorCanReadTrackRendition() {
+        let access = firestore.get(
+          /databases/(default)/documents/users/$(userId)/trackAccess/$(trackId)
+        );
+        return firestore.exists(
+          /databases/(default)/documents/users/$(userId)/projects/$(access.data.projectID)/invitees/$(request.auth.uid)
+        );
+      }
+
+      function linkSharedCanReadTrackRendition() {
+        let access = firestore.get(
+          /databases/(default)/documents/users/$(userId)/trackAccess/$(trackId)
+        );
+        return firestore.get(
+          /databases/(default)/documents/users/$(userId)/projectPreviews/$(access.data.projectID)
+        ).data.linkEnabled == true;
+      }
+
+      allow read: if request.auth != null
+        && (
+          isOwner(userId)
+          || (
+            isAnonymousGuest()
+              ? linkSharedCanReadTrackRendition()
+              : collaboratorCanReadTrackRendition()
+          )
+        );
+      allow write: if false;
+    }
+
+    // Renditions of version audio preserve the version visibility grant used
+    // by the corresponding original under audio/versions/{versionId}.
+    match /users/{userId}/audio-renditions/versions/{versionId}/{fileName} {
+      function collaboratorCanReadRendition() {
+        let access = firestore.get(
+          /databases/(default)/documents/users/$(userId)/versionAccess/$(versionId)
+        );
+        return access.data.isPublic == true
+          && firestore.exists(
+            /databases/(default)/documents/users/$(userId)/projects/$(access.data.projectID)/invitees/$(request.auth.uid)
+          );
+      }
+
+      function linkSharedCanReadRendition() {
+        let access = firestore.get(
+          /databases/(default)/documents/users/$(userId)/versionAccess/$(versionId)
+        );
+        return access.data.isPublic == true
+          && firestore.get(
+            /databases/(default)/documents/users/$(userId)/projectPreviews/$(access.data.projectID)
+          ).data.linkEnabled == true;
+      }
+
+      allow read: if request.auth != null
+        && (
+          isOwner(userId)
+          || (
+            isAnonymousGuest()
+              ? linkSharedCanReadRendition()
+              : collaboratorCanReadRendition()
+          )
+        );
+      allow write: if false;
+    }
+
     match /users/{userId}/covers/{fileName} {
-      // Any authenticated user can download cover images for shared projects.
-      allow read: if request.auth != null;
+      function collaboratorCanReadCover() {
+        let access = firestore.get(
+          /databases/(default)/documents/users/$(userId)/coverFileAccess/$(fileName)
+        );
+        return firestore.exists(
+          /databases/(default)/documents/users/$(userId)/projects/$(access.data.projectID)/invitees/$(request.auth.uid)
+        );
+      }
+
+      function linkSharedCanReadCover() {
+        let access = firestore.get(
+          /databases/(default)/documents/users/$(userId)/coverFileAccess/$(fileName)
+        );
+        return firestore.get(
+          /databases/(default)/documents/users/$(userId)/projectPreviews/$(access.data.projectID)
+        ).data.linkEnabled == true;
+      }
+
+      allow read: if request.auth != null
+        && (
+          isOwner(userId)
+          || (
+            isAnonymousGuest()
+              ? linkSharedCanReadCover()
+              : collaboratorCanReadCover()
+          )
+        );
 
       // Only the owner can upload or delete their own cover images. Clients
       // compress covers to <= 1.5 MB; the 2 MB ceiling rejects full-size photos.

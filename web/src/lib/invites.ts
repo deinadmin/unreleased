@@ -54,6 +54,18 @@ export function publicTrackURL(ownerUID: string, projectID: string, trackID: str
   return url.toString()
 }
 
+/** Public proxy URL for link-preview cover artwork. */
+export function publicCoverURL(ownerUID: string, projectID: string): string {
+  const firebaseProjectID = import.meta.env.VITE_FIREBASE_PROJECT_ID
+  const url = new URL(
+    `https://us-central1-${firebaseProjectID}.cloudfunctions.net/getPublicProject`,
+  )
+  url.searchParams.set("ownerId", ownerUID)
+  url.searchParams.set("projectId", projectID.toLowerCase())
+  url.searchParams.set("media", "cover")
+  return url.toString()
+}
+
 const previewDoc = (ownerUID: string, projectID: string) =>
   doc(db, "users", ownerUID, "projectPreviews", projectID)
 const inviteesCol = (ownerUID: string, projectID: string) =>

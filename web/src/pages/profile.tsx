@@ -9,7 +9,7 @@ import {
   Infinity as InfinityIcon,
   Info,
   Loader2,
-  SlidersHorizontal,
+  Volume2,
   Star,
   User,
 } from "lucide-react"
@@ -171,7 +171,7 @@ export function ProfilePage() {
             to="/profile/notifications"
           />
           <SettingsDivider />
-          <SettingsRow icon={<SlidersHorizontal className="size-4" />} title="EQ" chevron to="/profile/eq" />
+          <SettingsRow icon={<Volume2 className="size-4" />} title="Playback" chevron to="/profile/playback" />
           <SettingsDivider />
           <SettingsRow
             icon={<Cloud className="size-4" />}

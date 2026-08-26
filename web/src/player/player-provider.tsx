@@ -9,9 +9,14 @@ import {
   type ReactNode,
 } from "react"
 import { toast } from "@/lib/toast"
-import { downloadURL } from "@/lib/storage-urls"
+import { playbackSource } from "@/lib/storage-urls"
 import { preparePlayedTrackCache } from "@/lib/track-cache"
 import { equalizerRouting } from "@/player/equalizer"
+import {
+  loadPlaybackQuality,
+  persistPlaybackQuality,
+  type PlaybackQuality,
+} from "@/player/playback-quality"
 import type { Project, Track } from "@/lib/types"
 
 interface PlayerContextValue {
@@ -30,6 +35,8 @@ interface PlayerContextValue {
   progress: number
   /** The underlying element — waveforms rAF-read currentTime for smooth motion. */
   audio: HTMLAudioElement
+  playbackQuality: PlaybackQuality
+  setPlaybackQuality: (quality: PlaybackQuality) => void
   /**
    * Playback fraction (0…1) for every rAF-driven surface. Prefer this over
    * reading the element: it holds the resume position steady while a version
@@ -75,6 +82,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const [duration, setDuration] = useState(0)
   const [progress, setProgress] = useState(0)
   const [expanded, setExpanded] = useState(false)
+  const [playbackQuality, setPlaybackQualityState] = useState(loadPlaybackQuality)
   // Monotonic token so a stale async URL resolution can't hijack playback.
   const loadToken = useRef(0)
   const projectRef = useRef<Project | null>(null)
@@ -89,6 +97,11 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     const total = audio.duration
     return Number.isFinite(total) && total > 0 ? audio.currentTime / total : 0
   }, [audio])
+
+  const setPlaybackQuality = useCallback((quality: PlaybackQuality) => {
+    setPlaybackQualityState(quality)
+    persistPlaybackQuality(quality)
+  }, [])
 
   const play = useCallback(
     (nextTrack: Track, nextProject: Project) => {
@@ -112,20 +125,23 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       setDuration(nextTrack.duration)
       setProgress(0)
       setIsLoading(true)
-      downloadURL(storagePath)
-        .then((url) => {
+      playbackSource(storagePath, playbackQuality)
+        .then((source) => {
           if (loadToken.current !== token) return
-          preparePlayedTrackCache(storagePath, nextTrack.fileSize)
+          preparePlayedTrackCache(
+            source.storagePath,
+            source.isOriginal ? nextTrack.fileSize : 0,
+          )
           // The equalizer decides whether this load has to be a CORS request.
           equalizerRouting.prepare(audio)
-          audio.src = url
+          audio.src = source.url
           audio.currentTime = 0
           return audio.play().catch((error) => {
             // A CORS load the storage bucket refuses is recoverable: retry the
             // same source plainly, leaving the equalizer switched out.
             if (loadToken.current !== token) return
             if (!equalizerRouting.recoverFromLoadFailure(audio)) throw error
-            audio.src = url
+            audio.src = source.url
             audio.currentTime = 0
             return audio.play()
           })
@@ -145,7 +161,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
           if (loadToken.current === token) setIsLoading(false)
         })
     },
-    [audio],
+    [audio, playbackQuality],
   )
 
   const switchToVersion = useCallback(
@@ -182,10 +198,13 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         setIsPlaying(!audio.paused)
       }
 
-      downloadURL(storagePath)
-        .then((url) => {
+      playbackSource(storagePath, playbackQuality)
+        .then((source) => {
           if (loadToken.current !== token) return
-          preparePlayedTrackCache(storagePath, nextTrack.fileSize)
+          preparePlayedTrackCache(
+            source.storagePath,
+            source.isOriginal ? nextTrack.fileSize : 0,
+          )
 
           const load = (canRetryWithoutCORS: boolean) => {
             // The equalizer decides whether this load has to be a CORS request.
@@ -216,7 +235,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
             }
             audio.addEventListener("loadedmetadata", onReady, { once: true })
             audio.addEventListener("error", onError, { once: true })
-            audio.src = url
+            audio.src = source.url
           }
           load(true)
         })
@@ -231,7 +250,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
           toast("Couldn't play this version. Check your connection and try again.")
         })
     },
-    [audio],
+    [audio, playbackQuality],
   )
 
   const togglePlayPause = useCallback(() => {
@@ -356,6 +375,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       duration,
       progress,
       audio,
+      playbackQuality,
+      setPlaybackQuality,
       getProgress,
       play,
       switchToVersion,
@@ -367,7 +388,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       expanded,
       setExpanded,
     }),
-    [project, track, isPlaying, isLoading, duration, progress, audio, getProgress, play, switchToVersion, togglePlayPause, seek, next, previous, stop, expanded],
+    [project, track, isPlaying, isLoading, duration, progress, audio, playbackQuality, setPlaybackQuality, getProgress, play, switchToVersion, togglePlayPause, seek, next, previous, stop, expanded],
   )
 
   return <PlayerContext.Provider value={value}>{children}</PlayerContext.Provider>

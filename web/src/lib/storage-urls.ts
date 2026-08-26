@@ -1,5 +1,9 @@
 import { getDownloadURL, ref } from "firebase/storage"
 import { storage } from "./firebase"
+import {
+  renditionStoragePath,
+  type PlaybackQuality,
+} from "@/player/playback-quality"
 
 const STORAGE_KEY_PREFIX = "downloadURL:"
 
@@ -58,6 +62,59 @@ export function downloadURL(storagePath: string): Promise<string> {
     cache.set(storagePath, promise)
   }
   return promise
+}
+
+export interface PlaybackSource {
+  url: string
+  storagePath: string
+  isOriginal: boolean
+}
+
+/** Resolves the preferred AAC rendition and safely falls back to the original. */
+export async function playbackSource(
+  originalStoragePath: string,
+  quality: PlaybackQuality,
+): Promise<PlaybackSource> {
+  if (quality === "original") {
+    return {
+      url: await downloadURL(originalStoragePath),
+      storagePath: originalStoragePath,
+      isOriginal: true,
+    }
+  }
+
+  // Public share URLs are resolved by the authorized streaming function, which
+  // always serves Standard quality (with original fallback) server-side. A
+  // listener must sign in and accept the project before personal High/Original
+  // settings apply.
+  if (/^https?:\/\//.test(originalStoragePath)) {
+    const url = new URL(originalStoragePath)
+    url.searchParams.set("quality", "standard")
+    return { url: url.toString(), storagePath: originalStoragePath, isOriginal: false }
+  }
+
+  const renditionPath = renditionStoragePath(originalStoragePath, quality)
+  if (renditionPath) {
+    try {
+      return {
+        // Do a fresh metadata lookup for renditions. Unlike originals, these
+        // are created asynchronously and can be replaced by a retry/backfill;
+        // a persisted download token could therefore be stale.
+        url: await getDownloadURL(ref(storage, renditionPath)),
+        storagePath: renditionPath,
+        isOriginal: false,
+      }
+    } catch {
+      // A new upload may still be transcoding, or a legacy format may not have
+      // renditions. The original remains the always-playable source of truth.
+    }
+  }
+
+  return {
+    url: await downloadURL(originalStoragePath),
+    storagePath: originalStoragePath,
+    isOriginal: true,
+  }
 }
 
 /** Clears a URL that is stale because its object was replaced or its token was revoked. */

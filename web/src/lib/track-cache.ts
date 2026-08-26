@@ -2,6 +2,27 @@ const TRACK_CACHE_NAME = "unreleased-played-tracks-v1"
 const TRACK_METADATA_CACHE_NAME = "unreleased-played-track-metadata-v1"
 const TRACK_CACHE_PATH = "/__unreleased_cache__/played-track"
 
+function relatedStoragePaths(storagePath: string): string[] {
+  const paths = [storagePath]
+  const version = /^users\/([^/]+)\/audio\/versions\/([^/]+)\/[^/]+$/.exec(storagePath)
+  if (version) {
+    paths.push(
+      `users/${version[1]}/audio-renditions/versions/${version[2]}/standard.m4a`,
+      `users/${version[1]}/audio-renditions/versions/${version[2]}/high.m4a`,
+    )
+    return paths
+  }
+  const track = /^users\/([^/]+)\/audio\/([^/]+)$/.exec(storagePath)
+  if (track) {
+    const trackID = track[2].replace(/\.[^.]+$/, "")
+    paths.push(
+      `users/${track[1]}/audio-renditions/tracks/${trackID}/standard.m4a`,
+      `users/${track[1]}/audio-renditions/tracks/${trackID}/high.m4a`,
+    )
+  }
+  return paths
+}
+
 type CacheMode = "cors" | "opaque"
 
 function cacheRequest(storagePath: string, mode: CacheMode): Request {
@@ -46,10 +67,13 @@ export function preparePlayedTrackCache(storagePath: string, size: number): void
 
 /** Removes both CORS and plain-playback variants of a deleted audio object. */
 export function invalidatePlayedTrackCache(storagePath: string): void {
+  const storagePaths = relatedStoragePaths(storagePath)
   void serviceWorkerTarget().then((worker) => {
-    worker?.postMessage({
-      type: "UNRELEASED_TRACK_CACHE_DELETE",
-      storagePath,
+    storagePaths.forEach((path) => {
+      worker?.postMessage({
+        type: "UNRELEASED_TRACK_CACHE_DELETE",
+        storagePath: path,
+      })
     })
   })
 
@@ -59,10 +83,12 @@ export function invalidatePlayedTrackCache(storagePath: string): void {
   void Promise.all([caches.open(TRACK_CACHE_NAME), caches.open(TRACK_METADATA_CACHE_NAME)])
     .then(([trackCache, metadataCache]) =>
       Promise.all(
-        (["cors", "opaque"] as const).flatMap((mode) => {
-          const request = cacheRequest(storagePath, mode)
-          return [trackCache.delete(request), metadataCache.delete(request)]
-        }),
+        storagePaths.flatMap((path) =>
+          (["cors", "opaque"] as const).flatMap((mode) => {
+            const request = cacheRequest(path, mode)
+            return [trackCache.delete(request), metadataCache.delete(request)]
+          }),
+        ),
       ),
     )
     .catch(() => {})

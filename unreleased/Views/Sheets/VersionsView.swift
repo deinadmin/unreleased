@@ -384,7 +384,7 @@ struct VersionsView: View {
         }
 
         Task {
-            let url = await store.playbackURL(for: version)
+            let url = await store.playbackURL(for: version, quality: player.playbackQuality)
             guard loadingVersionID == version.id else { return }
             loadingVersionID = nil
             guard let url else {

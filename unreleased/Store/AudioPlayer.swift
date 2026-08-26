@@ -32,6 +32,12 @@ final class AudioPlayer {
     /// Universal — items may come from any project and persist across project changes.
     private(set) var queue: [QueuedItem] = []
 
+    var playbackQuality: PlaybackQuality {
+        didSet {
+            UserDefaults.standard.set(playbackQuality.rawValue, forKey: Self.playbackQualityKey)
+        }
+    }
+
     var isEqualizerEnabled: Bool {
         didSet {
             applyEqualizerSettings()
@@ -83,6 +89,7 @@ final class AudioPlayer {
     nonisolated private let remoteCommandTargetStorage = RemoteCommandTargetStorage()
 
     private let trackRestartThreshold: TimeInterval = 1.5
+    private static let playbackQualityKey = "audio.playback.quality"
     private static let equalizerEnabledKey = "audio.equalizer.enabled"
     private static let equalizerGainsKey = "audio.equalizer.gains"
     private static let customEqualizerPresetsKey = "audio.equalizer.customPresets"
@@ -96,6 +103,8 @@ final class AudioPlayer {
 
     init(store: ProjectStore) {
         self.store = store
+        self.playbackQuality = UserDefaults.standard.string(forKey: Self.playbackQualityKey)
+            .flatMap(PlaybackQuality.init(rawValue:)) ?? .standard
         let savedGains = (UserDefaults.standard.array(forKey: Self.equalizerGainsKey) as? [NSNumber])?
             .map(\.floatValue)
         if let savedGains,
@@ -312,7 +321,7 @@ final class AudioPlayer {
         refreshNowPlayingArtwork(for: project)
         updateNowPlayingInfo()
 
-        if store.hasCachedAudio(for: track) {
+        if playbackQuality == .original, store.hasCachedAudio(for: track) {
             isLoadingAudio = false
             loadingProgress = 0
             startPlayback(
@@ -328,7 +337,10 @@ final class AudioPlayer {
         loadingProgress = 0
 
         loadTask = Task {
-            let url = await store.playbackURL(for: track) { [weak self] progress in
+            let url = await store.playbackURL(
+                for: track,
+                quality: playbackQuality
+            ) { [weak self] progress in
                 Task { @MainActor in
                     guard let self, self.isLoadingAudio, self.currentTrack?.id == track.id else { return }
                     self.loadingProgress = progress
@@ -391,7 +403,8 @@ final class AudioPlayer {
         refreshNowPlayingArtwork(for: project)
         updateNowPlayingInfo()
 
-        if store.hasCachedAudio(for: track) || store.hasDownloadedFile(for: track) {
+        if playbackQuality == .original,
+           (store.hasCachedAudio(for: track) || store.hasDownloadedFile(for: track)) {
             startPlayback(
                 track: track,
                 in: project,
@@ -405,7 +418,10 @@ final class AudioPlayer {
         isLoadingAudio = true
         loadingProgress = 0
         loadTask = Task {
-            let url = await store.playbackURL(for: track) { [weak self] progress in
+            let url = await store.playbackURL(
+                for: track,
+                quality: playbackQuality
+            ) { [weak self] progress in
                 Task { @MainActor in
                     guard let self, self.isLoadingAudio, self.currentTrack?.id == track.id else { return }
                     self.loadingProgress = progress

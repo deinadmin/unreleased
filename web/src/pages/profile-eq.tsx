@@ -60,7 +60,7 @@ export function ProfileEqPage() {
     <div className="min-h-dvh overflow-x-clip">
       <AppHeader />
       <main className="mx-auto w-full max-w-lg px-5 pb-40">
-        <SettingsPageHeader backTo="/profile" backLabel="Profile" title="EQ" />
+        <SettingsPageHeader backTo="/profile/playback" backLabel="Playback" title="EQ" />
 
         {/* ── Curve editor ───────────────────────────────────────────── */}
         <section className="rise-in">

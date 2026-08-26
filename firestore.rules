@@ -49,6 +49,24 @@ service cloud.firestore {
         allow read, write: if request.auth != null && request.auth.uid == userId;
       }
 
+      // Server-maintained mapping from legacy flat audio paths to their
+      // project. Storage Rules use it to authorize owners, accepted invitees,
+      // and public-link guests without exposing the index to clients.
+      match /trackAccess/{trackId} {
+        allow read, write: if false;
+      }
+
+      // Exact legacy filename index used because Storage Rules cannot strip a
+      // file extension from a wildcard safely.
+      match /trackFileAccess/{fileName} {
+        allow read, write: if false;
+      }
+
+      // Exact project-cover filename to project mapping for Storage Rules.
+      match /coverFileAccess/{fileName} {
+        allow read, write: if false;
+      }
+
       // ── Notifications ──────────────────────────────────────────────────────
       // The recipient reads/updates/deletes their own notifications. The sender
       // may refresh or delete an invite notification for an idempotent re-invite
