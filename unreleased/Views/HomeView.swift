@@ -557,16 +557,10 @@ private struct ProjectCard: View {
                             minHeight: overlayControlRadius * 2
                         )
                         .padding(.horizontal, project.tracks.isEmpty ? 12 : 0)
-                        .coverControlContrast(
-                            for: coverImage,
-                            fallbackGradient: project.gradient,
-                            sampleRect: project.tracks.isEmpty
-                                ? CGRect(x: 0.2, y: 0.75, width: 0.75, height: 0.2)
-                                : CGRect(x: 0.75, y: 0.75, width: 0.2, height: 0.2)
-                        )
+                        .foregroundStyle(.black)
                         .contentShape(Capsule())
                     }
-                    .glassEffect(.clear.interactive(), in: Capsule())
+                    .glassEffect(.clear.interactive().tint(.white.opacity(0.6)), in: Capsule())
                     .padding(overlayControlInset)
                     .accessibilityLabel(
                         project.tracks.isEmpty ? "Add first track" : (showsPause ? "Pause" : "Play")

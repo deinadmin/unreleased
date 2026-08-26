@@ -119,7 +119,9 @@ struct NotificationsView: View {
 
 private struct NotificationRow: View {
     let notification: AppNotification
-    private let cardCornerRadius: CGFloat = 16
+    private let contentInset: CGFloat = 14
+    private let projectCoverCornerRadius: CGFloat = 12
+    private var cardCornerRadius: CGFloat { contentInset + projectCoverCornerRadius }
 
     var body: some View {
         HStack(spacing: 12) {
@@ -148,7 +150,7 @@ private struct NotificationRow: View {
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(.tertiary)
         }
-        .padding(14)
+        .padding(contentInset)
         .background(
             Color(.secondarySystemBackground),
             in: RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous)
@@ -161,7 +163,8 @@ private struct NotificationRow: View {
                 CloudProjectCoverThumbnail(
                     gradient: notification.projectGradient ?? GradientTheme.presets[4],
                     coverStoragePath: notification.coverStoragePath,
-                    size: 48
+                    size: 48,
+                    cornerRadiusOverride: projectCoverCornerRadius
                 )
             } else {
                 ZStack {

@@ -21,8 +21,9 @@ struct PlaybackView: View {
     private var qualitySection: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Playback Quality")
-                .font(.headline)
-                .padding(.horizontal, 4)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .padding(.leading, 4)
 
             VStack(spacing: 0) {
                 ForEach(Array(PlaybackQuality.allCases.enumerated()), id: \.element.id) { index, quality in
@@ -42,19 +43,15 @@ struct PlaybackView: View {
                 Color(.secondarySystemBackground),
                 in: RoundedRectangle(cornerRadius: 14, style: .continuous)
             )
-
-            Text("If the selected quality is still processing or unavailable, the original file plays automatically.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 4)
         }
     }
 
     private var equalizerSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Audio")
-                .font(.headline)
-                .padding(.horizontal, 4)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .padding(.leading, 4)
 
             NavigationLink(value: EqualizerRoute()) {
                 HStack(spacing: 12) {

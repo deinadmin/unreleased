@@ -201,7 +201,7 @@ struct ProjectDetailView: View {
             zoomNamespace: projectZoomNamespace,
             ownerLabel: ownerLabel,
             isImporting: isImporting,
-            onCoverLongPress: project.isShared ? nil : { isShowingEdit = true },
+            onEditLongPress: project.isShared ? nil : { isShowingEdit = true },
             onAddTracks: project.isShared ? nil : { requestAddTracks() }
         )
     }
@@ -413,7 +413,7 @@ private struct ProjectDetailHeaderSection: View, Equatable {
     let zoomNamespace: Namespace.ID
     let ownerLabel: String
     var isImporting: Bool = false
-    var onCoverLongPress: (() -> Void)? = nil
+    var onEditLongPress: (() -> Void)? = nil
     var onAddTracks: (() -> Void)? = nil
 
     @State private var longPressHapticTick = 0
@@ -490,8 +490,7 @@ private struct ProjectDetailHeaderSection: View, Equatable {
         )
         .matchedTransitionSource(id: project.id, in: zoomNamespace)
         .onLongPressGesture(minimumDuration: 0.5) {
-            longPressHapticTick &+= 1
-            onCoverLongPress?()
+            performEditLongPress()
         }
     }
 
@@ -502,6 +501,9 @@ private struct ProjectDetailHeaderSection: View, Equatable {
                 .foregroundStyle(.primary)
                 .multilineTextAlignment(.center)
                 .lineLimit(2)
+                .onLongPressGesture(minimumDuration: 0.5) {
+                    performEditLongPress()
+                }
 
             Text("\(project.trackCountText) • \(project.formattedDuration) • by \(ownerLabel.isEmpty ? "…" : "@\(ownerLabel)")")
                 .font(.system(size: 14))
@@ -511,6 +513,11 @@ private struct ProjectDetailHeaderSection: View, Equatable {
         }
         .frame(maxWidth: .infinity)
         .accessibilityElement(children: .combine)
+    }
+
+    private func performEditLongPress() {
+        longPressHapticTick &+= 1
+        onEditLongPress?()
     }
 
     private var projectActions: some View {
@@ -572,7 +579,7 @@ private struct AddTracksCircleButton: View {
                 }
 
                 if showsFirstTrackLabel {
-                    Text(isImporting ? "Importing…" : "Add your first track")
+                    Text(isImporting ? "Importing…" : "Add first track")
                         .font(.subheadline.weight(.semibold))
                         .lineLimit(1)
                         .fixedSize(horizontal: true, vertical: false)
@@ -596,7 +603,7 @@ private struct AddTracksCircleButton: View {
         .accessibilityLabel(
             isImporting
                 ? "Importing tracks"
-                : (showsFirstTrackLabel ? "Add your first track" : "Add tracks")
+                : (showsFirstTrackLabel ? "Add first track" : "Add tracks")
         )
         .animation(
             .spring(response: 0.42, dampingFraction: 0.82),

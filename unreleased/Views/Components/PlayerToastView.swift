@@ -118,25 +118,29 @@ struct PlayerToastBanner: View {
     let toast: PlayerToastCenter.Toast
 
     var body: some View {
-        HStack(spacing: 8) {
-            switch toast.icon {
-            case .system(let systemImage):
-                Image(systemName: systemImage)
-                    .font(.system(size: 14, weight: .semibold))
-            case .spinner:
-                TwoToneCircleSpinner(diameter: 14, lineWidth: 1.5)
-                    .environment(\.colorScheme, .dark)
-            }
+        Button(action: {}) {
+            HStack(spacing: 8) {
+                switch toast.icon {
+                case .system(let systemImage):
+                    Image(systemName: systemImage)
+                        .font(.system(size: 14, weight: .semibold))
+                case .spinner:
+                    TwoToneCircleSpinner(diameter: 14, lineWidth: 1.5)
+                        .environment(\.colorScheme, .dark)
+                }
 
-            Text(toast.message)
-                .font(.system(size: 14, weight: .medium))
+                Text(toast.message)
+                    .font(.system(size: 14, weight: .medium))
+            }
+            .foregroundStyle(.white)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
         }
-        .foregroundStyle(.white)
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
+        .buttonStyle(.plain)
         .glassEffect(
             .regular.interactive().tint(PlayerChrome.surfaceBackground),
             in: .capsule
         )
+        .accessibilityRemoveTraits(.isButton)
     }
 }
