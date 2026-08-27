@@ -80,6 +80,8 @@ type PageState =
   /** Link disabled (or guest sessions unavailable) — sign in to check access. */
   | { phase: "auth-required"; preview: ProjectPreview | null }
   | { phase: "not-found" }
+  /** The link is live but its projection could not be loaded — retryable. */
+  | { phase: "error" }
   /** Signed-in user who can't read the project yet but may join. */
   | { phase: "invite"; preview: ProjectPreview; canJoin: boolean }
   | { phase: "ready"; project: Project }
@@ -95,6 +97,7 @@ export function SharedProjectPage() {
   const inLibrary = useProject(projectID) !== undefined
   const [state, setState] = useState<PageState>({ phase: "loading" })
   const [accepting, setAccepting] = useState(false)
+  const [reloadToken, setReloadToken] = useState(0)
 
   useEffect(() => {
     if (initializing || !ownerId || !projectID) return
@@ -113,18 +116,26 @@ export function SharedProjectPage() {
     // browser would mean they had already been sent to it. Owners and accepted
     // invitees keep the live Firestore subscription.
     const start = async () => {
-      const [preview, publicProject] = await Promise.all([
+      const [preview, result] = await Promise.all([
         fetchPreview(ownerId, projectID),
         fetchPublicProject(ownerId, projectID),
       ])
       if (cancelled) return
 
-      if (publicProject) {
-        const project = await publicListenProject(publicProject, ownerId)
+      if (result.status === "ok") {
+        const project = await publicListenProject(result.project, ownerId)
         if (!cancelled) setState({ phase: "ready", project })
         return
       }
-      // No public projection: the link is off, or it was never shared.
+      // The projection is the only way a non-member sees tracks or artwork, so
+      // a transport/App Check failure is not evidence the project is gone.
+      // Saying "not found" for a link that is demonstrably live sends the
+      // visitor away from a page a retry would have fixed.
+      if (result.status === "error") {
+        setState({ phase: "error" })
+        return
+      }
+      // `unavailable`: the link is off, or it was never shared.
       if (!preview) {
         setState({ phase: "not-found" })
         return
@@ -145,7 +156,7 @@ export function SharedProjectPage() {
     return () => {
       cancelled = true
     }
-  }, [initializing, user, isSignedIn, ownerId, projectID, signInAsGuest])
+  }, [initializing, user, isSignedIn, ownerId, projectID, signInAsGuest, reloadToken])
 
   // Owner or already-accepted: the project view handles it.
   if (inLibrary) {
@@ -201,11 +212,37 @@ export function SharedProjectPage() {
           />
         )}
 
+        {state.phase === "error" && (
+          <CenteredMessage
+            title="Couldn't load this project"
+            body="The share link is still active. Check your connection and try again."
+          >
+            <button
+              type="button"
+              onClick={() => {
+                setState({ phase: "loading" })
+                setReloadToken((token) => token + 1)
+              }}
+              className="mt-7 flex h-12 items-center rounded-full bg-foreground px-8 text-[15px] font-bold text-background transition hover:opacity-90 active:scale-[0.98]"
+            >
+              Try again
+            </button>
+          </CenteredMessage>
+        )}
+
         {state.phase === "auth-required" && (
           <CenteredMessage
-            title="Project not found"
-            body="This link may be wrong, or the project is no longer shared."
-          />
+            title="This project isn't shared publicly"
+            body="Its share link is turned off. Sign in to check whether you were invited."
+          >
+            <button
+              type="button"
+              onClick={() => navigate(signInPath)}
+              className="mt-7 flex h-12 items-center rounded-full bg-foreground px-8 text-[15px] font-bold text-background transition hover:opacity-90 active:scale-[0.98]"
+            >
+              Sign in
+            </button>
+          </CenteredMessage>
         )}
 
         {state.phase === "invite" && (

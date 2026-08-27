@@ -75,22 +75,22 @@ export async function playbackSource(
   originalStoragePath: string,
   quality: PlaybackQuality,
 ): Promise<PlaybackSource> {
+  // Public share links arrive as absolute, short-lived V4 Storage signatures
+  // that `getPublicProject` already resolved to Standard quality (falling back
+  // to the original) server-side. A V4 signature covers the query string, so
+  // appending anything to it — including a quality hint — makes Storage reject
+  // the request with SignatureDoesNotMatch. Pass it through untouched; personal
+  // High/Original settings apply once a listener signs in and saves the project.
+  if (/^https?:\/\//.test(originalStoragePath)) {
+    return { url: originalStoragePath, storagePath: originalStoragePath, isOriginal: false }
+  }
+
   if (quality === "original") {
     return {
       url: await downloadURL(originalStoragePath),
       storagePath: originalStoragePath,
       isOriginal: true,
     }
-  }
-
-  // Public share URLs are resolved by the authorized streaming function, which
-  // always serves Standard quality (with original fallback) server-side. A
-  // listener must sign in and accept the project before personal High/Original
-  // settings apply.
-  if (/^https?:\/\//.test(originalStoragePath)) {
-    const url = new URL(originalStoragePath)
-    url.searchParams.set("quality", "standard")
-    return { url: url.toString(), storagePath: originalStoragePath, isOriginal: false }
   }
 
   const renditionPath = renditionStoragePath(originalStoragePath, quality)

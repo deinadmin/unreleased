@@ -72,6 +72,19 @@ export interface PublicProject {
 }
 
 /**
+ * Outcome of a public-projection load.
+ *
+ * `unavailable` is the endpoint's deliberate single answer for "link is off,
+ * never shared, or no such project". Everything else is `error`: a share link
+ * that is live must not be reported to the visitor as missing, and the two
+ * cases need different copy and a retry affordance.
+ */
+export type PublicProjectResult =
+  | { status: "ok"; project: PublicProject }
+  | { status: "unavailable" }
+  | { status: "error"; reason: "app-check" | "network" | "server" }
+
+/**
  * Loads the sanitized public projection of a shared project.
  *
  * Listeners who are not the owner or an accepted invitee read the project from
@@ -79,19 +92,44 @@ export interface PublicProject {
  * versions and per-track notes, and filtering those in the browser would mean
  * they had already been delivered to it. Returned media URLs are short-lived,
  * path-scoped Storage signatures rather than permanent download tokens.
+ *
+ * The endpoint enforces App Check, so a build without
+ * `VITE_FIREBASE_APPCHECK_SITE_KEY` cannot open any share link. That is
+ * intentional, but it must be loud: swallowing it made every public link look
+ * like a deleted project.
  */
 export async function fetchPublicProject(
   ownerUID: string,
   projectID: string,
-): Promise<PublicProject | null> {
-  if (!appCheck) return null
-  const token = await getToken(appCheck, false).catch(() => null)
-  if (!token) return null
+): Promise<PublicProjectResult> {
+  if (!appCheck) {
+    console.error(
+      "Public share links need App Check. Set VITE_FIREBASE_APPCHECK_SITE_KEY and rebuild.",
+    )
+    return { status: "error", reason: "app-check" }
+  }
+  const token = await getToken(appCheck, false).catch((error) => {
+    console.error("Could not obtain an App Check token for the public project request:", error)
+    return null
+  })
+  if (!token) return { status: "error", reason: "app-check" }
+
   const response = await fetch(publicProjectURL(ownerUID, projectID).toString(), {
     headers: { "X-Firebase-AppCheck": token.token },
-  }).catch(() => null)
-  if (!response?.ok) return null
-  return (await response.json().catch(() => null)) as PublicProject | null
+  }).catch((error) => {
+    console.error("getPublicProject request failed:", error)
+    return null
+  })
+  if (!response) return { status: "error", reason: "network" }
+  if (response.status === 404) return { status: "unavailable" }
+  if (!response.ok) {
+    console.error(`getPublicProject responded ${response.status}.`)
+    return { status: "error", reason: "server" }
+  }
+
+  const project = (await response.json().catch(() => null)) as PublicProject | null
+  if (!project) return { status: "error", reason: "server" }
+  return { status: "ok", project }
 }
 
 const previewDoc = (ownerUID: string, projectID: string) =>

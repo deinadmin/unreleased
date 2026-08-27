@@ -11,7 +11,7 @@ import {
   type User,
 } from "firebase/auth"
 import { doc, onSnapshot } from "firebase/firestore"
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react"
+import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react"
 import { auth, db } from "@/lib/firebase"
 import { clearDownloadURLCache } from "@/lib/storage-urls"
 import { clearProjectCoverCache } from "@/lib/project-cover-cache"
@@ -82,48 +82,55 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const usernameLoaded = profile.uid === profileUid
   const username = usernameLoaded ? profile.username : null
 
-  const value: AuthContextValue = {
-    user,
-    initializing,
-    isSignedIn: !!user && !user.isAnonymous,
-    isGuest: !!user && user.isAnonymous,
-    username,
-    usernameLoaded,
-    displayUsername:
-      username ??
-      user?.displayName?.replace(/\s+/g, "").toLowerCase() ??
-      user?.email?.split("@")[0]?.toLowerCase() ??
-      "listener",
-    signInWithGoogle: async () => {
-      await signInWithPopup(auth, new GoogleAuthProvider())
-    },
-    signInWithApple: async () => {
-      const provider = new OAuthProvider("apple.com")
-      provider.addScope("email")
-      provider.addScope("name")
-      await signInWithPopup(auth, provider)
-    },
-    signInWithEmail: async (email, password) => {
-      await signInWithEmailAndPassword(auth, email, password)
-    },
-    createAccount: async (email, password) => {
-      await createUserWithEmailAndPassword(auth, email, password)
-    },
-    sendPasswordReset: async (email) => {
-      await sendPasswordResetEmail(auth, email)
-    },
-    signInAsGuest: async () => {
-      await signInAnonymously(auth)
-    },
-    signOut: async () => {
-      await Promise.allSettled([
-        clearProjectCoverCache(),
-        clearPlayedTrackCache(),
-      ])
-      clearDownloadURLCache()
-      await firebaseSignOut(auth)
-    },
-  }
+  // Memoized because consumers legitimately depend on these callbacks. The
+  // shared-link page keys its load effect on `signInAsGuest`; a fresh identity
+  // on every provider render re-ran that effect, re-requesting the rate-limited
+  // public projection and re-triggering anonymous sign-in.
+  const value: AuthContextValue = useMemo(
+    () => ({
+      user,
+      initializing,
+      isSignedIn: !!user && !user.isAnonymous,
+      isGuest: !!user && user.isAnonymous,
+      username,
+      usernameLoaded,
+      displayUsername:
+        username ??
+        user?.displayName?.replace(/\s+/g, "").toLowerCase() ??
+        user?.email?.split("@")[0]?.toLowerCase() ??
+        "listener",
+      signInWithGoogle: async () => {
+        await signInWithPopup(auth, new GoogleAuthProvider())
+      },
+      signInWithApple: async () => {
+        const provider = new OAuthProvider("apple.com")
+        provider.addScope("email")
+        provider.addScope("name")
+        await signInWithPopup(auth, provider)
+      },
+      signInWithEmail: async (email: string, password: string) => {
+        await signInWithEmailAndPassword(auth, email, password)
+      },
+      createAccount: async (email: string, password: string) => {
+        await createUserWithEmailAndPassword(auth, email, password)
+      },
+      sendPasswordReset: async (email: string) => {
+        await sendPasswordResetEmail(auth, email)
+      },
+      signInAsGuest: async () => {
+        await signInAnonymously(auth)
+      },
+      signOut: async () => {
+        await Promise.allSettled([
+          clearProjectCoverCache(),
+          clearPlayedTrackCache(),
+        ])
+        clearDownloadURLCache()
+        await firebaseSignOut(auth)
+      },
+    }),
+    [user, initializing, username, usernameLoaded],
+  )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }

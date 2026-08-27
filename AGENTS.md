@@ -117,6 +117,21 @@ legacy flat-path audio until the backfill lands. Owners are unaffected.
   Firestore, Storage, and Auth in the Firebase console as well.
 - The Cloud Functions service account must have permission to sign blobs
   (`iam.serviceAccounts.signBlob`) because public share media now uses V4
-  signed Storage URLs instead of proxying bytes through a function.
+  signed Storage URLs instead of proxying bytes through a function. This is not
+  granted by default, and without it *every* share link 500s while the rest of
+  the app is unaffected — grant the runtime account the role on itself:
+
+  ```bash
+  SA=822378430827-compute@developer.gserviceaccount.com
+  gcloud iam service-accounts add-iam-policy-binding "$SA" \
+    --member="serviceAccount:$SA" \
+    --role="roles/iam.serviceAccountTokenCreator" \
+    --project=ancient-tractor-267017
+  ```
+
+  `iamcredentials.googleapis.com` must also be enabled. `getPublicProject`
+  answers `503 media-unavailable` and logs the remediation when signing fails,
+  so check `firebase functions:log --only getPublicProject` before suspecting
+  the client.
 - Plans are set by hand on `users/{uid}` (`plan`, `planExpiresAt`). There is no
   StoreKit integration and clients cannot write the document.

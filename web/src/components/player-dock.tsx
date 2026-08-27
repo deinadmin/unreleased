@@ -10,7 +10,7 @@ import {
   SkipForward,
 } from "lucide-react"
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react"
-import { useNavigate } from "react-router-dom"
+import { useLocation, useNavigate } from "react-router-dom"
 import { useContextMenu, type ContextMenuItem } from "@/components/context-menu"
 import { PlayerVersionList, PlayerVersionWheel } from "@/components/player-version-picker"
 import { CoverThumbnail, ProjectCover } from "@/components/project-cover"
@@ -48,8 +48,18 @@ export function PlayerDock() {
   const { projects } = useProjects()
   const isDesktop = useMediaQuery("(min-width: 1024px)")
   const navigate = useNavigate()
+  const { pathname } = useLocation()
 
-  const hasTrack = Boolean(player.track && player.project)
+  // The welcome flow sits outside the app shell — reached by signing out, or by
+  // choosing to sign in from a public share that is playing. Playback ends there
+  // rather than following the user through auth, and the chrome goes with it.
+  const onWelcomeRoute = pathname.startsWith("/welcome")
+  const stopPlayback = player.stop
+  useEffect(() => {
+    if (onWelcomeRoute) stopPlayback()
+  }, [onWelcomeRoute, stopPlayback])
+
+  const hasTrack = Boolean(player.track && player.project) && !onWelcomeRoute
   const expanded = hasTrack && player.expanded
 
   // Shift the page content while the sidebar player is open on big screens.
@@ -93,7 +103,7 @@ export function PlayerDock() {
     return () => window.removeEventListener("keydown", onKey)
   }, [player])
 
-  if (!player.track || !player.project) return null
+  if (!hasTrack || !player.track || !player.project) return null
 
   // Prefer live store metadata (title, cover, waveform) over the play-time snapshot.
   const project = projects.find((p) => p.id === player.project!.id) ?? player.project

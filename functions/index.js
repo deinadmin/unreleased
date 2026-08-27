@@ -1455,21 +1455,40 @@ export const getPublicProject = onRequest(
 
     const projectTracks = Array.isArray(project.tracks) ? project.tracks : [];
     const bucket = getStorage().bucket();
-    const tracks = (await Promise.all(projectTracks.map(async (track) => {
-      const audio = selectedPublicAudio(track);
-      if (!audio || !publicStoragePath(audio.storagePath, ownerId, "audio")) return null;
-      const storagePath = await selectedPublicAudioPath(
-        bucket,
-        audio.storagePath,
-        "standard"
-      );
-      const audioUrl = await signedPublicMediaURL(bucket, storagePath, "track");
-      return sanitizePublicTrack(track, ownerId, audioUrl);
-    }))).filter(Boolean);
 
+    // V4 signing calls the IAM Credentials API, so it fails for the whole
+    // deployment when the runtime service account lacks
+    // `iam.serviceAccounts.signBlob`. Say so, and fail the request rather than
+    // degrade: a payload with metadata but no signed track URLs renders as an
+    // empty project, which reads as "the owner deleted their tracks" instead of
+    // "this deployment is misconfigured".
+    let tracks;
     let coverUrl;
-    if (publicStoragePath(project.coverStoragePath, ownerId, "covers")) {
-      coverUrl = await signedPublicMediaURL(bucket, project.coverStoragePath, "cover");
+    try {
+      tracks = (await Promise.all(projectTracks.map(async (track) => {
+        const audio = selectedPublicAudio(track);
+        if (!audio || !publicStoragePath(audio.storagePath, ownerId, "audio")) return null;
+        const storagePath = await selectedPublicAudioPath(
+          bucket,
+          audio.storagePath,
+          "standard"
+        );
+        const audioUrl = await signedPublicMediaURL(bucket, storagePath, "track");
+        return sanitizePublicTrack(track, ownerId, audioUrl);
+      }))).filter(Boolean);
+
+      if (publicStoragePath(project.coverStoragePath, ownerId, "covers")) {
+        coverUrl = await signedPublicMediaURL(bucket, project.coverStoragePath, "cover");
+      }
+    } catch (error) {
+      logger.error(
+        `Could not sign public media for users/${ownerId}/projects/${projectId}. `
+          + "The runtime service account needs roles/iam.serviceAccountTokenCreator "
+          + "on itself for getSignedUrl() to work:",
+        error
+      );
+      response.status(503).json({ error: "media-unavailable" });
+      return;
     }
 
     response.status(200).json({
