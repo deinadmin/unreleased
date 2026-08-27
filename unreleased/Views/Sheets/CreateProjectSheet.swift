@@ -10,6 +10,7 @@ struct CreateProjectSheet: View {
     @State private var previewVinylGradient: GradientTheme? = nil
     @State private var isShowingDocumentPicker = false
     @State private var isImporting = false
+    @State private var isSaving = false
     var onCreated: ((Project) -> Void)? = nil
 
     var body: some View {
@@ -35,12 +36,12 @@ struct CreateProjectSheet: View {
                         .padding(8)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("Create") { createProject() }
+                    Button("Create") { Task { await createProject() } }
                         .buttonStyle(.glassProminent)
                         .tint(.accentColor)
                         .foregroundStyle(.white)
                         .fontWeight(.semibold)
-                        .disabled(trimmedName.isEmpty)
+                        .disabled(trimmedName.isEmpty || isSaving)
                         .fixedSize(horizontal: true, vertical: false)
                         .padding(8)
                 }
@@ -93,7 +94,7 @@ struct CreateProjectSheet: View {
                 .font(.system(size: 17))
                 .padding(14)
                 .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                .onSubmit { createProject() }
+                .onSubmit { Task { await createProject() } }
         }
     }
 
@@ -108,12 +109,16 @@ struct CreateProjectSheet: View {
         }
     }
 
-    private func createProject() {
+    private func createProject() async {
+        guard !isSaving else { return }
+        isSaving = true
+        defer { isSaving = false }
         let finalName = trimmedName.isEmpty ? "untitled project" : trimmedName
         var project = Project(name: finalName, gradient: gradient)
         project.accentColorHex = store.resolvedAccentHex(gradient: gradient, coverImage: coverImage)
         project.coverGradientColors = store.resolvedCoverGradientColors(coverImage: coverImage)
-        if let coverImage, let fileName = store.saveCoverImage(coverImage, projectID: project.id) {
+        if let coverImage,
+           let fileName = await store.saveCoverImage(coverImage, projectID: project.id) {
             project.coverImageFileName = fileName
         }
         store.addProject(project)

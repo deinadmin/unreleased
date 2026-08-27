@@ -188,6 +188,7 @@ export function PlayerDock() {
             getProgress={player.getProgress}
             onSeek={player.seek}
             duration={player.duration || track.duration}
+            isAnimating={!expanded && player.isPlaying}
             className="w-[130px] shrink-0"
           />
         </div>
@@ -201,13 +202,22 @@ export function PlayerDock() {
  * and a floating timestamp tooltip that follows the pointer on hover. It goes
  * inert while the track is still loading — there is nothing to seek into yet.
  */
-function ProgressSection({ player, track }: { player: PlayerValue; track: Track }) {
+function ProgressSection({
+  player,
+  track,
+  isVisible,
+}: {
+  player: PlayerValue
+  track: Track
+  isVisible: boolean
+}) {
   const trackDuration = player.duration || track.duration
   const currentSeconds = player.progress * trackDuration
   const getProgress = player.getProgress
   const disabled = player.isLoading
   const fillRef = useRef<HTMLDivElement>(null)
   const [hoverFraction, setHoverFraction] = useState<number | null>(null)
+  const [dragging, setDragging] = useState(false)
   const drag = useRef<{ active: boolean; fraction: number; holdUntil: number }>({
     active: false,
     fraction: 0,
@@ -219,6 +229,7 @@ function ProgressSection({ player, track }: { player: PlayerValue; track: Track 
   useEffect(() => {
     if (!disabled) return
     drag.current = { active: false, fraction: 0, holdUntil: 0 }
+    setDragging(false)
     setHoverFraction(null)
   }, [disabled])
 
@@ -230,11 +241,17 @@ function ProgressSection({ player, track }: { player: PlayerValue; track: Track 
       if (fillRef.current) {
         fillRef.current.style.width = `${Math.min(1, Math.max(0, progress)) * 100}%`
       }
-      frame = requestAnimationFrame(tick)
+      if (
+        isVisible &&
+        !document.hidden &&
+        (player.isPlaying || drag.current.active || performance.now() < drag.current.holdUntil)
+      ) {
+        frame = requestAnimationFrame(tick)
+      }
     }
     frame = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(frame)
-  }, [getProgress])
+  }, [getProgress, isVisible, player.isPlaying, dragging])
 
   const fractionFromEvent = (event: React.PointerEvent<HTMLDivElement>) => {
     const rect = event.currentTarget.getBoundingClientRect()
@@ -261,6 +278,7 @@ function ProgressSection({ player, track }: { player: PlayerValue; track: Track 
             event.currentTarget.setPointerCapture(event.pointerId)
             const fraction = fractionFromEvent(event)
             drag.current = { active: true, fraction, holdUntil: 0 }
+            setDragging(true)
             setHoverFraction(fraction)
           }}
           onPointerMove={(event) => {
@@ -272,6 +290,7 @@ function ProgressSection({ player, track }: { player: PlayerValue; track: Track 
             if (drag.current.active) {
               drag.current.active = false
               drag.current.holdUntil = performance.now() + 300
+              setDragging(false)
               player.seek(fractionFromEvent(event))
             }
             if (event.pointerType !== "mouse") setHoverFraction(null)
@@ -279,6 +298,7 @@ function ProgressSection({ player, track }: { player: PlayerValue; track: Track 
           onPointerLeave={() => setHoverFraction(null)}
           onPointerCancel={() => {
             drag.current.active = false
+            setDragging(false)
             setHoverFraction(null)
           }}
         >
@@ -742,7 +762,7 @@ function SidebarPlayer({
       </div>
 
       <div className="px-8 pb-10 pt-4">
-        <ProgressSection player={player} track={track} />
+        <ProgressSection player={player} track={track} isVisible={expanded} />
         <div className="mt-4">
           <TransportControls
             player={player}
@@ -825,7 +845,7 @@ function FullscreenPlayer({
       </div>
 
       <div className="mt-4">
-        <ProgressSection player={player} track={track} />
+        <ProgressSection player={player} track={track} isVisible={expanded} />
       </div>
       <div className="mt-5">
         <TransportControls

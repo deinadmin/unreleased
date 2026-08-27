@@ -1,4 +1,4 @@
-import { Timestamp, deleteDoc, doc, setDoc, updateDoc, writeBatch } from "firebase/firestore"
+import { Timestamp, doc, updateDoc } from "firebase/firestore"
 import { deleteObject, ref as storageRef } from "firebase/storage"
 import { encodeTrack } from "./codec"
 import { db, storage } from "./firebase"
@@ -27,45 +27,6 @@ export function versionAudioStoragePath(
   fileExtension: string,
 ): string {
   return `users/${uid}/audio/versions/${versionID}/audio.${fileExtension}`
-}
-
-const versionAccessDoc = (uid: string, versionID: string) =>
-  doc(db, "users", uid, "versionAccess", versionID)
-
-/**
- * Owner-maintained visibility index the Storage rules read when a collaborator
- * or a share-link guest streams a version.
- */
-async function writeVersionAccess(
-  uid: string,
-  projectID: string,
-  versions: TrackVersion[],
-): Promise<void> {
-  if (versions.length === 0) return
-  if (versions.length === 1) {
-    await setDoc(
-      versionAccessDoc(uid, versions[0].id),
-      { projectID, isPublic: versions[0].isPublic },
-      { merge: true },
-    )
-    return
-  }
-  const batch = writeBatch(db)
-  for (const version of versions) {
-    batch.set(
-      versionAccessDoc(uid, version.id),
-      { projectID, isPublic: version.isPublic },
-      { merge: true },
-    )
-  }
-  await batch.commit()
-}
-
-/** Best-effort removal of the visibility index for versions that no longer exist. */
-export function deleteVersionAccess(uid: string, versionIDs: string[]): void {
-  for (const versionID of new Set(versionIDs)) {
-    deleteDoc(versionAccessDoc(uid, versionID)).catch(() => {})
-  }
 }
 
 async function writeTrack(uid: string, project: Project, updated: Track): Promise<void> {
@@ -101,7 +62,6 @@ export async function addVersions(
     versions: [...[...added].reverse(), ...withHistory.versions],
     activeVersionID: added[added.length - 1].id,
   })
-  await writeVersionAccess(uid, project.id, updated.versions)
   await writeTrack(uid, project, updated)
 }
 
@@ -180,7 +140,6 @@ export async function setVersionPublic(
     ),
   }
   await writeTrack(uid, project, updated)
-  await writeVersionAccess(uid, project.id, [{ ...target, isPublic }])
 }
 
 /** Removes a version and its cloud audio. The last remaining version can't be deleted. */
@@ -211,7 +170,6 @@ export async function deleteVersion(
     invalidatePlayedTrackCache(deleted.storagePath)
     deleteObject(storageRef(storage, deleted.storagePath)).catch(() => {})
   }
-  deleteVersionAccess(uid, [deleted.id])
 }
 
 /** Every version ID a track owns, including the implicit v1 of a legacy track. */

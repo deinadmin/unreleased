@@ -92,3 +92,34 @@ export function usePlanState(): { plan: UserPlan; loading: boolean } {
 export function usePlan(): UserPlan {
   return usePlanState().plan
 }
+
+/**
+ * Server-maintained storage usage from `users/{uid}/storage/state`.
+ *
+ * This is the figure enforcement actually applies. It meters every prefix a
+ * client can write — audio, cover art and the profile picture — so summing
+ * local track sizes under-reports and lets uploads start that the server then
+ * rejects. The document is read-only to clients, so it cannot be faked.
+ * `null` means it has not loaded (or was never written) yet.
+ */
+export function useServerStorageUsage(): number | null {
+  const { user, isSignedIn } = useAuth()
+  const [usedBytes, setUsedBytes] = useState<number | null>(null)
+
+  useEffect(() => {
+    if (!user || !isSignedIn) {
+      setUsedBytes(null)
+      return
+    }
+    return onSnapshot(
+      doc(db, "users", user.uid, "storage", "state"),
+      (snapshot) => {
+        const value = snapshot.data()?.usedBytes
+        setUsedBytes(typeof value === "number" ? value : null)
+      },
+      () => setUsedBytes(null),
+    )
+  }, [user, isSignedIn])
+
+  return usedBytes
+}

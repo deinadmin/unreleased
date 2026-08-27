@@ -653,6 +653,7 @@ function VersionCard({
         getProgress={getProgress}
         onSeek={onSeek}
         duration={version.duration}
+        isAnimating={isPreviewPlaying}
         visibleBars={22}
         barColor={BAR_COLOR}
         playedColor={PLAYED_COLOR}

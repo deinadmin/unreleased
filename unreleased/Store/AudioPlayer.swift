@@ -947,12 +947,14 @@ final class AudioPlayer {
             }
         }
 
-        startPlaybackTimer()
         if shouldPlay {
             guard startEngineIfNeeded() else { return false }
+            startPlaybackTimer()
             playerNode.play()
             return playerNode.isPlaying
         }
+        playbackTimer?.invalidate()
+        playbackTimer = nil
         return false
     }
 
@@ -1035,6 +1037,7 @@ final class AudioPlayer {
 
             self.playerNode.play()
             self.isPlaying = self.playerNode.isPlaying
+            if self.isPlaying { self.startPlaybackTimer() }
             self.updateNowPlayingInfo()
         }
         return true
@@ -1044,6 +1047,8 @@ final class AudioPlayer {
         audioSessionActivationTask?.cancel()
         audioSessionActivationTask = nil
         updateCurrentTimeFromEngine()
+        playbackTimer?.invalidate()
+        playbackTimer = nil
         playerNode.pause()
 
         // AVAudioPlayerNode.pause() alone leaves AVAudioEngine rendering silence.

@@ -97,7 +97,7 @@ final class AuthManager {
             )
         }
 
-        guard let optimized = PhotoUploadCompression.profile(image) else {
+        guard let optimized = await PhotoUploadCompression.profile(image) else {
             throw NSError(
                 domain: "AuthManager",
                 code: 422,

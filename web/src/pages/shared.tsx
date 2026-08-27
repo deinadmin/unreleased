@@ -1,4 +1,3 @@
-import { doc, onSnapshot } from "firebase/firestore"
 import { Pause, Play, Plus } from "lucide-react"
 import { useEffect, useState } from "react"
 import { Navigate, useLocation, useNavigate, useParams } from "react-router-dom"
@@ -10,25 +9,71 @@ import { TrackRow } from "@/components/track-row"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useAuth } from "@/hooks/use-auth"
 import { useProject, useProjects } from "@/hooks/use-projects"
-import { decodeProject } from "@/lib/codec"
-import { db } from "@/lib/firebase"
 import { formatProjectDuration } from "@/lib/format"
 import {
   acceptInvite,
   fetchPreview,
+  fetchPublicProject,
   hasPendingInvite,
   normalizeProjectID,
-  publicCoverURL,
-  publicTrackURL,
+  type PublicProject,
 } from "@/lib/invites"
 import {
   projectAccent,
-  sharedPlayableProject,
   trackCountText,
+  type GradientTheme,
   type Project,
   type ProjectPreview,
 } from "@/lib/types"
+import { decodeWaveform } from "@/lib/waveform"
 import { usePlayer } from "@/player/player-provider"
+
+const FALLBACK_GRADIENT: GradientTheme = {
+  colors: ["#667EEA", "#764BA2"],
+  startX: 0,
+  startY: 0,
+  endX: 1,
+  endY: 1,
+}
+
+/**
+ * Adapts the `getPublicProject` payload to the shape the player and track rows
+ * already render. Track `storagePath` carries the endpoint's streaming URL —
+ * `playbackSource` passes absolute URLs straight through instead of resolving
+ * them against Cloud Storage.
+ */
+async function publicListenProject(
+  project: PublicProject,
+  ownerID: string,
+): Promise<Project> {
+  const tracks = await Promise.all(
+    (project.tracks ?? []).map(async (track) => ({
+      id: track.id,
+      title: track.title,
+      fileName: track.fileName,
+      fileSize: track.fileSize,
+      duration: track.duration,
+      addedDate: new Date(track.addedDate),
+      waveform: track.waveform ? await decodeWaveform(track.waveform) : undefined,
+      storagePath: track.audioUrl,
+      notes: "",
+      versions: [],
+    })),
+  )
+  return {
+    id: project.id,
+    name: project.name,
+    gradient: project.gradient ?? FALLBACK_GRADIENT,
+    coverStoragePath: project.coverUrl,
+    accentColorHex: project.accentColorHex,
+    coverGradientColors: project.coverGradientColors,
+    createdDate: new Date(project.createdDate),
+    updatedDate: new Date(project.updatedDate),
+    ownerUsername: project.ownerUsername,
+    ownerID,
+    tracks,
+  }
+}
 
 type PageState =
   | { phase: "loading" }
@@ -61,71 +106,44 @@ export function SharedProjectPage() {
     }
 
     let cancelled = false
-    let unsubscribe: (() => void) | undefined
 
+    // Listeners who have not joined read the sanitized projection from
+    // `getPublicProject` rather than the project document. The raw document
+    // holds private versions and per-track notes; filtering those in the
+    // browser would mean they had already been sent to it. Owners and accepted
+    // invitees keep the live Firestore subscription.
     const start = async () => {
-      const preview = await fetchPreview(ownerId, projectID)
+      const [preview, publicProject] = await Promise.all([
+        fetchPreview(ownerId, projectID),
+        fetchPublicProject(ownerId, projectID),
+      ])
       if (cancelled) return
-      unsubscribe = onSnapshot(
-        doc(db, "users", ownerId, "projects", projectID),
-        async (snapshot) => {
-          if (cancelled) return
-          if (!snapshot.exists()) {
-            setState({ phase: "not-found" })
-            return
-          }
-          const decoded = await decodeProject(snapshot.data())
-          if (cancelled || !decoded) return
-          const playable = sharedPlayableProject({ ...decoded, ownerID: ownerId })
-          const publicCover = playable.coverStoragePath
-            ? publicCoverURL(ownerId, projectID)
-            : undefined
-          setState({
-            phase: "ready",
-            project: {
-              ...playable,
-              coverStoragePath: publicCover,
-              tracks: playable.tracks.map((track) => ({
-                ...track,
-                storagePath: track.storagePath
-                  ? publicTrackURL(ownerId, projectID, track.id)
-                  : undefined,
-              })),
-            },
-          })
-        },
-        async () => {
-          // Permission denied: link off (or never shared).
-          if (cancelled) return
-          if (!preview) {
-            setState({ phase: "not-found" })
-            return
-          }
-          if (!isSignedIn) {
-            setState({ phase: "auth-required", preview })
-            return
-          }
-          const pending = await hasPendingInvite(ownerId, projectID, user.uid)
-          if (!cancelled) {
-            setState({
-              phase: "invite",
-              preview: {
-                ...preview,
-                coverStoragePath:
-                  preview.linkEnabled && preview.coverStoragePath
-                    ? publicCoverURL(ownerId, projectID)
-                    : preview.coverStoragePath,
-              },
-              canJoin: preview.linkEnabled || pending,
-            })
-          }
-        },
-      )
+
+      if (publicProject) {
+        const project = await publicListenProject(publicProject, ownerId)
+        if (!cancelled) setState({ phase: "ready", project })
+        return
+      }
+      // No public projection: the link is off, or it was never shared.
+      if (!preview) {
+        setState({ phase: "not-found" })
+        return
+      }
+      if (!isSignedIn) {
+        setState({ phase: "auth-required", preview })
+        return
+      }
+      const pending = await hasPendingInvite(ownerId, projectID, user.uid)
+      if (cancelled) return
+      setState({
+        phase: "invite",
+        preview,
+        canJoin: preview.linkEnabled || pending,
+      })
     }
     void start()
     return () => {
       cancelled = true
-      unsubscribe?.()
     }
   }, [initializing, user, isSignedIn, ownerId, projectID, signInAsGuest])
 

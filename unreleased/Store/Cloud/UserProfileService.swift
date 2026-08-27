@@ -89,7 +89,13 @@ final class UserProfileService {
     }
 
     /// Prefix-searches the username index for invite suggestions.
-    /// Returns at most `limit` matches, excluding `excludingUID` (typically the caller).
+    /// Returns at most `limit` matches, excluding the caller.
+    ///
+    /// The query runs in the `searchUsers` Cloud Function rather than here.
+    /// Doing it client-side required `list` permission on `usernames`, and that
+    /// collection is the uid directory for the whole app — with it, anyone
+    /// could enumerate every user, then every project id they own, which makes
+    /// share-link UUIDs guessable. Clients now only get exact-key reads.
     static func searchUsers(
         prefix rawPrefix: String,
         excludingUID: String?,
@@ -98,39 +104,25 @@ final class UserProfileService {
         let prefix = rawPrefix
             .lowercased()
             .trimmingCharacters(in: .whitespaces)
-        guard !prefix.isEmpty else { return [] }
+        // The function applies the same floor; short prefixes match too much of
+        // the directory to be a search rather than a dump.
+        guard prefix.count >= 2 else { return [] }
 
-        // Firestore prefix query on the document ID (the lowercased username).
-        let end = prefix + "\u{f8ff}"
-        let query = CloudPaths.usernamesCollection()
-            .order(by: FieldPath.documentID())
-            .start(at: [prefix])
-            .end(at: [end])
-            .limit(to: limit + 1)   // fetch one extra in case we filter ourselves out
-
-        guard let snapshot = try? await query.getDocuments() else { return [] }
-        let matches = snapshot.documents.compactMap { doc -> (uid: String, username: String)? in
-            guard let uid = doc.data()["uid"] as? String else { return nil }
-            if let excludingUID, uid == excludingUID { return nil }
-            return (uid, doc.documentID)
-        }
-        .prefix(limit)
-        return await withTaskGroup(of: UserSearchResult.self) { group in
-            for match in matches {
-                group.addTask {
+        do {
+            let matches = try await CallableFunction.searchUsers(prefix: prefix)
+            return matches
+                .filter { $0.id != excludingUID }
+                .prefix(limit)
+                .map { match in
                     UserSearchResult(
-                        id: match.uid,
+                        id: match.id,
                         username: match.username,
-                        avatarURL: await fetchAvatarURL(forUID: match.uid)
+                        avatarURL: match.avatarURL.flatMap(URL.init(string:))
                     )
                 }
-            }
-
-            var resultsByID: [String: UserSearchResult] = [:]
-            for await result in group {
-                resultsByID[result.id] = result
-            }
-            return matches.compactMap { resultsByID[$0.uid] }
+        } catch {
+            print("UserProfileService: user search failed — \(error)")
+            return []
         }
     }
 
@@ -139,7 +131,7 @@ final class UserProfileService {
     static func fetchAvatarURL(forUID uid: String) async -> URL? {
         let profile = try? await CloudPaths.userProfileDocument(userID: uid).getDocument()
         if let rawURL = profile?.data()?["avatarURL"] as? String,
-           let url = URL(string: rawURL) {
+           let url = canonicalAvatarURL(rawURL, forUID: uid) {
             return url
         }
 
@@ -162,5 +154,15 @@ final class UserProfileService {
         } catch {
             return nil
         }
+    }
+
+    static func canonicalAvatarURL(_ rawValue: String, forUID uid: String) -> URL? {
+        guard let url = URL(string: rawValue),
+              url.scheme == "https",
+              url.host == "firebasestorage.googleapis.com"
+        else { return nil }
+        let decodedPath = url.path.removingPercentEncoding ?? url.path
+        guard decodedPath.hasSuffix("/o/users/\(uid)/profile/avatar.jpg") else { return nil }
+        return url
     }
 }

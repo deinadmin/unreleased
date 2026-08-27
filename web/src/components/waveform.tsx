@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { resampleBars, seededBars } from "@/lib/waveform"
 import { cn } from "@/lib/utils"
 
@@ -12,6 +12,7 @@ export function Waveform({
   waveform,
   getProgress,
   onSeek,
+  isAnimating = false,
   barCount = 60,
   accent = "#FFD000",
   base = "rgba(255,255,255,0.35)",
@@ -21,12 +22,14 @@ export function Waveform({
   waveform?: number[]
   getProgress: () => number
   onSeek?: (fraction: number) => void
+  isAnimating?: boolean
   barCount?: number
   accent?: string
   base?: string
   className?: string
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const [dragging, setDragging] = useState(false)
   const drag = useRef<{ active: boolean; fraction: number }>({ active: false, fraction: 0 })
 
   const bars = useMemo(
@@ -44,7 +47,12 @@ export function Waveform({
     if (!ctx) return
     let frame = 0
 
+    const scheduleDraw = () => {
+      if (!frame) frame = requestAnimationFrame(draw)
+    }
+
     const draw = () => {
+      frame = 0
       const dpr = window.devicePixelRatio || 1
       const width = canvas.clientWidth
       const height = canvas.clientHeight
@@ -69,11 +77,18 @@ export function Waveform({
         ctx.roundRect(x, y, barWidth, barHeight, barWidth / 2)
         ctx.fill()
       }
-      frame = requestAnimationFrame(draw)
+      if (!document.hidden && (isAnimating || drag.current.active)) scheduleDraw()
     }
-    frame = requestAnimationFrame(draw)
-    return () => cancelAnimationFrame(frame)
-  }, [bars, accent, base, getProgress])
+    const resizeObserver = new ResizeObserver(scheduleDraw)
+    resizeObserver.observe(canvas)
+    document.addEventListener("visibilitychange", scheduleDraw)
+    scheduleDraw()
+    return () => {
+      cancelAnimationFrame(frame)
+      resizeObserver.disconnect()
+      document.removeEventListener("visibilitychange", scheduleDraw)
+    }
+  }, [bars, accent, base, getProgress, isAnimating, dragging])
 
   const fractionFromEvent = (event: React.PointerEvent<HTMLCanvasElement>) => {
     const rect = event.currentTarget.getBoundingClientRect()
@@ -88,6 +103,7 @@ export function Waveform({
         if (!onSeek) return
         event.currentTarget.setPointerCapture(event.pointerId)
         drag.current = { active: true, fraction: fractionFromEvent(event) }
+        setDragging(true)
       }}
       onPointerMove={(event) => {
         if (drag.current.active) drag.current.fraction = fractionFromEvent(event)
@@ -95,10 +111,12 @@ export function Waveform({
       onPointerUp={(event) => {
         if (!drag.current.active) return
         drag.current.active = false
+        setDragging(false)
         onSeek?.(fractionFromEvent(event))
       }}
       onPointerCancel={() => {
         drag.current.active = false
+        setDragging(false)
       }}
     />
   )

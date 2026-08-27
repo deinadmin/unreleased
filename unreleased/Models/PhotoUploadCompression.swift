@@ -1,6 +1,6 @@
 import UIKit
 
-struct CompressedPhoto {
+struct CompressedPhoto: @unchecked Sendable {
     let image: UIImage
     let data: Data
 }
@@ -11,27 +11,37 @@ struct CompressedPhoto {
 /// alpha, and encoded with adaptive JPEG quality. A dimension fallback keeps
 /// even unusually noisy images within the target byte budget.
 enum PhotoUploadCompression {
-    static func cover(_ image: UIImage) -> CompressedPhoto? {
-        compressSquare(
-            image,
-            maxPixelDimension: 1_200,
-            initialQuality: 0.82,
-            minimumQuality: 0.62,
-            maxBytes: 1_500_000
-        )
+    private struct SendableImage: @unchecked Sendable {
+        let value: UIImage
     }
 
-    static func profile(_ image: UIImage) -> CompressedPhoto? {
-        compressSquare(
-            image,
-            maxPixelDimension: 512,
-            initialQuality: 0.82,
-            minimumQuality: 0.62,
-            maxBytes: 500_000
-        )
+    static func cover(_ image: UIImage) async -> CompressedPhoto? {
+        let source = SendableImage(value: image)
+        return await Task.detached(priority: .userInitiated) {
+            compressSquare(
+                source.value,
+                maxPixelDimension: 1_200,
+                initialQuality: 0.82,
+                minimumQuality: 0.62,
+                maxBytes: 1_500_000
+            )
+        }.value
     }
 
-    private static func compressSquare(
+    static func profile(_ image: UIImage) async -> CompressedPhoto? {
+        let source = SendableImage(value: image)
+        return await Task.detached(priority: .userInitiated) {
+            compressSquare(
+                source.value,
+                maxPixelDimension: 512,
+                initialQuality: 0.82,
+                minimumQuality: 0.62,
+                maxBytes: 500_000
+            )
+        }.value
+    }
+
+    nonisolated private static func compressSquare(
         _ source: UIImage,
         maxPixelDimension: CGFloat,
         initialQuality: CGFloat,
@@ -69,7 +79,7 @@ enum PhotoUploadCompression {
         return nil
     }
 
-    private static func renderOpaqueSquare(
+    nonisolated private static func renderOpaqueSquare(
         _ source: UIImage,
         pixelDimension: CGFloat
     ) -> UIImage {

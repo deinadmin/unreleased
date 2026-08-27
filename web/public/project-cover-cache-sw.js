@@ -361,6 +361,16 @@ self.addEventListener("message", (event) => {
   }
   if (message.type === "UNRELEASED_TRACK_CACHE_DELETE" && typeof message.storagePath === "string") {
     event.waitUntil(deleteCachedTrack(message.storagePath))
+    return
+  }
+  if (message.type === "UNRELEASED_TRACK_CACHE_CLEAR") {
+    trackDownloads.clear()
+    announcedTrackSizes.clear()
+    event.waitUntil(Promise.all([
+      caches.delete(TRACK_CACHE_NAME),
+      caches.delete(TRACK_METADATA_CACHE_NAME),
+      caches.delete(CACHE_NAME),
+    ]))
   }
 })
 

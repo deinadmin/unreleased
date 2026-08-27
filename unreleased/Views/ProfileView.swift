@@ -504,10 +504,12 @@ struct ProfileView: View {
     }
 
     private func signOut() {
+        let userID = auth.signedInUserID
         player.stop()
         store.configureSync(userID: nil)
         store.clearLocalLibrary()
         Task {
+            await avatarStore.purge(userID: userID)
             await auth.signOut()
         }
     }

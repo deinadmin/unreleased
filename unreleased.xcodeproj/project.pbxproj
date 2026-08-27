@@ -10,6 +10,7 @@
 		C31DD60F2FD4D8FE00F7C3A6 /* FirebaseMessaging in Frameworks */ = {isa = PBXBuildFile; productRef = C31DD60E2FD4D8FE00F7C3A6 /* FirebaseMessaging */; };
 		C367E3892FC3C284008D53DC /* ColorThiefSwift in Frameworks */ = {isa = PBXBuildFile; productRef = C367E3882FC3C284008D53DC /* ColorThiefSwift */; };
 		C367E38C2FC3C2CF008D53DC /* DominantColors in Frameworks */ = {isa = PBXBuildFile; productRef = C367E38B2FC3C2CF008D53DC /* DominantColors */; };
+		C3AC11212FD5A10100AC0002 /* FirebaseAppCheck in Frameworks */ = {isa = PBXBuildFile; productRef = C3AC11202FD5A10100AC0001 /* FirebaseAppCheck */; };
 		C3F169C52FBDF5A800EB18FB /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = C3F169C42FBDF5A800EB18FB /* FirebaseAuth */; };
 		C3F169C72FBDF5A800EB18FB /* FirebaseFirestore in Frameworks */ = {isa = PBXBuildFile; productRef = C3F169C62FBDF5A800EB18FB /* FirebaseFirestore */; };
 		C3F169C92FBDF5A800EB18FB /* FirebaseStorage in Frameworks */ = {isa = PBXBuildFile; productRef = C3F169C82FBDF5A800EB18FB /* FirebaseStorage */; };
@@ -34,6 +35,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				C3AC11212FD5A10100AC0002 /* FirebaseAppCheck in Frameworks */,
 				C31DD60F2FD4D8FE00F7C3A6 /* FirebaseMessaging in Frameworks */,
 				C3F169C52FBDF5A800EB18FB /* FirebaseAuth in Frameworks */,
 				C367E38C2FC3C2CF008D53DC /* DominantColors in Frameworks */,
@@ -92,6 +94,7 @@
 			);
 			name = unreleased;
 			packageProductDependencies = (
+				C3AC11202FD5A10100AC0001 /* FirebaseAppCheck */,
 				C3F169C42FBDF5A800EB18FB /* FirebaseAuth */,
 				C3F169CA2FBDF6A100EB18FB /* FirebaseCore */,
 				C3F169C62FBDF5A800EB18FB /* FirebaseFirestore */,
@@ -418,6 +421,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = C367E38A2FC3C2CF008D53DC /* XCRemoteSwiftPackageReference "DominantColors" */;
 			productName = DominantColors;
+		};
+		C3AC11202FD5A10100AC0001 /* FirebaseAppCheck */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = C3F169C32FBDF5A800EB18FB /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseAppCheck;
 		};
 		C3F169C42FBDF5A800EB18FB /* FirebaseAuth */ = {
 			isa = XCSwiftPackageProductDependency;

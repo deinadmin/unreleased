@@ -216,12 +216,6 @@ final class ProjectSyncService {
                         )
                         guard !exists else { continue }
 
-                        if !track.versions.isEmpty {
-                            try await writeVersionAccess(
-                                projectID: project.id,
-                                version: version
-                            )
-                        }
                         _ = try await AudioFileCache.shared.upload(
                             localURL: localURL,
                             to: storagePath,
@@ -300,12 +294,6 @@ final class ProjectSyncService {
         for path in paths {
             await AudioFileCache.shared.delete(storagePath: path)
         }
-        for version in track.versions {
-            try? await CloudPaths.versionAccessDocument(
-                userID: userID,
-                versionID: version.id
-            ).delete()
-        }
     }
 
     func deleteVersionFromCloud(_ version: TrackVersion, trackID: UUID) async {
@@ -319,21 +307,6 @@ final class ProjectSyncService {
             fileExtension: version.fileExtension
         )
         await AudioFileCache.shared.delete(storagePath: path)
-        try? await CloudPaths.versionAccessDocument(
-            userID: userID,
-            versionID: version.id
-        ).delete()
-    }
-
-    func updateVersionAccess(
-        projectID: UUID,
-        version: TrackVersion
-    ) async {
-        do {
-            try await writeVersionAccess(projectID: projectID, version: version)
-        } catch {
-            print("ProjectSyncService: version visibility update failed — \(error)")
-        }
     }
 
     // MARK: - Snapshot handling
@@ -394,11 +367,6 @@ final class ProjectSyncService {
                     ownerUID: userID,
                     ownerUsername: username
                 )
-                for track in project.tracks {
-                    for version in track.versions {
-                        try await writeVersionAccess(projectID: project.id, version: version)
-                    }
-                }
                 lastSyncedUpdated[project.id] = project.updatedDate
 
                 for track in project.tracks
@@ -460,7 +428,6 @@ final class ProjectSyncService {
             )
 
             do {
-                try await writeVersionAccess(projectID: projectID, version: version)
                 let uploadedSize = try await AudioFileCache.shared.upload(
                     localURL: localURL,
                     to: storagePath,
@@ -498,22 +465,6 @@ final class ProjectSyncService {
             userID: userID,
             versionID: version.id,
             fileExtension: version.fileExtension
-        )
-    }
-
-    private func writeVersionAccess(
-        projectID: UUID,
-        version: TrackVersion
-    ) async throws {
-        try await CloudPaths.versionAccessDocument(
-            userID: userID,
-            versionID: version.id
-        ).setData(
-            [
-                "projectID": projectID.uuidString,
-                "isPublic": version.isPublic,
-            ],
-            merge: true
         )
     }
 

@@ -7,9 +7,14 @@
   },
   "main": "index.js",
   "dependencies": {
-    "firebase-admin": "^12.1.0",
-    "firebase-functions": "^5.0.0",
+    "firebase-admin": "^14.3.0",
+    "firebase-functions": "^7.3.2",
     "ffmpeg-static": "^5.2.0"
+  },
+  "overrides": {
+    "@google-cloud/storage": "8.0.1",
+    "protobufjs": "7.6.5",
+    "uuid": "11.1.1"
   },
   "private": true
 }

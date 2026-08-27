@@ -11,12 +11,17 @@ import {
 } from "react"
 import { toast } from "@/lib/toast"
 import { useAuth } from "@/hooks/use-auth"
-import { PLAN_TIERS, effectiveTier, usePlan } from "@/hooks/use-plan"
+import {
+  PLAN_TIERS,
+  effectiveTier,
+  usePlan,
+  useServerStorageUsage,
+} from "@/hooks/use-plan"
 import { useProjects } from "@/hooks/use-projects"
 import { encodeProject, encodeTrack } from "@/lib/codec"
 import { db, storage } from "@/lib/firebase"
 import { addVersions, versionAudioStoragePath } from "@/lib/version-edits"
-import { analyzeAudioFile } from "@/lib/waveform-analyzer"
+import { analyzeAudioFile, MAX_BROWSER_AUDIO_BYTES } from "@/lib/waveform-analyzer"
 import {
   randomGradient,
   trackStorageBytes,
@@ -78,6 +83,7 @@ export function UploadsProvider({ children }: { children: ReactNode }) {
   const { user, isSignedIn } = useAuth()
   const { projects } = useProjects()
   const plan = usePlan()
+  const serverUsedBytes = useServerStorageUsage()
   const [uploads, setUploads] = useState<UploadItem[]>([])
   const [isImporting, setIsImporting] = useState(false)
 
@@ -86,6 +92,8 @@ export function UploadsProvider({ children }: { children: ReactNode }) {
   projectsRef.current = projects
   const planRef = useRef(plan)
   planRef.current = plan
+  const serverUsedBytesRef = useRef(serverUsedBytes)
+  serverUsedBytesRef.current = serverUsedBytes
 
   // Sweep finished rows off the card after a short delay.
   useEffect(() => {
@@ -110,13 +118,21 @@ export function UploadsProvider({ children }: { children: ReactNode }) {
       toast("No audio files found. Supported: mp3, m4a, wav, aiff, flac, aac.")
       return null
     }
+    if (audioFiles.some((file) => file.size > MAX_BROWSER_AUDIO_BYTES)) {
+      toast("Web uploads are limited to 200 MB per file to protect browser memory. Use iOS for larger files.")
+      return null
+    }
 
     const limit = PLAN_TIERS[effectiveTier(planRef.current)].storageLimitBytes
     if (limit !== null) {
-      const used = projectsRef.current
+      const localAudioBytes = projectsRef.current
         .filter((p) => !p.ownerID)
         .flatMap((p) => p.tracks)
         .reduce((total, t) => total + trackStorageBytes(t), 0)
+      // The server counts cover art and the profile picture too, so it is the
+      // higher and more accurate figure; local tracks are the floor for audio
+      // this device queued but has not finished uploading.
+      const used = Math.max(serverUsedBytesRef.current ?? 0, localAudioBytes)
       const incoming = audioFiles.reduce((sum, f) => sum + f.size, 0)
       if (used + incoming > limit) {
         toast("Not enough storage on your plan. Free up space or upgrade to continue.")

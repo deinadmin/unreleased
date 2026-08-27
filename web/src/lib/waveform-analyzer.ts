@@ -21,7 +21,15 @@ export interface AnalyzedAudio {
   waveform: number[]
 }
 
+/** Avoid allocating several copies of a near-Storage-limit file in one tab. */
+export const MAX_BROWSER_AUDIO_BYTES = 200 * 1024 * 1024
+const MAX_BROWSER_AUDIO_SECONDS = 2 * 60 * 60
+const ANALYSIS_CHUNK_FRAMES = 262_144
+
 export async function analyzeAudioFile(file: File, targetBars = 200): Promise<AnalyzedAudio> {
+  if (file.size > MAX_BROWSER_AUDIO_BYTES) {
+    throw new Error("Audio files larger than 200 MB must be uploaded from the iOS app.")
+  }
   let buffer: AudioBuffer
   try {
     // A fixed 44.1 kHz offline context keeps decoding deterministic across
@@ -34,10 +42,14 @@ export async function analyzeAudioFile(file: File, targetBars = 200): Promise<An
     return { duration: 0, waveform: [] }
   }
 
-  return { duration: buffer.duration, waveform: extractBars(buffer, targetBars) }
+  if (buffer.duration > MAX_BROWSER_AUDIO_SECONDS) {
+    throw new Error("Audio longer than two hours is not supported.")
+  }
+
+  return { duration: buffer.duration, waveform: await extractBars(buffer, targetBars) }
 }
 
-function extractBars(buffer: AudioBuffer, targetBars: number): number[] {
+async function extractBars(buffer: AudioBuffer, targetBars: number): Promise<number[]> {
   const totalFrames = buffer.length
   const channelCount = buffer.numberOfChannels
   if (totalFrames <= 0 || channelCount <= 0) return []
@@ -49,16 +61,22 @@ function extractBars(buffer: AudioBuffer, targetBars: number): number[] {
   const barSumSq = new Float64Array(targetBars)
   const barCount = new Int32Array(targetBars)
 
-  for (let f = 0; f < totalFrames; f++) {
-    let sumSq = 0
-    for (let c = 0; c < channelCount; c++) {
-      const v = channels[c][f]
-      sumSq += v * v
+  for (let chunkStart = 0; chunkStart < totalFrames; chunkStart += ANALYSIS_CHUNK_FRAMES) {
+    const chunkEnd = Math.min(totalFrames, chunkStart + ANALYSIS_CHUNK_FRAMES)
+    for (let f = chunkStart; f < chunkEnd; f++) {
+      let sumSq = 0
+      for (let c = 0; c < channelCount; c++) {
+        const v = channels[c][f]
+        sumSq += v * v
+      }
+      const power = sumSq / channelCount
+      const barIdx = Math.min(targetBars - 1, Math.floor(f / framesPerBar))
+      barSumSq[barIdx] += power
+      barCount[barIdx] += 1
     }
-    const power = sumSq / channelCount
-    const barIdx = Math.min(targetBars - 1, Math.floor(f / framesPerBar))
-    barSumSq[barIdx] += power
-    barCount[barIdx] += 1
+    // Web Audio decoding is asynchronous, but the PCM walk is JavaScript. A
+    // macrotask yield keeps input, paint, and cancellation responsive.
+    if (chunkEnd < totalFrames) await new Promise<void>((resolve) => setTimeout(resolve, 0))
   }
 
   // RMS per bar — Math.fround mirrors the iOS casts to 32-bit Float

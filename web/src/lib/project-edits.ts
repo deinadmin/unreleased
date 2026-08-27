@@ -20,7 +20,6 @@ import {
 } from "./project-cover-cache"
 import { invalidatePlayedTrackCache } from "./track-cache"
 import type { GradientTheme, Project, Track } from "./types"
-import { deleteVersionAccess } from "./version-edits"
 
 /** Firestore edits for the user's own projects, mirroring the iOS `EditProjectSheet.save()`. */
 
@@ -106,9 +105,8 @@ export async function deleteTrack(uid: string, project: Project, trackID: string
     tracks,
     updatedDate: Timestamp.now(),
   })
-  // Best-effort cleanup of the cloud audio files and version visibility index.
+  // Best-effort cleanup of cloud audio. The project trigger removes indexes.
   deleteAudioObjects(audioPaths(target))
-  deleteVersionAccess(uid, target.versions.map((v) => v.id))
 }
 
 /** A track queued for deletion, identified by the project that holds it. */
@@ -149,7 +147,6 @@ export async function deleteTracks(
         updatedDate: Timestamp.now(),
       })
       removedPaths.push(...removed.flatMap(audioPaths))
-      deleteVersionAccess(uid, removed.flatMap((t) => t.versions.map((v) => v.id)))
     }),
   )
   // Best-effort cleanup of the cloud audio files.
@@ -269,14 +266,6 @@ export async function deleteProject(uid: string, project: Project): Promise<void
   pendingInvites.forEach((snapshot) => batch.delete(snapshot.ref))
   batch.delete(doc(db, "users", uid, "projectPreviews", project.id))
 
-  for (const track of project.tracks) {
-    const versionIDs = track.versions.length > 0
-      ? track.versions.map((version) => version.id)
-      : [track.id]
-    for (const versionID of versionIDs) {
-      batch.delete(doc(db, "users", uid, "versionAccess", versionID))
-    }
-  }
   batch.delete(projectRef)
   await batch.commit()
 

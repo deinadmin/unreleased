@@ -13,6 +13,22 @@ export class InvalidProfilePhotoError extends Error {
   }
 }
 
+function canonicalProfilePhotoURL(rawValue: unknown, uid: string): string | undefined {
+  if (typeof rawValue !== "string") return undefined
+  try {
+    const url = new URL(rawValue)
+    const path = decodeURIComponent(url.pathname)
+    if (
+      url.protocol !== "https:" ||
+      url.hostname !== "firebasestorage.googleapis.com" ||
+      !path.endsWith(`/o/users/${uid}/profile/avatar.jpg`)
+    ) return undefined
+    return url.toString()
+  } catch {
+    return undefined
+  }
+}
+
 /**
  * Center-crops a user-selected image, uploads a compact JPEG, and updates the
  * Firebase Auth profile so every avatar in the web app sees the new photo.
@@ -63,8 +79,8 @@ export async function setProfilePhoto(user: FirebaseUser, file: File): Promise<s
 /** Resolves another user's current avatar, including legacy Storage-only uploads. */
 export async function fetchProfilePhotoURL(uid: string): Promise<string | undefined> {
   const profile = await getDoc(doc(db, "userProfiles", uid)).catch(() => null)
-  const profileURL = profile?.data()?.avatarURL
-  if (typeof profileURL === "string" && profileURL) return profileURL
+  const profileURL = canonicalProfilePhotoURL(profile?.data()?.avatarURL, uid)
+  if (profileURL) return profileURL
 
   const avatarRef = storageRef(storage, `users/${uid}/profile/avatar.jpg`)
   try {

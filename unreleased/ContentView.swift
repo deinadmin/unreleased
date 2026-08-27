@@ -120,7 +120,6 @@ struct ContentView: View {
                     Color.clear.frame(height: 66)
                 }
             }
-            .blur(radius: player.isShowingNowPlaying ? 24 : 0)
             .overlay {
                 if player.isShowingNowPlaying {
                     Color.black

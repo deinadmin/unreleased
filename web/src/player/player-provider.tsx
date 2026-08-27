@@ -9,7 +9,11 @@ import {
   type ReactNode,
 } from "react"
 import { toast } from "@/lib/toast"
-import { playbackSource } from "@/lib/storage-urls"
+import {
+  playbackSource,
+  refreshedPlaybackSource,
+  type PlaybackSource,
+} from "@/lib/storage-urls"
 import { preparePlayedTrackCache } from "@/lib/track-cache"
 import { equalizerRouting } from "@/player/equalizer"
 import {
@@ -125,26 +129,38 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       setDuration(nextTrack.duration)
       setProgress(0)
       setIsLoading(true)
-      playbackSource(storagePath, playbackQuality)
-        .then((source) => {
+      const start = (source: PlaybackSource, canRefreshURL: boolean): Promise<void> => {
+        preparePlayedTrackCache(
+          source.storagePath,
+          source.isOriginal ? nextTrack.fileSize : 0,
+        )
+        // The equalizer decides whether this load has to be a CORS request.
+        equalizerRouting.prepare(audio)
+        audio.src = source.url
+        audio.currentTime = 0
+        return audio.play().catch(async (error) => {
+          // A CORS load the storage bucket refuses is recoverable: retry the
+          // same source plainly, leaving the equalizer switched out.
           if (loadToken.current !== token) return
-          preparePlayedTrackCache(
-            source.storagePath,
-            source.isOriginal ? nextTrack.fileSize : 0,
-          )
-          // The equalizer decides whether this load has to be a CORS request.
-          equalizerRouting.prepare(audio)
-          audio.src = source.url
-          audio.currentTime = 0
-          return audio.play().catch((error) => {
-            // A CORS load the storage bucket refuses is recoverable: retry the
-            // same source plainly, leaving the equalizer switched out.
-            if (loadToken.current !== token) return
-            if (!equalizerRouting.recoverFromLoadFailure(audio)) throw error
+          if (equalizerRouting.recoverFromLoadFailure(audio)) {
             audio.src = source.url
             audio.currentTime = 0
             return audio.play()
-          })
+          }
+          // The cached URL may simply carry a rotated download token. One
+          // freshly resolved URL distinguishes a revoked listener from a
+          // listener holding a stale token.
+          if (!canRefreshURL) throw error
+          const refreshed = await refreshedPlaybackSource(storagePath, playbackQuality)
+          if (loadToken.current !== token) return
+          return start(refreshed, false)
+        })
+      }
+
+      playbackSource(storagePath, playbackQuality)
+        .then((source) => {
+          if (loadToken.current !== token) return
+          return start(source, true)
         })
         .catch((error) => {
           if (loadToken.current !== token) return
@@ -201,12 +217,15 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       playbackSource(storagePath, playbackQuality)
         .then((source) => {
           if (loadToken.current !== token) return
-          preparePlayedTrackCache(
-            source.storagePath,
-            source.isOriginal ? nextTrack.fileSize : 0,
-          )
-
-          const load = (canRetryWithoutCORS: boolean) => {
+          const load = (
+            current: PlaybackSource,
+            canRetryWithoutCORS: boolean,
+            canRefreshURL: boolean,
+          ) => {
+            preparePlayedTrackCache(
+              current.storagePath,
+              current.isOriginal ? nextTrack.fileSize : 0,
+            )
             // The equalizer decides whether this load has to be a CORS request.
             equalizerRouting.prepare(audio)
             const onReady = () => {
@@ -227,7 +246,20 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
               // A CORS load the storage bucket refuses is recoverable: retry the
               // same source plainly, leaving the equalizer switched out.
               if (canRetryWithoutCORS && equalizerRouting.recoverFromLoadFailure(audio)) {
-                load(false)
+                load(current, false, canRefreshURL)
+                return
+              }
+              // Or the cached URL carries a download token the server rotated.
+              if (canRefreshURL) {
+                void refreshedPlaybackSource(storagePath, playbackQuality)
+                  .then((refreshed) => {
+                    if (loadToken.current !== token) return
+                    load(refreshed, true, false)
+                  })
+                  .catch(() => {
+                    release()
+                    toast("Couldn't play this version. Check your connection and try again.")
+                  })
                 return
               }
               release()
@@ -235,9 +267,9 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
             }
             audio.addEventListener("loadedmetadata", onReady, { once: true })
             audio.addEventListener("error", onError, { once: true })
-            audio.src = source.url
+            audio.src = current.url
           }
-          load(true)
+          load(source, true, true)
         })
         .catch((error) => {
           if (loadToken.current !== token) return

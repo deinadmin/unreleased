@@ -4,23 +4,18 @@ import {
   deleteDoc,
   deleteField,
   doc,
-  endAt,
-  documentId,
   getDoc,
   getDocs,
-  limit,
   onSnapshot,
-  orderBy,
-  query,
   setDoc,
-  startAt,
   writeBatch,
   type QuerySnapshot,
   type Unsubscribe,
 } from "firebase/firestore"
+import { httpsCallable } from "firebase/functions"
+import { getToken } from "firebase/app-check"
 import { decodeGradient, encodeGradient } from "./codec"
-import { db } from "./firebase"
-import { fetchProfilePhotoURL } from "./profile-photo"
+import { appCheck, db, functions } from "./firebase"
 import type {
   InviteeInfo,
   PendingInviteInfo,
@@ -41,29 +36,62 @@ export function shareLink(ownerUID: string, projectID: string): string {
   return `${publicWebOrigin}/shared/${encodeURIComponent(ownerUID)}/${encodeURIComponent(projectID.toLowerCase())}`
 }
 
-/** Public proxy URL for link-preview playback without accepting the project. */
-export function publicTrackURL(ownerUID: string, projectID: string, trackID: string): string {
+function publicProjectURL(ownerUID: string, projectID: string): URL {
   const firebaseProjectID = import.meta.env.VITE_FIREBASE_PROJECT_ID
   const url = new URL(
     `https://us-central1-${firebaseProjectID}.cloudfunctions.net/getPublicProject`,
   )
   url.searchParams.set("ownerId", ownerUID)
   url.searchParams.set("projectId", projectID.toLowerCase())
-  url.searchParams.set("media", "track")
-  url.searchParams.set("trackId", trackID)
-  return url.toString()
+  return url
 }
 
-/** Public proxy URL for link-preview cover artwork. */
-export function publicCoverURL(ownerUID: string, projectID: string): string {
-  const firebaseProjectID = import.meta.env.VITE_FIREBASE_PROJECT_ID
-  const url = new URL(
-    `https://us-central1-${firebaseProjectID}.cloudfunctions.net/getPublicProject`,
-  )
-  url.searchParams.set("ownerId", ownerUID)
-  url.searchParams.set("projectId", projectID.toLowerCase())
-  url.searchParams.set("media", "cover")
-  return url.toString()
+/** A track as exposed by `getPublicProject` — private versions are never included. */
+export interface PublicTrack {
+  id: string
+  title: string
+  fileName: string
+  fileSize: number
+  duration: number
+  addedDate: string
+  waveform?: string
+  audioUrl: string
+}
+
+export interface PublicProject {
+  id: string
+  name: string
+  ownerUsername: string
+  gradient: { colors: string[]; startX: number; startY: number; endX: number; endY: number }
+  accentColorHex?: string
+  coverGradientColors?: string[]
+  coverUrl?: string
+  createdDate: string
+  updatedDate: string
+  tracks: PublicTrack[]
+}
+
+/**
+ * Loads the sanitized public projection of a shared project.
+ *
+ * Listeners who are not the owner or an accepted invitee read the project from
+ * here rather than from Firestore. The raw project document carries private
+ * versions and per-track notes, and filtering those in the browser would mean
+ * they had already been delivered to it. Returned media URLs are short-lived,
+ * path-scoped Storage signatures rather than permanent download tokens.
+ */
+export async function fetchPublicProject(
+  ownerUID: string,
+  projectID: string,
+): Promise<PublicProject | null> {
+  if (!appCheck) return null
+  const token = await getToken(appCheck, false).catch(() => null)
+  if (!token) return null
+  const response = await fetch(publicProjectURL(ownerUID, projectID).toString(), {
+    headers: { "X-Firebase-AppCheck": token.token },
+  }).catch(() => null)
+  if (!response?.ok) return null
+  return (await response.json().catch(() => null)) as PublicProject | null
 }
 
 const previewDoc = (ownerUID: string, projectID: string) =>
@@ -365,36 +393,28 @@ export async function cancelInvite(
 
 // MARK: - User search
 
-/** Prefix search over the `usernames` index (doc ID = lowercased username). */
+/**
+ * Prefix search over the `usernames` index, run server-side.
+ *
+ * Doing this in the browser required `list` permission on `usernames`, which
+ * is a directory dump of every uid in the system — enough to enumerate other
+ * users' projects and share links. The callable applies the same prefix query
+ * with the caller's identity and returns only what the UI needs.
+ */
 export async function searchUsers(
   rawPrefix: string,
-  excludingUID: string | null,
+  _excludingUID: string | null,
   maxResults = 10,
 ): Promise<UserSearchResult[]> {
   const prefix = rawPrefix.toLowerCase().trim()
-  if (!prefix) return []
-  const usersQuery = query(
-    collection(db, "usernames"),
-    orderBy(documentId()),
-    startAt(prefix),
-    endAt(prefix + "\uf8ff"),
-    limit(maxResults + 1),
+  if (prefix.length < 2) return []
+  const call = httpsCallable<{ prefix: string }, { results: UserSearchResult[] }>(
+    functions,
+    "searchUsers",
   )
-  const snapshot = await getDocs(usersQuery).catch(() => null)
-  if (!snapshot) return []
-  const matches = snapshot.docs
-    .flatMap((docSnap) => {
-      const uid = docSnap.data().uid
-      if (typeof uid !== "string" || uid === excludingUID) return []
-      return [{ id: uid, username: docSnap.id }]
-    })
-    .slice(0, maxResults)
-  return Promise.all(
-    matches.map(async (match) => ({
-      ...match,
-      avatarURL: await fetchProfilePhotoURL(match.id),
-    })),
-  )
+  const response = await call({ prefix }).catch(() => null)
+  if (!response) return []
+  return (response.data.results ?? []).slice(0, maxResults)
 }
 
 // MARK: - Accepted shared-project refs (web library persistence)

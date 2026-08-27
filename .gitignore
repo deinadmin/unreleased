@@ -3,3 +3,19 @@
 /firebase-debug.log
 /certs/*
 /GoogleService-Info.plist
+
+# Environment files. web/.env holds the Firebase web config and the App Check
+# site key; nothing here is a signing secret, but it is per-environment and
+# should not be committed.
+.env
+.env.*
+!.env.example
+
+node_modules/
+/web/dist/
+/web/.vite/
+/rules-tests/node_modules/
+**/firebase-debug.log
+**/firestore-debug.log
+**/ui-debug.log
+.DS_Store

@@ -373,8 +373,11 @@ enum ProjectInviteService {
             gradient: gradient,
             coverStoragePath: data["coverStoragePath"] as? String,
             accentColorHex: data["accentColorHex"] as? String,
-            // Older preview docs predate this flag; treat them as enabled.
-            linkEnabled: data["linkEnabled"] as? Bool ?? true
+            // Must match the Firestore rules and `getPublicProject`, which both
+            // require the flag to be exactly true. Defaulting a missing flag to
+            // enabled would offer an Accept button the server then rejects.
+            // `ensurePreview`/`writePreview` seed it, so absence means not shared.
+            linkEnabled: data["linkEnabled"] as? Bool ?? false
         )
     }
 

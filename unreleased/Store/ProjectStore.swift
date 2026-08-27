@@ -46,6 +46,8 @@ final class ProjectStore {
     private var storageService: StorageEnforcementService?
     private var serverStorageAtCapacity = false
     private var storageUploadWasRejected = false
+    /// Authoritative usage from `users/{uid}/storage/state`; nil until it loads.
+    private var serverUsedBytes: Int64?
     private var profileService: UserProfileService?
     private var sharedSyncService: SharedProjectSyncService?
     private var notificationsService: NotificationsService?
@@ -159,7 +161,10 @@ final class ProjectStore {
 
     /// Only the user's own projects count against their storage limit. Shared
     /// projects they merely follow/stream live in the owner's storage, not theirs.
-    var totalUsedStorageBytes: Int64 {
+    ///
+    /// This sees audio only, and does not know about anything still queued for
+    /// upload on another device, so it is the fallback rather than the answer.
+    private var locallyTrackedStorageBytes: Int64 {
         projects
             .filter { !$0.isShared }
             .flatMap(\.tracks)
@@ -168,6 +173,18 @@ final class ProjectStore {
                     ? track.fileSize
                     : track.versions.reduce(0) { $0 + $1.fileSize })
             }
+    }
+
+    /// Bytes counted against the plan limit.
+    ///
+    /// The server figure is authoritative: it meters every prefix a client can
+    /// write (audio, cover art and the profile picture), which the local sum
+    /// cannot see. Local tracks still act as a floor so audio that is queued
+    /// but not yet uploaded is budgeted for instead of being waved through and
+    /// rejected on arrival.
+    var totalUsedStorageBytes: Int64 {
+        guard let serverUsedBytes else { return locallyTrackedStorageBytes }
+        return max(serverUsedBytes, locallyTrackedStorageBytes)
     }
 
     var freeStorageBytes: Int64 {
@@ -232,6 +249,7 @@ final class ProjectStore {
         storageService = nil
         serverStorageAtCapacity = false
         storageUploadWasRejected = false
+        serverUsedBytes = nil
 
         profileService?.stop()
         profileService = nil
@@ -274,6 +292,7 @@ final class ProjectStore {
             userID: userID,
             onState: { [weak self] state in
                 guard let self else { return }
+                self.serverUsedBytes = state.usedBytes
                 self.serverStorageAtCapacity = state.overLimit
                     || state.limitBytes.map { state.usedBytes >= $0 } == true
 
@@ -808,15 +827,7 @@ final class ProjectStore {
         }
         projects[pIdx].tracks[tIdx].versions[vIdx].isPublic = isPublic
         projects[pIdx].updatedDate = Date()
-        let updatedVersion = projects[pIdx].tracks[tIdx].versions[vIdx]
         save()
-        let service = syncService
-        Task {
-            await service?.updateVersionAccess(
-                projectID: projectID,
-                version: updatedVersion
-            )
-        }
     }
 
     func deleteVersion(_ versionID: UUID, from trackID: UUID, in projectID: UUID) {
@@ -868,13 +879,15 @@ final class ProjectStore {
     }
 
     @discardableResult
-    func saveCoverImage(_ image: UIImage, projectID: UUID) -> String? {
+    func saveCoverImage(_ image: UIImage, projectID: UUID) async -> String? {
         let version = Int(Date().timeIntervalSince1970)
         let fileName = "\(projectID.uuidString)-\(version).jpg"
         let url = coverImagesURL.appendingPathComponent(fileName)
-        guard let optimized = PhotoUploadCompression.cover(image) else { return nil }
+        guard let optimized = await PhotoUploadCompression.cover(image) else { return nil }
         do {
-            try optimized.data.write(to: url, options: .atomic)
+            try await Task.detached(priority: .utility) {
+                try optimized.data.write(to: url, options: .atomic)
+            }.value
             coverImageCache[fileName] = optimized.image
             return fileName
         } catch {
@@ -970,6 +983,12 @@ final class ProjectStore {
 
     func importAudioFile(from sourceURL: URL) async throws -> Track {
         let ext = sourceURL.pathExtension.lowercased()
+        let supportedExtensions = Set([
+            "mp3", "m4a", "wav", "aiff", "aif", "flac", "aac"
+        ])
+        guard supportedExtensions.contains(ext) else {
+            throw AudioImportError.unsupportedFormat
+        }
         let fileName = "\(UUID().uuidString).\(ext)"
         let documentsFolder = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         let audioFolder = documentsFolder.appendingPathComponent("AudioFiles", isDirectory: true)
@@ -1549,9 +1568,16 @@ final class ProjectStore {
     /// Wipes all locally persisted library data. Call on sign-out so the next
     /// account starts from a clean slate rather than seeing the previous user's projects.
     func clearLocalLibrary() {
+        for task in downloadTasks.values { task.cancel() }
+        downloadTasks.removeAll()
         projects = []
+        coverImageCache.removeAll()
         let url = dataURL
+        let mediaDirectories = [audioFilesURL, downloadsURL, coverImagesURL]
         persistQueue.async { try? FileManager.default.removeItem(at: url) }
+        Task {
+            await AudioFileCache.shared.purgeLocalFiles(in: mediaDirectories)
+        }
     }
 
     private func load() {
@@ -1563,5 +1589,13 @@ final class ProjectStore {
         } catch {
             print("ProjectStore: load failed — \(error)")
         }
+    }
+}
+
+private enum AudioImportError: LocalizedError {
+    case unsupportedFormat
+
+    var errorDescription: String? {
+        "Choose an MP3, M4A, WAV, AIFF, FLAC, or AAC audio file."
     }
 }

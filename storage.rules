@@ -11,6 +11,32 @@ service firebase.storage {
         && request.auth.token.firebase.sign_in_provider == 'anonymous';
     }
 
+    // Deletes arrive with no `request.resource`, so upload constraints must be
+    // skipped for them (the owner may always remove their own objects).
+    function isDelete() {
+      return request.resource == null;
+    }
+
+    // Per-object ceiling for audio. The *cumulative* plan quota is enforced
+    // server-side by `enforceStorageLimit`; this only stops a single request
+    // from parking an arbitrarily large object before the trigger can react.
+    // The extension allowlist keeps the bucket from being used as a file host.
+    function isAcceptableAudio(fileName) {
+      return request.resource.size < 500 * 1024 * 1024
+        && fileName.matches('(?i).+\\.(mp3|m4a|wav|aiff|aif|flac|aac)')
+        && request.resource.contentType.matches(
+          '(?i)^audio/(mpeg|mp4|x-m4a|wav|x-wav|wave|aiff|x-aiff|flac|x-flac|aac|x-aac)$'
+        );
+    }
+
+    // Clients compress before upload (cover <= 1.5 MB, avatar <= 500 KB); these
+    // ceilings reject anything that skipped compression. Images only — JPEG is
+    // the single format both clients produce.
+    function isAcceptableImage(maxBytes) {
+      return request.resource.size < maxBytes
+        && request.resource.contentType == 'image/jpeg';
+    }
+
     // Version audio has a dedicated path so visibility is enforced server-side.
     // A public version is readable only by the owner, an accepted project
     // invitee, or an anonymous share-link guest while link sharing is enabled.
@@ -51,26 +77,37 @@ service firebase.storage {
           )
         );
 
-      allow write: if request.auth != null && request.auth.uid == userId;
+      allow write: if isOwner(userId)
+        && versionId.matches(
+          '(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+        )
+        && fileName.matches('(?i)^audio\\.(mp3|m4a|wav|aiff|aif|flac|aac)$')
+        && (isDelete() || isAcceptableAudio(fileName));
     }
 
     match /users/{userId}/audio/{fileName} {
+      // Legacy flat-path audio predates per-version paths, but a migrated
+      // track's version 0 keeps this path — so `isPublic` must be honored here
+      // exactly as it is under audio/versions/. The index carries the most
+      // restrictive visibility of every version that resolves to this object.
       function collaboratorCanReadTrack() {
         let access = firestore.get(
           /databases/(default)/documents/users/$(userId)/trackFileAccess/$(fileName)
         );
-        return firestore.exists(
-          /databases/(default)/documents/users/$(userId)/projects/$(access.data.projectID)/invitees/$(request.auth.uid)
-        );
+        return access.data.isPublic == true
+          && firestore.exists(
+            /databases/(default)/documents/users/$(userId)/projects/$(access.data.projectID)/invitees/$(request.auth.uid)
+          );
       }
 
       function linkSharedCanReadTrack() {
         let access = firestore.get(
           /databases/(default)/documents/users/$(userId)/trackFileAccess/$(fileName)
         );
-        return firestore.get(
-          /databases/(default)/documents/users/$(userId)/projectPreviews/$(access.data.projectID)
-        ).data.linkEnabled == true;
+        return access.data.isPublic == true
+          && firestore.get(
+            /databases/(default)/documents/users/$(userId)/projectPreviews/$(access.data.projectID)
+          ).data.linkEnabled == true;
       }
 
       allow read: if request.auth != null
@@ -84,7 +121,11 @@ service firebase.storage {
         );
 
       // Only the owner can upload or delete their own audio files.
-      allow write: if request.auth != null && request.auth.uid == userId;
+      allow write: if isOwner(userId)
+        && fileName.matches(
+          '(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\\.(mp3|m4a|wav|aiff|aif|flac|aac)$'
+        )
+        && (isDelete() || isAcceptableAudio(fileName));
     }
 
     // Server-generated AAC copies inherit the original track's project access.
@@ -93,18 +134,20 @@ service firebase.storage {
         let access = firestore.get(
           /databases/(default)/documents/users/$(userId)/trackAccess/$(trackId)
         );
-        return firestore.exists(
-          /databases/(default)/documents/users/$(userId)/projects/$(access.data.projectID)/invitees/$(request.auth.uid)
-        );
+        return access.data.isPublic == true
+          && firestore.exists(
+            /databases/(default)/documents/users/$(userId)/projects/$(access.data.projectID)/invitees/$(request.auth.uid)
+          );
       }
 
       function linkSharedCanReadTrackRendition() {
         let access = firestore.get(
           /databases/(default)/documents/users/$(userId)/trackAccess/$(trackId)
         );
-        return firestore.get(
-          /databases/(default)/documents/users/$(userId)/projectPreviews/$(access.data.projectID)
-        ).data.linkEnabled == true;
+        return access.data.isPublic == true
+          && firestore.get(
+            /databases/(default)/documents/users/$(userId)/projectPreviews/$(access.data.projectID)
+          ).data.linkEnabled == true;
       }
 
       allow read: if request.auth != null
@@ -183,32 +226,31 @@ service firebase.storage {
           )
         );
 
-      // Only the owner can upload or delete their own cover images. Clients
-      // compress covers to <= 1.5 MB; the 2 MB ceiling rejects full-size photos.
-      allow write: if request.auth != null
-                   && request.auth.uid == userId
-                   && (
-                     request.resource == null
-                     || (
-                       request.resource.size < 2 * 1024 * 1024
-                       && request.resource.contentType == 'image/jpeg'
-                     )
-                   );
+      // The name must begin with the owning project's UUID so a cover always
+      // belongs to a project; the trailing version segment keeps the path
+      // immutable for long-lived caching. `sweepReplacedCovers` deletes every
+      // superseded and orphaned cover, so a project can only ever hold one.
+      // Covers also count against the plan quota.
+      allow write: if isOwner(userId)
+        && (
+          isDelete()
+          || (
+            isAcceptableImage(2 * 1024 * 1024)
+            && fileName.matches(
+              '[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}-[0-9A-Za-z-]{1,80}\\.jpg'
+            )
+          )
+        );
     }
 
     match /users/{userId}/profile/{fileName} {
       // Profile pictures are visible to signed-in collaborators. Only the
-      // account owner may upload an image. Clients target <= 500 KB.
+      // account owner may upload, and only to the single canonical object —
+      // a wildcard here would be an unmetered place to park arbitrary files.
       allow read: if request.auth != null;
-      allow write: if request.auth != null
-                   && request.auth.uid == userId
-                   && (
-                     request.resource == null
-                     || (
-                       request.resource.size < 1024 * 1024
-                       && request.resource.contentType == 'image/jpeg'
-                     )
-                   );
+      allow write: if isOwner(userId)
+        && fileName == 'avatar.jpg'
+        && (isDelete() || isAcceptableImage(1024 * 1024));
     }
   }
 }

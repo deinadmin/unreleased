@@ -5,6 +5,9 @@ enum AudioImportBridge {
     private static let pendingImportKey = "pendingImport"
     private static let projectMirrorsKey = "projectMirrors"
     private static let incomingFolderName = "IncomingImports"
+    private static let supportedExtensions = Set([
+        "mp3", "m4a", "wav", "aiff", "aif", "flac", "aac"
+    ])
 
     private static var defaults: UserDefaults? {
         UserDefaults(suiteName: appGroupID)
@@ -79,7 +82,7 @@ enum AudioImportBridge {
 
         var stagedItems: [PendingImport.Item] = []
         for source in sourceItems {
-            let ext = source.url.pathExtension.isEmpty ? "m4a" : source.url.pathExtension
+            let ext = try validatedExtension(for: source.url)
             let filename = "\(UUID().uuidString).\(ext)"
             let destination = incomingDirectory.appendingPathComponent(filename)
             try FileManager.default.copyItem(at: source.url, to: destination)
@@ -100,7 +103,7 @@ enum AudioImportBridge {
 
         clearPendingImport()
 
-        let ext = sourceURL.pathExtension.isEmpty ? "m4a" : sourceURL.pathExtension
+        let ext = try validatedExtension(for: sourceURL)
         let filename = "\(UUID().uuidString).\(ext)"
         let destination = incomingDirectory.appendingPathComponent(filename)
         try FileManager.default.copyItem(at: sourceURL, to: destination)
@@ -149,7 +152,25 @@ enum AudioImportBridge {
         }
     }
 
-    enum BridgeError: Error {
+    private static func validatedExtension(for url: URL) throws -> String {
+        let ext = url.pathExtension.lowercased()
+        guard supportedExtensions.contains(ext) else {
+            throw BridgeError.unsupportedAudioFormat
+        }
+        return ext
+    }
+
+    enum BridgeError: LocalizedError {
         case appGroupUnavailable
+        case unsupportedAudioFormat
+
+        var errorDescription: String? {
+            switch self {
+            case .appGroupUnavailable:
+                "The shared import folder is unavailable."
+            case .unsupportedAudioFormat:
+                "Choose an MP3, M4A, WAV, AIFF, FLAC, or AAC audio file."
+            }
+        }
     }
 }

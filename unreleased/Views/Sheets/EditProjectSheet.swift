@@ -10,6 +10,7 @@ struct EditProjectSheet: View {
     @State private var gradient: GradientTheme
     @State private var coverImage: UIImage?
     @State private var previewVinylGradient: GradientTheme? = nil
+    @State private var isSaving = false
     /// The cover image as loaded when the sheet was opened, used to detect whether
     /// the user actually changed it (vs just viewing it) before re-saving to disk.
     private let originalCoverImage: UIImage?
@@ -44,11 +45,12 @@ struct EditProjectSheet: View {
                         .padding(8)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("Save") { save() }
+                    Button("Save") { Task { await save() } }
                         .buttonStyle(.glassProminent)
                         .tint(.accentColor)
                         .foregroundStyle(.white)
                         .fontWeight(.semibold)
+                        .disabled(isSaving)
                         .fixedSize(horizontal: true, vertical: false)
                         .padding(8)
                 }
@@ -112,7 +114,7 @@ struct EditProjectSheet: View {
                 .font(.system(size: 17))
                 .padding(14)
                 .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                .onSubmit { save() }
+                .onSubmit { Task { await save() } }
         }
     }
 
@@ -127,7 +129,10 @@ struct EditProjectSheet: View {
         }
     }
 
-    private func save() {
+    private func save() async {
+        guard !isSaving else { return }
+        isSaving = true
+        defer { isSaving = false }
         var updated = project
         let trimmed = name.trimmingCharacters(in: .whitespaces)
         updated.name = trimmed.isEmpty ? "untitled project" : trimmed
@@ -150,7 +155,10 @@ struct EditProjectSheet: View {
                     store.deleteCoverFromCloud(storagePath: previousCloudPath)
                     updated.coverStoragePath = nil
                 }
-                updated.coverImageFileName = store.saveCoverImage(coverImage, projectID: project.id)
+                updated.coverImageFileName = await store.saveCoverImage(
+                    coverImage,
+                    projectID: project.id
+                )
             } else if updated.coverImageFileName != nil {
                 store.deleteCoverImage(fileName: updated.coverImageFileName)
                 updated.coverImageFileName = nil

@@ -3,34 +3,108 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isUser(userId) {
+      return request.auth != null && request.auth.uid == userId;
+    }
+
+    function isProjectInvitee(ownerId, projectId) {
+      return request.auth != null
+        && exists(/databases/$(database)/documents/users/$(ownerId)/projects/$(projectId)/invitees/$(request.auth.uid));
+    }
+
+    function hasPendingProjectInvite(ownerId, projectId) {
+      return request.auth != null
+        && exists(/databases/$(database)/documents/users/$(ownerId)/projects/$(projectId)/pendingInvites/$(request.auth.uid));
+    }
+
+    function isValidUsername(username) {
+      return username is string
+        && username.matches('^[a-z0-9_]{3,20}$');
+    }
+
+    function ownsUsernameReservation(userId, username) {
+      return isValidUsername(username)
+        && getAfter(/databases/$(database)/documents/usernames/$(username)).data.uid == userId;
+    }
+
+    function isCanonicalAvatarURL(userId, avatarURL) {
+      return avatarURL is string
+        && avatarURL.size() <= 2048
+        && avatarURL.matches(
+          '^https://firebasestorage\\.googleapis\\.com/v0/b/[^/]+/o/users%2F'
+            + userId
+            + '%2Fprofile%2Favatar\\.jpg\\?.*$'
+        );
+    }
+
+    function isValidUserProfile(userId) {
+      return request.resource.data.keys().hasOnly([
+          'username', 'avatarURL', 'avatarUpdatedAt'
+        ])
+        && (
+          !('username' in request.resource.data)
+          || ownsUsernameReservation(userId, request.resource.data.username)
+        )
+        && (
+          !('avatarURL' in request.resource.data)
+          || isCanonicalAvatarURL(userId, request.resource.data.avatarURL)
+        )
+        && (
+          !('avatarUpdatedAt' in request.resource.data)
+          || request.resource.data.avatarUpdatedAt is timestamp
+        );
+    }
+
     // ── Username uniqueness index ────────────────────────────────────────────
-    // Any authenticated user can read (availability check).
-    // Only the holder can create the entry; no updates or client-side deletes.
+    // Exact lookups only. `list` is denied because a prefix query over this
+    // collection dumps every uid in the system, which turns share-link UUIDs
+    // and project IDs into enumerable values. Invite search goes through the
+    // `searchUsers` callable instead.
     match /usernames/{username} {
-      allow read: if request.auth != null;
-      allow create: if request.auth != null
-        && request.resource.data.uid == request.auth.uid;
+      allow get: if isSignedIn();
+      allow list: if false;
+
+      // A claim is only valid as part of the same atomic transaction that
+      // points the claimer's profile at this exact name, so one account can
+      // never accumulate names. `releaseReplacedUsername` frees the old entry.
+      allow create: if isSignedIn()
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.keys().hasOnly(['uid'])
+        && getAfter(/databases/$(database)/documents/userProfiles/$(request.auth.uid))
+             .data.username.lower() == username;
       allow update, delete: if false;
     }
 
     // ── User profiles (app-written: username) ────────────────────────────────
-    // Any authenticated user can read (for displaying owner names).
-    // Only the owner can write their own profile.
+    // Readable by uid for displaying owner names and avatars; not enumerable.
     match /userProfiles/{userId} {
-      allow read: if request.auth != null;
-      allow write: if request.auth != null && request.auth.uid == userId;
+      allow get: if isSignedIn();
+      allow list: if false;
+      // A profile username is valid only while the same transaction leaves a
+      // matching uniqueness reservation owned by this uid. Avatar URLs are
+      // pinned to the user's one canonical Storage object.
+      allow create, update: if isUser(userId) && isValidUserProfile(userId);
+      allow delete: if isUser(userId);
     }
 
     // ── Per-user data ────────────────────────────────────────────────────────
     match /users/{userId} {
       // Plan document: owner read-only, admin writes via console.
-      allow read: if request.auth != null && request.auth.uid == userId;
+      allow read: if isUser(userId);
       allow write: if false;
 
       // ── Private per-user data (FCM push token, etc.) ───────────────────────
-      // Readable/writable only by the owner. Cloud Functions (admin) bypass rules.
+      // Readable/writable only by the owner. Cloud Functions (admin) bypass
+      // rules. The document id is pinned to the known set so this cannot become
+      // an unmetered dumping ground for arbitrary documents.
       match /private/{docId} {
-        allow read, write: if request.auth != null && request.auth.uid == userId;
+        allow read: if isUser(userId);
+        allow write: if isUser(userId)
+          && docId in ['push', 'sharedProjects', 'equalizerPresets'];
       }
 
       // ── Storage enforcement state ──────────────────────────────────────────
@@ -39,14 +113,21 @@ service cloud.firestore {
       // displays and upsell prompts; clients can never write it, so a tampered app
       // cannot fake its usage or clear a quota rejection.
       match /storage/{docId} {
-        allow read: if request.auth != null && request.auth.uid == userId;
+        allow read: if isUser(userId);
         allow write: if false;
+      }
+
+      // One server-owned accounting record per metered Storage object. These
+      // make finalize/delete events idempotent without listing the bucket on
+      // every upload. Paths and generations are never client-authoritative.
+      match /storageObjects/{objectId} {
+        allow read, write: if false;
       }
 
       // Owner-maintained visibility index used by Cloud Storage rules for
       // version audio. Collaborators never need direct document access.
       match /versionAccess/{versionId} {
-        allow read, write: if request.auth != null && request.auth.uid == userId;
+        allow read, write: if isUser(userId);
       }
 
       // Server-maintained mapping from legacy flat audio paths to their
@@ -71,61 +152,85 @@ service cloud.firestore {
       // The recipient reads/updates/deletes their own notifications. The sender
       // may refresh or delete an invite notification for an idempotent re-invite
       // or when withdrawing a pending invite.
-      // Any authenticated user may create a notification addressed to this user,
-      // as long as they stamp themselves as the sender.
       match /notifications/{notificationId} {
-        allow read: if request.auth != null && request.auth.uid == userId;
-        allow update: if request.auth != null
+        // A sender may only address a recipient through the one deterministic
+        // document id for a project they actually own. Re-inviting overwrites
+        // that single document, so no sender can grow another user's
+        // collection (or their push volume) without bound.
+        function isOwnInviteForOwnProject() {
+          return request.resource.data.fromUID == request.auth.uid
+            && request.resource.data.type == 'projectInvite'
+            && request.resource.data.projectID is string
+            && notificationId ==
+                 'projectInvite-' + request.auth.uid + '-' + request.resource.data.projectID
+            && exists(
+                 /databases/$(database)/documents/users/$(request.auth.uid)/projects/$(request.resource.data.projectID)
+               );
+        }
+
+        allow read: if isUser(userId);
+        allow update: if isSignedIn()
           && (
-            request.auth.uid == userId
-            || (
-              resource.data.fromUID == request.auth.uid
-              && request.resource.data.fromUID == request.auth.uid
-              && request.resource.data.type == "projectInvite"
-            )
+            isUser(userId)
+            || (resource.data.fromUID == request.auth.uid && isOwnInviteForOwnProject())
           );
-        allow delete: if request.auth != null
-          && (
-            request.auth.uid == userId
-            || resource.data.fromUID == request.auth.uid
-          );
-        allow create: if request.auth != null
-          && request.resource.data.fromUID == request.auth.uid;
+        allow delete: if isSignedIn()
+          && (isUser(userId) || resource.data.fromUID == request.auth.uid);
+        allow create: if isSignedIn() && isOwnInviteForOwnProject();
       }
 
       // ── Invite previews ────────────────────────────────────────────────────
-      // Small preview docs (name, gradient, ownerUsername, linkEnabled) that any
-      // authenticated user can read so the invite sheet can display project
-      // info before the recipient has accepted.
+      // Small preview docs (name, gradient, ownerUsername, linkEnabled) shown on
+      // the invite sheet before a recipient accepts.
+      //
+      // `list` is denied and `get` is scoped: previously any signed-in user
+      // could page this collection to harvest every project id a user owns,
+      // which defeated the point of share links being unguessable UUIDs.
       match /projectPreviews/{projectId} {
-        allow read: if request.auth != null;
-        allow write: if request.auth != null && request.auth.uid == userId;
+        allow get: if isSignedIn()
+          && (
+            isUser(userId)
+            || resource.data.linkEnabled == true
+            || isProjectInvitee(userId, projectId)
+            || hasPendingProjectInvite(userId, projectId)
+          );
+        allow list: if false;
+        allow write: if isUser(userId)
+          && (request.resource == null || request.resource.data.linkEnabled is bool);
       }
 
       // ── Projects ───────────────────────────────────────────────────────────
       match /projects/{projectId} {
-        // Owner has full access.
-        allow read, write: if request.auth != null && request.auth.uid == userId;
+        // Owner has full access. `tracks` is capped so a single document cannot
+        // be grown without bound.
+        allow read: if isUser(userId);
+        allow write: if isUser(userId)
+          && (
+            request.resource == null
+            || !('tracks' in request.resource.data)
+            || (request.resource.data.tracks is list
+                && request.resource.data.tracks.size() <= 500)
+          );
 
         // Accepted invitees can read (but not write) the full project.
-        allow read: if request.auth != null
-          && exists(/databases/$(database)/documents/users/$(userId)/projects/$(projectId)/invitees/$(request.auth.uid));
+        // `get` only — `list` would expose the owner's whole library.
+        allow get: if isProjectInvitee(userId, projectId);
 
-        // Link sharing: anyone signed in (including anonymous guest sessions
-        // from the web player) can read while the owner's share link is on.
-        allow read: if request.auth != null
-          && get(/databases/$(database)/documents/users/$(userId)/projectPreviews/$(projectId)).data.linkEnabled == true;
+        // NOTE: link sharing deliberately grants NO direct access to this
+        // document. The raw project contains private versions and track notes,
+        // so guests and signed-in non-members read a sanitized projection from
+        // the `getPublicProject` function instead.
 
         // ── Invitees subcollection ─────────────────────────────────────────
         match /invitees/{inviteeId} {
           // Owner can read and manage all invitees.
-          allow read, write: if request.auth != null && request.auth.uid == userId;
+          allow read, write: if isUser(userId);
 
           // Users can add themselves (accept invite) only when either the
           // general link is enabled, or they were explicitly invited by username
           // (a pendingInvites doc exists for them). Existing invitees are
           // unaffected when the link is later disabled.
-          allow create: if request.auth != null
+          allow create: if isSignedIn()
             && request.auth.uid == inviteeId
             && request.resource.data.uid == request.auth.uid
             && (
@@ -133,28 +238,28 @@ service cloud.firestore {
                 exists(/databases/$(database)/documents/users/$(userId)/projectPreviews/$(projectId))
                 && get(/databases/$(database)/documents/users/$(userId)/projectPreviews/$(projectId)).data.linkEnabled == true
               )
-              || exists(/databases/$(database)/documents/users/$(userId)/projects/$(projectId)/pendingInvites/$(request.auth.uid))
+              || hasPendingProjectInvite(userId, projectId)
             );
 
           // Re-accepting is idempotent across devices. Once the invitee doc
           // exists, the same user may refresh only their own membership record.
-          allow update: if request.auth != null
+          allow update: if isSignedIn()
             && request.auth.uid == inviteeId
             && resource.data.uid == request.auth.uid
             && request.resource.data.uid == request.auth.uid;
 
           // Users can remove themselves (leave project).
-          allow delete: if request.auth != null && request.auth.uid == inviteeId;
+          allow delete: if isSignedIn() && request.auth.uid == inviteeId;
         }
 
         // ── Pending invites subcollection ──────────────────────────────────
         // Owner invites people by username; the invited user can read and clear
         // their own pending invite once accepted.
         match /pendingInvites/{inviteeId} {
-          allow read: if request.auth != null
+          allow read: if isSignedIn()
             && (request.auth.uid == userId || request.auth.uid == inviteeId);
-          allow create, update: if request.auth != null && request.auth.uid == userId;
-          allow delete: if request.auth != null
+          allow create, update: if isUser(userId);
+          allow delete: if isSignedIn()
             && (request.auth.uid == userId || request.auth.uid == inviteeId);
         }
       }

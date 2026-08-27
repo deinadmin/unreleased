@@ -13,6 +13,9 @@ import {
 import { doc, onSnapshot } from "firebase/firestore"
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react"
 import { auth, db } from "@/lib/firebase"
+import { clearDownloadURLCache } from "@/lib/storage-urls"
+import { clearProjectCoverCache } from "@/lib/project-cover-cache"
+import { clearPlayedTrackCache } from "@/lib/track-cache"
 
 interface AuthContextValue {
   user: User | null
@@ -113,6 +116,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await signInAnonymously(auth)
     },
     signOut: async () => {
+      await Promise.allSettled([
+        clearProjectCoverCache(),
+        clearPlayedTrackCache(),
+      ])
+      clearDownloadURLCache()
       await firebaseSignOut(auth)
     },
   }

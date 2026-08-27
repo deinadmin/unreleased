@@ -227,3 +227,15 @@ export async function invalidateProjectCover(storagePath: string | undefined): P
     ])
   }
 }
+
+/** Purges account-owned cover bytes and object URLs on sign-out. */
+export async function clearProjectCoverCache(): Promise<void> {
+  for (const request of pending.values()) request.controller.abort()
+  pending.clear()
+  for (const storagePath of [...memoryCache.keys()]) forgetFromMemory(storagePath)
+  generations.clear()
+  cacheSetup = undefined
+  if (supportsPersistentCache()) {
+    await window.caches.delete(CACHE_NAME).catch(() => false)
+  }
+}

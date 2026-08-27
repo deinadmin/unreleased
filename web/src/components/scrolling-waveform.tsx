@@ -16,6 +16,7 @@ export function ScrollingWaveform({
   getProgress,
   onSeek,
   duration,
+  isAnimating = false,
   visibleBars = 38,
   barColor = "rgba(255,255,255,0.72)",
   playedColor = "rgba(255,255,255,1)",
@@ -28,6 +29,8 @@ export function ScrollingWaveform({
   onSeek?: (fraction: number) => void
   /** Track duration in seconds — enables the scrub-time tooltip. */
   duration?: number
+  /** True only while this waveform's audio is actively advancing. */
+  isAnimating?: boolean
   visibleBars?: number
   barColor?: string
   playedColor?: string
@@ -38,6 +41,7 @@ export function ScrollingWaveform({
   const tooltipTextRef = useRef<HTMLSpanElement>(null)
   const [hovering, setHovering] = useState(false)
   const [dragging, setDragging] = useState(false)
+  const [isVisible, setIsVisible] = useState(true)
   const drag = useRef<{
     active: boolean
     startX: number
@@ -54,12 +58,28 @@ export function ScrollingWaveform({
 
   useEffect(() => {
     const canvas = canvasRef.current
+    if (!canvas || typeof IntersectionObserver === "undefined") return
+    const observer = new IntersectionObserver(
+      ([entry]) => setIsVisible(entry.isIntersecting),
+      { rootMargin: "80px" },
+    )
+    observer.observe(canvas)
+    return () => observer.disconnect()
+  }, [])
+
+  useEffect(() => {
+    const canvas = canvasRef.current
     if (!canvas) return
     const ctx = canvas.getContext("2d")
     if (!ctx) return
     let frame = 0
 
+    const scheduleDraw = () => {
+      if (!frame) frame = requestAnimationFrame(draw)
+    }
+
     const draw = () => {
+      frame = 0
       const dpr = window.devicePixelRatio || 1
       const width = canvas.clientWidth
       const height = canvas.clientHeight
@@ -103,11 +123,34 @@ export function ScrollingWaveform({
       ctx.roundRect(centerX - 1, 1, 2, height - 2, 1)
       ctx.fill()
 
-      frame = requestAnimationFrame(draw)
+      const shouldContinue =
+        isVisible &&
+        !document.hidden &&
+        (isAnimating || drag.current.active || performance.now() < drag.current.holdUntil)
+      if (shouldContinue) scheduleDraw()
     }
-    frame = requestAnimationFrame(draw)
-    return () => cancelAnimationFrame(frame)
-  }, [bars, visibleBars, barColor, playedColor, playheadColor, getProgress, duration])
+    const resizeObserver = new ResizeObserver(scheduleDraw)
+    resizeObserver.observe(canvas)
+    document.addEventListener("visibilitychange", scheduleDraw)
+    scheduleDraw()
+    return () => {
+      cancelAnimationFrame(frame)
+      resizeObserver.disconnect()
+      document.removeEventListener("visibilitychange", scheduleDraw)
+    }
+  }, [
+    bars,
+    visibleBars,
+    barColor,
+    playedColor,
+    playheadColor,
+    getProgress,
+    duration,
+    dragging,
+    hovering,
+    isAnimating,
+    isVisible,
+  ])
 
   const tooltipVisible = Boolean(duration) && (dragging || hovering)
 

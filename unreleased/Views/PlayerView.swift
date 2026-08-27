@@ -1517,7 +1517,10 @@ private struct HeroCoverView: View {
             // Both artwork layers use the same timeline angle. The Gaussian
             // blur is applied before rotation, allowing SwiftUI to transform
             // the blurred result instead of changing the blur itself.
-            TimelineView(.animation(minimumInterval: nil, paused: !isPlaying || isScrubbing)) { tl in
+            TimelineView(.animation(
+                minimumInterval: 1.0 / 30.0,
+                paused: !isPlaying || isScrubbing
+            )) { tl in
                 let degrees = rotationClock.rotation(at: tl.date)
 
                 ZStack {

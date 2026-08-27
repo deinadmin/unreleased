@@ -93,3 +93,14 @@ export function invalidatePlayedTrackCache(storagePath: string): void {
     )
     .catch(() => {})
 }
+
+/** Purges every downloaded track retained by the previous account. */
+export async function clearPlayedTrackCache(): Promise<void> {
+  const worker = await serviceWorkerTarget()
+  worker?.postMessage({ type: "UNRELEASED_TRACK_CACHE_CLEAR" })
+  if (!("caches" in window)) return
+  await Promise.all([
+    caches.delete(TRACK_CACHE_NAME),
+    caches.delete(TRACK_METADATA_CACHE_NAME),
+  ]).catch(() => [])
+}

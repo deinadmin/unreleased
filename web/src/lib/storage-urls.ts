@@ -123,3 +123,39 @@ export function invalidateDownloadURL(storagePath: string): void {
   resolvedCache.delete(storagePath)
   removePersisted(storagePath)
 }
+
+/** Removes every bearer URL retained for the previous signed-in account. */
+export function clearDownloadURLCache(): void {
+  cache.clear()
+  resolvedCache.clear()
+  try {
+    for (let index = localStorage.length - 1; index >= 0; index--) {
+      const key = localStorage.key(index)
+      if (key?.startsWith(STORAGE_KEY_PREFIX)) localStorage.removeItem(key)
+    }
+  } catch {
+    // Storage can be unavailable in private browsing.
+  }
+}
+
+/**
+ * Re-resolves a playback source after a load failure.
+ *
+ * A Firebase download URL embeds the object's download token, and the server
+ * rotates that token whenever access is revoked (a version turned private, a
+ * listener removed, a share link switched off). Every URL cached here — in
+ * memory and in localStorage — dies with it. Losing access should fail, but a
+ * listener who still has access should not have to reload the page, so one
+ * retry against a freshly minted URL tells the two cases apart.
+ */
+export async function refreshedPlaybackSource(
+  originalStoragePath: string,
+  quality: PlaybackQuality,
+): Promise<PlaybackSource> {
+  invalidateDownloadURL(originalStoragePath)
+  if (quality !== "original") {
+    const renditionPath = renditionStoragePath(originalStoragePath, quality)
+    if (renditionPath) invalidateDownloadURL(renditionPath)
+  }
+  return playbackSource(originalStoragePath, quality)
+}

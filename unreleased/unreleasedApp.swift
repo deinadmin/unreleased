@@ -1,3 +1,4 @@
+import FirebaseAppCheck
 import FirebaseAuth
 import FirebaseCore
 import FirebaseFirestore
@@ -13,6 +14,8 @@ struct unreleasedApp: App {
     @State private var linkRouter = ProjectLinkRouter()
 
     init() {
+        // Must be set before `configure()` so the first token request uses it.
+        Self.configureAppCheck()
         if FirebaseApp.app() == nil {
             FirebaseApp.configure()
         }
@@ -20,6 +23,22 @@ struct unreleasedApp: App {
         Self.configureFirestoreCache()
         AuthManager.configureGoogleSignIn()
         _authManager = State(initialValue: AuthManager())
+    }
+
+    /// Attests that requests come from a genuine build of this app rather than a
+    /// script holding the same public config.
+    ///
+    /// Enforcement is a per-service switch in the Firebase console. Until it is
+    /// turned on this only reports metrics, so shipping it is safe and lets the
+    /// "verified requests" share be confirmed before anything starts failing.
+    /// Debug builds use the debug provider, whose token has to be registered
+    /// under App Check > Apps > Manage debug tokens.
+    private static func configureAppCheck() {
+        #if DEBUG
+        AppCheck.setAppCheckProviderFactory(AppCheckDebugProviderFactory())
+        #else
+        AppCheck.setAppCheckProviderFactory(AppAttestProviderFactory())
+        #endif
     }
 
     /// UserDefaults is wiped when the app is deleted; Keychain is not.
@@ -35,7 +54,10 @@ struct unreleasedApp: App {
 
     private static func configureFirestoreCache() {
         let settings = FirestoreSettings()
-        settings.cacheSettings = PersistentCacheSettings()
+        // ProjectStore already owns the explicit offline library. Keeping raw
+        // Firestore snapshots only in memory prevents one signed-in account's
+        // private documents from remaining on a shared device for the next.
+        settings.cacheSettings = MemoryCacheSettings()
         Firestore.firestore().settings = settings
     }
 
@@ -79,7 +101,7 @@ struct unreleasedApp: App {
     }
 
     private func isAudioFile(_ url: URL) -> Bool {
-        let audioExtensions = ["mp3", "m4a", "wav", "aiff", "aac", "flac", "ogg"]
+        let audioExtensions = ["mp3", "m4a", "wav", "aiff", "aif", "aac", "flac"]
         let pathExtension = url.pathExtension.lowercased()
         return audioExtensions.contains(pathExtension)
     }

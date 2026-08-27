@@ -264,7 +264,7 @@ struct ScrollingMiniWaveformView: View {
             let centerX   = w / 2
 
             TimelineView(.animation(
-                minimumInterval: nil,
+                minimumInterval: 1.0 / 60.0,
                 paused: abs(progressRate) < 0.000_001
             )) { tl in
                 // While scrubbing: show the drag position directly.

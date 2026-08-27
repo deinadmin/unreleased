@@ -37,7 +37,9 @@ final class ProfileAvatarStore {
                 print("ProfileAvatarStore: profile listener error — \(error)")
             }
 
-            let remoteURL = (snapshot?.data()?["avatarURL"] as? String).flatMap(URL.init(string:))
+            let remoteURL = (snapshot?.data()?["avatarURL"] as? String).flatMap {
+                UserProfileService.canonicalAvatarURL($0, forUID: userID)
+            }
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 let photoURL: URL?
@@ -128,6 +130,21 @@ final class ProfileAvatarStore {
     func setImage(_ image: UIImage?) {
         self.image = image
         isLoading = false
+    }
+
+    func purge(userID: String?) async {
+        profileListener?.remove()
+        profileListener = nil
+        activeKey = nil
+        activeUserID = nil
+        image = nil
+        isLoading = false
+        guard let userID else { return }
+        await Task.detached(priority: .utility) {
+            try? FileManager.default.removeItem(at: Self.cacheURL(userID: userID))
+            UserDefaults.standard.removeObject(forKey: "profileAvatar.cachedURL.\(userID)")
+            URLCache.shared.removeAllCachedResponses()
+        }.value
     }
 
     private nonisolated static func cachedImage(userID: String, matching url: URL) async -> SendableImage? {

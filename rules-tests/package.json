@@ -1,0 +1,12 @@
+{
+  "name": "unreleased-rules-tests",
+  "description": "Adversarial regression suite for firestore.rules and storage.rules.",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "cd .. && firebase emulators:exec --project demo-unreleased --only auth,firestore,storage \"node rules-tests/rules.test.mjs\""
+  },
+  "dependencies": {
+    "firebase": "^12.16.0"
+  }
+}

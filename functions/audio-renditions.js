@@ -17,6 +17,9 @@ const WAV_CONTENT_TYPES = new Set(["audio/wav", "audio/x-wav", "audio/wave"]);
 const BACKFILL_STATE_PATH = "_system/audioRenditionBackfill";
 const BACKFILL_PAGE_SIZE = 100;
 const BACKFILL_TRANSCODE_LIMIT = 6;
+/** Bounds both legitimate processing and the cost of adversarial WAV input. */
+const MAX_RENDITION_SECONDS = 2 * 60 * 60;
+const MAX_WAV_SOURCE_BYTES = 400 * 1024 * 1024;
 
 export const AUDIO_RENDITIONS = Object.freeze({
   standard: { bitrate: "160k", fileName: "standard.m4a" },
@@ -42,6 +45,19 @@ function isWaveOriginal(file) {
   if (!descriptor) return false;
   const contentType = String(file.metadata?.contentType ?? "").toLowerCase();
   return descriptor.extension === "wav" || WAV_CONTENT_TYPES.has(contentType);
+}
+
+async function hasWaveHeader(file) {
+  const prefix = await new Promise((resolve, reject) => {
+    const chunks = [];
+    const stream = file.createReadStream({ start: 0, end: 11 });
+    stream.on("data", (chunk) => chunks.push(chunk));
+    stream.on("error", reject);
+    stream.on("end", () => resolve(Buffer.concat(chunks)));
+  });
+  return prefix.length >= 12 &&
+    ["RIFF", "RF64"].includes(prefix.subarray(0, 4).toString("ascii")) &&
+    prefix.subarray(8, 12).toString("ascii") === "WAVE";
 }
 
 export function renditionStoragePath(originalStoragePath, quality) {
@@ -75,7 +91,23 @@ async function renditionMatchesGeneration(bucket, storagePath, sourceGeneration)
 async function runFfmpeg(sourceFile, outputs) {
   if (!ffmpegPath) throw new Error("ffmpeg-static did not provide an executable");
 
-  const args = ["-hide_banner", "-loglevel", "error", "-i", "pipe:0", "-vn"];
+  const args = [
+    "-hide_banner",
+    "-loglevel",
+    "error",
+    // `isWaveOriginal` trusts a client-supplied extension and content type, so
+    // the demuxer is pinned rather than probed. Without this, naming any file
+    // `.wav` would let it be decoded as whatever it actually is, and a small
+    // densely-compressed input could expand into hours of CPU on a 2 vCPU
+    // instance. `-t` caps the damage even for a genuinely long WAV.
+    "-f",
+    "wav",
+    "-i",
+    "pipe:0",
+    "-t",
+    String(MAX_RENDITION_SECONDS),
+    "-vn",
+  ];
   for (const output of outputs) {
     args.push(
       "-map",
@@ -117,10 +149,24 @@ async function runFfmpeg(sourceFile, outputs) {
  */
 export async function ensureAudioRenditions(file, sourceGeneration) {
   if (!isWaveOriginal(file)) return false;
+  const sourceSize = Number(file.metadata?.size ?? 0);
+  if (!Number.isFinite(sourceSize) || sourceSize < 44 || sourceSize > MAX_WAV_SOURCE_BYTES) {
+    logger.warn(`Skipped WAV outside rendition size limits: ${file.name} (${sourceSize}).`);
+    return false;
+  }
+  if (!(await hasWaveHeader(file))) {
+    logger.warn(`Skipped object without a WAV header: ${file.name}.`);
+    return false;
+  }
 
   const bucket = file.bucket;
   const generation = String(sourceGeneration ?? file.metadata?.generation ?? "");
   if (!generation) throw new Error(`Missing generation for ${file.name}`);
+  const [currentMetadata] = await bucket.file(file.name).getMetadata();
+  if (String(currentMetadata.generation ?? "") !== generation) {
+    logger.info(`Skipped stale rendition event for ${file.name} generation ${generation}.`);
+    return false;
+  }
 
   const desiredOutputs = Object.entries(AUDIO_RENDITIONS).map(([quality, config]) => ({
     quality,
@@ -146,7 +192,7 @@ export async function ensureAudioRenditions(file, sourceGeneration) {
 
     // Do not publish stale output if this path was deleted or overwritten while
     // ffmpeg was running. A finalized event for the newer generation owns it.
-    const [latestMetadata] = await file.getMetadata();
+    const [latestMetadata] = await bucket.file(file.name).getMetadata();
     if (String(latestMetadata.generation ?? "") !== generation) {
       logger.info(`Skipped stale renditions for ${file.name} generation ${generation}.`);
       return false;
@@ -183,13 +229,21 @@ export const generateAudioRenditions = onObjectFinalized(
     memory: "2GiB",
     cpu: 2,
     timeoutSeconds: 540,
-    maxInstances: 4,
+    maxInstances: 2,
   },
   async (event) => {
     const storagePath = event.data.name ?? "";
     const bucket = getStorage().bucket(event.data.bucket);
-    const file = bucket.file(storagePath);
-    await ensureAudioRenditions(file, event.data.generation);
+    const generation = String(event.data.generation ?? "");
+    if (!generation) throw new Error(`Missing generation for ${storagePath}`);
+    const file = bucket.file(storagePath, { generation });
+    try {
+      await ensureAudioRenditions(file, generation);
+    } catch (error) {
+      // A newer overwrite can remove the event generation before delivery.
+      if (error?.code === 404) return;
+      throw error;
+    }
   }
 );
 

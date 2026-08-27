@@ -72,12 +72,6 @@ enum CloudPaths {
         projectsCollection(userID: userID).document(projectID.uuidString)
     }
 
-    static func versionAccessDocument(userID: String, versionID: UUID) -> DocumentReference {
-        userDocument(userID: userID)
-            .collection("versionAccess")
-            .document(versionID.uuidString)
-    }
-
     // MARK: - Invite previews
 
     /// Small publicly-readable preview used to show invite prompts before acceptance.

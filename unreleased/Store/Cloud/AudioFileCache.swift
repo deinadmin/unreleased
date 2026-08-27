@@ -114,6 +114,15 @@ actor AudioFileCache {
         try? await CloudPaths.storageReference(storagePath: storagePath).delete()
     }
 
+    /** Cancels transfers and removes every account-owned local media directory. */
+    func purgeLocalFiles(in directories: [URL]) {
+        for task in activeDownloads.values { task.cancel() }
+        activeDownloads.removeAll()
+        for directory in directories {
+            try? FileManager.default.removeItem(at: directory)
+        }
+    }
+
     func download(storagePath: String, to destination: URL) async throws {
         try FileManager.default.createDirectory(
             at: destination.deletingLastPathComponent(),
