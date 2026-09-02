@@ -58,20 +58,37 @@ final class StorageEnforcementService {
 
     // MARK: - Rejection dedup
 
+    /// A rejection older than this is history rather than news. The upsell is a
+    /// reaction to an upload the user just made, so a stale marker must never
+    /// open a modal. `enforceStorageLimit` retires markers on a longer grace
+    /// period, so nothing still worth showing is swept before we see it.
+    private static let rejectionFreshnessWindow: TimeInterval = 10 * 60
+
     private func rejectionDefaultsKey(_ userID: String) -> String {
         "storageEnforcement.lastBlockedAt.\(userID)"
     }
 
-    /// Returns true when `blockedAt` is newer than the last rejection we surfaced
-    /// for this user, persisting the new high-water mark so we only prompt once.
+    /// Returns true when `blockedAt` is a rejection we have not surfaced yet
+    /// *and* it is recent enough to still be worth interrupting the user for,
+    /// persisting the new high-water mark so we only prompt once.
+    ///
+    /// The high-water mark lives in UserDefaults, so a reinstall or a new device
+    /// starts with nothing stored, while `lastBlockedAt` is server state that
+    /// outlives the install. Treating "nothing stored" as "everything is new"
+    /// replayed long-dead rejections as an "Upload Blocked" sheet moments after
+    /// sign-in, before the user had touched anything. Seed the mark on that
+    /// first observation instead of reporting it.
     private func consumeRejectionIfNew(_ blockedAt: Date?, userID: String) -> Bool {
         guard let blockedAt else { return false }
         let key = rejectionDefaultsKey(userID)
-        let previous = UserDefaults.standard.double(forKey: key)
+        let defaults = UserDefaults.standard
+        let isFirstObservation = defaults.object(forKey: key) == nil
+        let previous = defaults.double(forKey: key)
         let timestamp = blockedAt.timeIntervalSince1970
         guard timestamp > previous + 0.5 else { return false }
-        UserDefaults.standard.set(timestamp, forKey: key)
-        return true
+        defaults.set(timestamp, forKey: key)
+        guard !isFirstObservation else { return false }
+        return blockedAt.timeIntervalSinceNow > -Self.rejectionFreshnessWindow
     }
 
     // MARK: - Decoding

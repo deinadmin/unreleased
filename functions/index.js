@@ -562,6 +562,12 @@ const STORAGE_ACCOUNTING_VERSION = 2;
 const MAX_METERED_OBJECTS = 5_000;
 const STORAGE_INVENTORY_LIMIT = MAX_METERED_OBJECTS + 1;
 const STORAGE_ACCOUNTING_LEASE_MS = 2 * 60 * 1000;
+/**
+ * How long a rejection marker survives once the user is back under quota.
+ * Must stay above the clients' rejection freshness window (10 minutes) so a
+ * rejection is never swept while a client would still surface it.
+ */
+const BLOCKED_MARKER_GRACE_MS = 15 * 60 * 1000;
 
 class StorageAccountingBusyError extends Error {}
 
@@ -745,16 +751,18 @@ async function ensureStorageAccounting(bucket, userId, tier, limitBytes) {
       if (state.get("initializationLeaseToken") !== leaseToken) {
         throw new Error(`Storage accounting lease was lost for ${userId}.`);
       }
+      const overLimit =
+        inventory.truncated ||
+        inventory.objectCount > MAX_METERED_OBJECTS ||
+        (limitBytes !== null && inventory.usedBytes > limitBytes);
       transaction.set(stateReference, {
         tier,
         usedBytes: inventory.usedBytes,
         objectCount: inventory.objectCount,
         objectLimit: MAX_METERED_OBJECTS,
         limitBytes,
-        overLimit:
-          inventory.truncated ||
-          inventory.objectCount > MAX_METERED_OBJECTS ||
-          (limitBytes !== null && inventory.usedBytes > limitBytes),
+        overLimit,
+        ...clearedBlockedMarkers(state, overLimit),
         inventoryTruncated: inventory.truncated,
         accountingVersion: STORAGE_ACCOUNTING_VERSION,
         reconciliationNeeded: true,
@@ -786,6 +794,33 @@ function generationIsNewer(candidate, reference) {
   } catch {
     return false;
   }
+}
+
+/**
+ * Fields that retire a stale rejection marker, to be spread into any write that
+ * recomputes `overLimit`.
+ *
+ * `lastBlockedAt` is what makes a client raise "Upload Blocked", so it has to
+ * mean "there is an outstanding rejection" rather than "one happened, ever".
+ * Left to accumulate it became a permanent tombstone, and any client whose
+ * local high-water mark had been reset — a reinstall, a second device — replayed
+ * it as a modal at sign-in.
+ *
+ * A marker inside the grace window is deliberately left alone: when one upload
+ * in a batch is rejected and a smaller sibling is accepted right after, the
+ * rejection still needs to reach the user. The window is longer than the
+ * client's freshness window so it never sweeps a marker the client would show.
+ */
+function clearedBlockedMarkers(state, overLimit) {
+  if (overLimit) return {};
+  const blockedAt = state?.get("lastBlockedAt");
+  if (!(blockedAt instanceof Timestamp)) return {};
+  if (blockedAt.toMillis() > Date.now() - BLOCKED_MARKER_GRACE_MS) return {};
+  return {
+    lastBlockedAt: FieldValue.delete(),
+    lastBlockedBytes: FieldValue.delete(),
+    lastBlockedTrackId: FieldValue.delete(),
+  };
 }
 
 /** Writes the per-user storage state doc the client listens to for usage + rejections. */
@@ -948,6 +983,7 @@ export const enforceStorageLimit = onObjectFinalized(
         objectLimit: MAX_METERED_OBJECTS,
         limitBytes,
         overLimit: false,
+        ...clearedBlockedMarkers(state, false),
         inventoryTruncated: false,
         accountingVersion: STORAGE_ACCOUNTING_VERSION,
         reconciliationNeeded: true,
@@ -1013,13 +1049,15 @@ export const refreshStorageUsage = onObjectDeleted(
         Number(state.get("objectCount") ?? 0) - (object.exists ? 1 : 0)
       );
       const limitBytes = state.get("limitBytes");
+      const overLimit =
+        state.get("inventoryTruncated") === true ||
+        objectCount > MAX_METERED_OBJECTS ||
+        (typeof limitBytes === "number" && usedBytes > limitBytes);
       transaction.set(stateReference, {
         usedBytes,
         objectCount,
-        overLimit:
-          state.get("inventoryTruncated") === true ||
-          objectCount > MAX_METERED_OBJECTS ||
-          (typeof limitBytes === "number" && usedBytes > limitBytes),
+        overLimit,
+        ...clearedBlockedMarkers(state, overLimit),
         reconciliationNeeded: true,
         reconciliationVersion: FieldValue.increment(1),
         updatedAt: FieldValue.serverTimestamp(),
@@ -1073,16 +1111,18 @@ export const reconcileStorageUsage = onSchedule(
         ) {
           return false;
         }
+        const overLimit =
+          inventory.truncated ||
+          inventory.objectCount > MAX_METERED_OBJECTS ||
+          (limitBytes !== null && inventory.usedBytes > limitBytes);
         transaction.set(state.ref, {
           tier,
           usedBytes: inventory.usedBytes,
           objectCount: inventory.objectCount,
           objectLimit: MAX_METERED_OBJECTS,
           limitBytes,
-          overLimit:
-            inventory.truncated ||
-            inventory.objectCount > MAX_METERED_OBJECTS ||
-            (limitBytes !== null && inventory.usedBytes > limitBytes),
+          overLimit,
+          ...clearedBlockedMarkers(latest, overLimit),
           inventoryTruncated: inventory.truncated,
           accountingVersion: STORAGE_ACCOUNTING_VERSION,
           reconciliationNeeded: false,

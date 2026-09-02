@@ -20,7 +20,9 @@ Run whatever the change touches; run the rules suite for anything under
 
 ```bash
 # Security rules — 30 attacks that must be denied, 21 flows that must work.
-cd rules-tests && npm install && npm test
+# Do not run `npm install` here: rules-tests/node_modules is a tracked symlink
+# to web/node_modules, and npm replaces it with a real directory.
+cd rules-tests && npm test
 
 # Shared-project reconciler (proves it repairs drift without rewriting
 # documents that are already correct).
@@ -79,6 +81,15 @@ adding a case that proves the replacement holds.
   clients and the rules must agree on that format.
 - **Triggers never read an unbounded collection.** A user's notification
   collection is attacker-influenced; query it with filters and a limit.
+- **Server state that drives a modal must expire.** `lastBlockedAt` on
+  `users/{uid}/storage/state` means "there is an outstanding upload rejection",
+  not "one happened once": every write that recomputes `overLimit` to false
+  retires it via `clearedBlockedMarkers`. Clients dedupe rejections against a
+  UserDefaults high-water mark, which a reinstall or a new device wipes, so an
+  immortal marker replays as an "Upload Blocked" sheet seconds after sign-in for
+  a user who is nowhere near their quota. The client's freshness window
+  (10 min) must stay below `BLOCKED_MARKER_GRACE_MS` (15 min) so the server
+  never sweeps a rejection a client would still show.
 - **Repair work stays off the write path.** Both clients refresh
   `projectPreviews` on every project sync, so anything hanging off that write
   runs on every track rename. `reconcileSharedProjectState` is a daily schedule
